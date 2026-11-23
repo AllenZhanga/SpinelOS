@@ -1,2 +1,2 @@
-# ArchStreamOS
-StreamOS Based Arch Linux
+# ArchSteamOS
+SteamOS Based Arch Linux
