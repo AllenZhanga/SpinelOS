@@ -60,6 +60,7 @@ iso_application="SpinelOS Gaming Linux Live ISO"
 file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"
 file_permissions["/usr/local/bin/start-spinel-desktop"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-shell"]="0:0:0755"
+file_permissions["/usr/local/bin/spinel-install"]="0:0:0755"
 EOF
 
 echo "[5/5] Building ISO via mkarchiso..."

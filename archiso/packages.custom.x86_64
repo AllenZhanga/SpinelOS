@@ -6,6 +6,16 @@ intel-ucode
 pciutils
 usbutils
 
+# Disk Installer & Bootloader Tools
+parted
+dosfstools
+e2fsprogs
+squashfs-tools
+rsync
+arch-install-scripts
+grub
+efibootmgr
+
 # Graphics: AMD + Intel (64-bit & 32-bit for Steam/Proton)
 mesa
 lib32-mesa

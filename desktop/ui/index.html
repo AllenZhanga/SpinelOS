@@ -86,13 +86,112 @@
       <article class="card glass">
         <div class="card-tag">SYSTEM POWER</div>
         <h2>电源与安装管理</h2>
-        <p>Live 模式用于测试硬件兼容；若需持久化游戏库，请安装至本地 NVMe/SSD。</p>
+        <p id="install-card-desc">Live 模式用于测试硬件兼容；若需持久化游戏库，请安装至本地 NVMe/SSD。</p>
         <div class="card-actions">
+          <button class="btn primary small" id="btn-open-installer" data-cmd="installer:open">安装到硬盘</button>
           <button class="btn small" data-cmd="power:reboot">重启</button>
           <button class="btn small danger" data-cmd="power:shutdown">关机</button>
         </div>
       </article>
     </section>
+
+    <!-- Graphical Disk Installer Modal -->
+    <div id="installer-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal-panel glass">
+        <header class="modal-header">
+          <div>
+            <span class="badge">SpinelOS Installer</span>
+            <h2>安装 SpinelOS 到本地硬盘</h2>
+          </div>
+          <div class="modal-header-right">
+            <span id="inst-env-badge" class="status-chip">检测环境...</span>
+            <button class="icon-btn" id="btn-close-installer" data-cmd="installer:close">关闭</button>
+          </div>
+        </header>
+
+        <div id="inst-form-view" class="modal-body">
+          <div class="inst-section">
+            <div class="section-head">
+              <h3>1. 选择目标硬盘</h3>
+              <button class="btn small" data-cmd="installer:scan-disks">刷新磁盘</button>
+            </div>
+            <div id="inst-disk-list" class="disk-list">
+              <div class="disk-empty">正在扫描磁盘设备...</div>
+            </div>
+          </div>
+
+          <div class="inst-section">
+            <h3>2. 系统与账号配置</h3>
+            <div class="form-grid">
+              <label class="field">
+                <span>用户名（小写字母/数字）</span>
+                <input type="text" id="inst-username" value="gamer" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>主机名</span>
+                <input type="text" id="inst-hostname" value="spinelos" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>登录 / sudo 密码（至少 4 位）</span>
+                <input type="password" id="inst-password" placeholder="输入密码" />
+              </label>
+              <label class="field">
+                <span>确认密码</span>
+                <input type="password" id="inst-password2" placeholder="再次输入密码" />
+              </label>
+              <label class="field">
+                <span>系统时区</span>
+                <select id="inst-timezone">
+                  <option value="Asia/Shanghai" selected>Asia/Shanghai (北京时间)</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo</option>
+                  <option value="UTC">UTC</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles</option>
+                  <option value="Europe/London">Europe/London</option>
+                </select>
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" id="inst-autologin" checked />
+                <span>开机自动登录并直接进入 SpinelOS 桌面</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="danger-box">
+            <label class="checkbox-field">
+              <input type="checkbox" id="inst-confirm-wipe" />
+              <span>我已确认所选硬盘无重要数据，允许清空分区并安装 SpinelOS（测试建议优先使用空盘或副盘）。</span>
+            </label>
+          </div>
+
+          <div id="inst-form-error" class="form-error hidden"></div>
+
+          <footer class="modal-footer">
+            <button class="btn ghost" data-cmd="installer:close">取消</button>
+            <button class="btn primary" id="btn-start-install" data-cmd="installer:submit">开始格式化并安装</button>
+          </footer>
+        </div>
+
+        <div id="inst-progress-view" class="modal-body hidden">
+          <div class="progress-header">
+            <span id="inst-step-text">准备开始安装...</span>
+            <strong id="inst-pct-text">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="inst-progress-bar" class="progress-fill" style="width: 0%"></div>
+          </div>
+
+          <pre id="inst-log-box" class="log-box"></pre>
+
+          <footer class="modal-footer">
+            <span id="inst-status-hint" class="muted-hint">正在执行安装，请勿断电或拔出安装介质...</span>
+            <div class="footer-actions">
+              <button class="btn ghost hidden" id="btn-inst-back" data-cmd="installer:back">返回配置</button>
+              <button class="btn primary hidden" id="btn-inst-reboot" data-cmd="power:reboot">立即重启电脑</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script src="app.js"></script>

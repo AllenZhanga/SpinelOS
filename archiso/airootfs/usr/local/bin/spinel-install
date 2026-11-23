@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DISK=""
+USERNAME="gamer"
+HOSTNAME="spinelos"
+TIMEZONE="Asia/Shanghai"
+AUTOLOGIN="true"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --disk) DISK="${2:-}"; shift 2 ;;
+    --username) USERNAME="${2:-}"; shift 2 ;;
+    --hostname) HOSTNAME="${2:-}"; shift 2 ;;
+    --timezone) TIMEZONE="${2:-}"; shift 2 ;;
+    --autologin) AUTOLOGIN="${2:-true}"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "[ERROR] spinel-install must run as root." >&2
+  exit 1
+fi
+
+if [[ -z "$DISK" || ! -b "$DISK" ]]; then
+  echo "[ERROR] Invalid target disk: '$DISK'" >&2
+  exit 1
+fi
+
+if [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]]; then
+  echo "[ERROR] Invalid username: '$USERNAME'" >&2
+  exit 1
+fi
+
+if [[ ! "$HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
+  echo "[ERROR] Invalid hostname: '$HOSTNAME'" >&2
+  exit 1
+fi
+
+if [[ ! -f "/usr/share/zoneinfo/${TIMEZONE}" ]]; then
+  echo "[ERROR] Invalid timezone: '$TIMEZONE'" >&2
+  exit 1
+fi
+
+# Read user/root password securely from stdin
+IFS= read -r TARGET_PASSWORD || true
+if [[ ${#TARGET_PASSWORD} -lt 4 ]]; then
+  echo "[ERROR] Password must be at least 4 characters." >&2
+  exit 1
+fi
+
+progress() {
+  echo "@@PROGRESS:${1}:${2}"
+}
+
+cleanup_on_error() {
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "[ERROR] Installation failed (exit code $rc). Cleaning up mounts..."
+    umount -R /mnt 2>/dev/null || true
+  fi
+}
+trap cleanup_on_error EXIT
+
+# Prevent wiping the Live USB boot medium itself
+BOOTMNT_SRC="$(findmnt -n -o SOURCE /run/archiso/bootmnt 2>/dev/null || true)"
+if [[ -n "$BOOTMNT_SRC" ]]; then
+  BOOTMNT_DISK="/dev/$(lsblk -no PKNAME "$BOOTMNT_SRC" 2>/dev/null | head -n1 || true)"
+  if [[ "$DISK" == "$BOOTMNT_SRC" || "$DISK" == "$BOOTMNT_DISK" ]]; then
+    echo "[ERROR] Refusing to overwrite the active Live ISO boot device ($DISK)." >&2
+    exit 1
+  fi
+fi
+
+IS_UEFI=false
+if [[ -d /sys/firmware/efi/efivars ]]; then
+  IS_UEFI=true
+fi
+
+echo "==> Target Disk: $DISK (UEFI=$IS_UEFI)"
+echo "==> User: $USERNAME | Hostname: $HOSTNAME | Timezone: $TIMEZONE | Autologin: $AUTOLOGIN"
+
+# Partition naming helper (nvme0n1 -> nvme0n1p1, sda -> sda1)
+part_path() {
+  local disk="$1"
+  local idx="$2"
+  if [[ "$disk" =~ [0-9]$ ]]; then
+    echo "${disk}p${idx}"
+  else
+    echo "${disk}${idx}"
+  fi
+}
+
+progress 8 "正在清理旧分区并创建分区表..."
+umount -R /mnt 2>/dev/null || true
+for part in $(lsblk -ln -o PATH "$DISK" 2>/dev/null | tail -n +2); do
+  swapoff "$part" 2>/dev/null || true
+  umount -f "$part" 2>/dev/null || true
+done
+
+wipefs -af "$DISK"
+
+if [[ "$IS_UEFI" == "true" ]]; then
+  parted -s "$DISK" mklabel gpt \
+    mkpart ESP fat32 1MiB 513MiB \
+    set 1 esp on \
+    mkpart SPINEL_ROOT ext4 513MiB 100%
+else
+  parted -s "$DISK" mklabel gpt \
+    mkpart BIOSBOOT 1MiB 3MiB \
+    set 1 bios_grub on \
+    mkpart SPINEL_ROOT ext4 3MiB 100%
+fi
+
+partprobe "$DISK" || true
+udevadm settle || sleep 2
+
+PART_1="$(part_path "$DISK" 1)"
+PART_2="$(part_path "$DISK" 2)"
+
+if [[ "$IS_UEFI" == "true" ]]; then
+  echo "==> Formatting EFI ($PART_1) and Root ($PART_2)..."
+  mkfs.fat -F32 -n SPINEL_EFI "$PART_1"
+  mkfs.ext4 -F -L SPINEL_ROOT "$PART_2"
+  mount "$PART_2" /mnt
+  mkdir -p /mnt/boot/efi
+  mount "$PART_1" /mnt/boot/efi
+else
+  echo "==> Formatting Root ($PART_2) for Legacy BIOS boot..."
+  mkfs.ext4 -F -L SPINEL_ROOT "$PART_2"
+  mount "$PART_2" /mnt
+fi
+
+progress 22 "正在复制 SpinelOS 系统镜像到目标硬盘（可能需要几分钟）..."
+SFS_PATH="/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
+if [[ -f "$SFS_PATH" ]]; then
+  echo "==> Extracting $SFS_PATH to /mnt..."
+  unsquashfs -f -d /mnt "$SFS_PATH"
+elif [[ -d /run/archiso/airootfs ]]; then
+  echo "==> Syncing /run/archiso/airootfs to /mnt..."
+  rsync -aAXH /run/archiso/airootfs/ /mnt/
+else
+  echo "==> Syncing live root filesystem to /mnt..."
+  rsync -aAXH \
+    --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+    / /mnt/
+fi
+
+mkdir -p /mnt/{dev,proc,sys,tmp,run,mnt}
+chmod 1777 /mnt/tmp
+
+progress 55 "正在生成 fstab 并清理 Live ISO 临时配置..."
+genfstab -U /mnt > /mnt/etc/fstab
+
+# Remove Live-ISO-only mkinitcpio and systemd configurations
+rm -f /mnt/etc/mkinitcpio.conf.d/archiso.conf
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/pacman-init.service
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/choose-mirror.service
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/livecd-alsa-unmuter.service
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd-wait-online.service
+rm -f /mnt/etc/systemd/system/etc-pacman.d-gnupg.mount
+rm -f /mnt/etc/systemd/system/getty@tty1.service.d/autologin.conf
+rm -f /mnt/etc/sysusers.d/gamer.conf
+rm -f /mnt/etc/tmpfiles.d/gamer.conf
+rm -f /mnt/etc/sudoers.d/gamer
+
+# Ensure kernel image exists in /mnt/boot
+if [[ ! -f /mnt/boot/vmlinuz-linux ]]; then
+  KVER="$(ls /mnt/usr/lib/modules 2>/dev/null | head -n1 || true)"
+  if [[ -n "$KVER" && -f "/mnt/usr/lib/modules/${KVER}/vmlinuz" ]]; then
+    cp "/mnt/usr/lib/modules/${KVER}/vmlinuz" /mnt/boot/vmlinuz-linux
+  else
+    echo "[ERROR] Cannot find Linux kernel image in /mnt." >&2
+    exit 1
+  fi
+fi
+
+# Configure hostname, hosts, and locales
+echo "$HOSTNAME" > /mnt/etc/hostname
+cat > /mnt/etc/hosts <<EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}
+EOF
+
+sed -i 's/^#\s*en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /mnt/etc/locale.gen
+sed -i 's/^#\s*zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /mnt/etc/locale.gen
+echo "LANG=zh_CN.UTF-8" > /mnt/etc/locale.conf
+if [[ ! -f /mnt/etc/vconsole.conf ]]; then
+  echo "KEYMAP=us" > /mnt/etc/vconsole.conf
+fi
+
+progress 70 "正在配置用户账号、密码、时区与桌面自启..."
+arch-chroot /mnt /bin/bash -euo pipefail <<EOF
+ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+hwclock --systohc 2>/dev/null || true
+locale-gen
+
+if id -u "${USERNAME}" >/dev/null 2>&1; then
+  usermod -aG wheel,video,audio,input,render "${USERNAME}"
+else
+  useradd -m -G wheel,video,audio,input,render -s /bin/bash "${USERNAME}"
+fi
+EOF
+
+# Feed passwords via stdin into chroot chpasswd (never logged or passed on argv)
+printf "root:%s\n%s:%s\n" "$TARGET_PASSWORD" "$USERNAME" "$TARGET_PASSWORD" | arch-chroot /mnt chpasswd
+
+# Enable wheel group sudo with password authentication
+mkdir -p /mnt/etc/sudoers.d
+cat > /mnt/etc/sudoers.d/wheel <<'EOF'
+%wheel ALL=(ALL:ALL) ALL
+EOF
+chmod 0440 /mnt/etc/sudoers.d/wheel
+
+# Update desktop autostart script for the chosen user
+cat > /mnt/etc/profile.d/spinel-autostart.sh <<EOF
+# Auto-launch SpinelOS Wayland desktop on tty1 for ${USERNAME}
+if [ -z "\${DISPLAY:-}" ] && [ -z "\${WAYLAND_DISPLAY:-}" ] && [ "\$(tty 2>/dev/null)" = "/dev/tty1" ] && [ "\$(id -un)" = "${USERNAME}" ]; then
+  exec /usr/local/bin/start-spinel-desktop
+fi
+EOF
+
+if [[ "$AUTOLOGIN" == "true" ]]; then
+  mkdir -p /mnt/etc/systemd/system/getty@tty1.service.d
+  cat > /mnt/etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin ${USERNAME} %I \$TERM
+EOF
+fi
+
+# Preserve initialized pacman keyring if available on live host
+if [[ -f /etc/pacman.d/gnupg/pubring.gpg ]]; then
+  rm -rf /mnt/etc/pacman.d/gnupg
+  cp -a /etc/pacman.d/gnupg /mnt/etc/pacman.d/gnupg
+else
+  arch-chroot /mnt bash -c "pacman-key --init && pacman-key --populate archlinux" || true
+fi
+
+progress 82 "正在重建标准硬盘 initramfs..."
+arch-chroot /mnt mkinitcpio -P
+
+progress 92 "正在安装 GRUB 引导程序并写入 NVIDIA KMS 参数..."
+if [[ -f /mnt/etc/default/grub ]]; then
+  if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /mnt/etc/default/grub; then
+    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 nvidia_drm.modeset=1 nvidia_drm.fbdev=1"/' /mnt/etc/default/grub
+  else
+    echo 'GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1"' >> /mnt/etc/default/grub
+  fi
+  sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /mnt/etc/default/grub
+fi
+
+if [[ "$IS_UEFI" == "true" ]]; then
+  arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=SpinelOS --recheck || true
+  arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --recheck
+else
+  arch-chroot /mnt grub-install --target=i386-pc --recheck "$DISK"
+fi
+
+arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+
+sync
+umount -R /mnt || true
+
+progress 100 "SpinelOS 已成功安装到 ${DISK}！请拔出安装介质并重启电脑。"
