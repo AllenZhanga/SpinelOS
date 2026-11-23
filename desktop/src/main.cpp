@@ -196,7 +196,7 @@ WebKitWebView *create_configured_webview(AppState *state) {
     webkit_settings_set_enable_javascript(settings, TRUE);
     webkit_settings_set_allow_file_access_from_file_urls(settings, TRUE);
     webkit_settings_set_hardware_acceleration_policy(
-        settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ON_DEMAND
+        settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS
     );
 
     WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(web);
