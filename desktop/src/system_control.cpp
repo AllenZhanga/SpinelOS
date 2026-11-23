@@ -174,6 +174,22 @@ std::string detect_network_status() {
     return net.empty() ? "Offline" : net;
 }
 
+bool detect_low_fx_mode() {
+    std::error_code ec;
+    fs::path drm_dir("/sys/class/drm");
+    if (!fs::is_directory(drm_dir, ec)) return true;
+
+    for (const auto &entry : fs::directory_iterator(drm_dir, ec)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("card", 0) != 0 || name.find('-') != std::string::npos) continue;
+        std::string vendor = trim_copy(read_first_line((entry.path() / "device/vendor").string(), ""));
+        if (vendor == "0x10de" || vendor == "0x1002" || vendor == "0x8086") {
+            return false;  // Real NVIDIA, AMD, or Intel GPU present
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 PerfConfig load_perf_config() {
@@ -253,6 +269,7 @@ void push_telemetry_to_view(WebKitWebView *view) {
     std::string net = json_escape(detect_network_status());
     std::string kernel = json_escape(read_first_line("/proc/sys/kernel/osrelease", "Linux"));
     bool is_live = is_live_iso_env();
+    bool low_fx = detect_low_fx_mode();
 
     std::ostringstream js;
     js << "window.__spinelUpdateTelemetry && window.__spinelUpdateTelemetry({"
@@ -260,7 +277,8 @@ void push_telemetry_to_view(WebKitWebView *view) {
        << "\"mem\":\"" << mem << "\","
        << "\"net\":\"" << net << "\","
        << "\"kernel\":\"" << kernel << "\","
-       << "\"is_live\":" << (is_live ? "true" : "false")
+       << "\"is_live\":" << (is_live ? "true" : "false") << ","
+       << "\"low_fx\":" << (low_fx ? "true" : "false")
        << "});";
     eval_js(view, js.str());
 }

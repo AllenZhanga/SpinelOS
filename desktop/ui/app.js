@@ -913,6 +913,10 @@
     set("hub-net", data.net);
     set("hub-kernel", data.kernel);
 
+    if (typeof data.low_fx === "boolean") {
+      document.body.classList.toggle("low-fx", data.low_fx);
+    }
+
     const desc = document.getElementById("install-card-desc");
     if (desc && typeof data.is_live === "boolean") {
       desc.textContent = data.is_live
