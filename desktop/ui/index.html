@@ -32,7 +32,10 @@
 
     <section class="hero-card glass">
       <div class="hero-text">
-        <span class="badge">Wayland · Arch Linux · Proton Ready</span>
+        <div class="hero-badges">
+          <span class="badge">Wayland · SpinelOS · Proton Ready</span>
+          <span id="hub-gamepad-chip" class="status-chip">手柄操控: 未连接</span>
+        </div>
         <h1>欢迎来到 SpinelOS 游戏桌面</h1>
         <p>
           独立构建的 C++20 / WebKitGTK6 Wayland 桌面环境，内置 AMD / Intel / NVIDIA RTX（nvidia-open）图形栈与 32 位 Steam Play 转译支持。
@@ -265,11 +268,37 @@
         <div id="inst-form-view" class="modal-body">
           <div class="inst-section">
             <div class="section-head">
-              <h3>1. 选择目标硬盘</h3>
-              <button class="btn small" data-cmd="installer:scan-disks">刷新磁盘</button>
+              <h3>1. 选择安装方式与目标位置</h3>
+              <div class="footer-actions">
+                <div class="tab-bar">
+                  <button class="tab-btn active" id="btn-mode-disk" data-cmd="installer:mode:disk">整盘安装（清空硬盘）</button>
+                  <button class="tab-btn" id="btn-mode-part" data-cmd="installer:mode:partition">自定义分区（双系统）</button>
+                </div>
+                <button class="btn small" data-cmd="installer:scan-disks">刷新磁盘</button>
+              </div>
             </div>
-            <div id="inst-disk-list" class="disk-list">
-              <div class="disk-empty">正在扫描磁盘设备...</div>
+
+            <div id="inst-disk-section">
+              <div id="inst-disk-list" class="disk-list">
+                <div class="disk-empty">正在扫描磁盘设备...</div>
+              </div>
+            </div>
+
+            <div id="inst-part-section" class="part-section hidden">
+              <div class="form-grid">
+                <label class="field">
+                  <span>根分区 `/`（将格式化为 ext4，建议 ≥ 20 GB）</span>
+                  <select id="inst-root-part"></select>
+                </label>
+                <label class="field" id="inst-efi-wrap">
+                  <span>EFI 引导分区 `/boot/efi`（不格式化，与 Windows 共存）</span>
+                  <select id="inst-efi-part"></select>
+                </label>
+                <label class="checkbox-field">
+                  <input type="checkbox" id="inst-os-prober" checked />
+                  <span>启用 os-prober 自动扫描并添加已有 Windows / 其他系统引导项</span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -312,7 +341,7 @@
           <div class="danger-box">
             <label class="checkbox-field">
               <input type="checkbox" id="inst-confirm-wipe" />
-              <span>我已确认所选硬盘无重要数据，允许清空分区并安装 SpinelOS（测试建议优先使用空盘或副盘）。</span>
+              <span id="inst-confirm-label">我已确认所选硬盘无重要数据，允许清空分区并安装 SpinelOS（测试建议优先使用空盘或副盘）。</span>
             </label>
           </div>
 

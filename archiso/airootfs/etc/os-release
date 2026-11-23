@@ -1,0 +1,11 @@
+NAME="SpinelOS"
+PRETTY_NAME="SpinelOS Gaming Linux"
+ID=spinelos
+ID_LIKE=arch
+BUILD_ID=rolling
+ANSI_COLOR="38;2;56;189;248"
+HOME_URL="https://github.com/AllenZhanga/SpinelOS"
+DOCUMENTATION_URL="https://github.com/AllenZhanga/SpinelOS"
+SUPPORT_URL="https://github.com/AllenZhanga/SpinelOS/issues"
+BUG_REPORT_URL="https://github.com/AllenZhanga/SpinelOS/issues"
+LOGO=spinelos

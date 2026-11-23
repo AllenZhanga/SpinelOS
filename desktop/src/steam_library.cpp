@@ -173,6 +173,73 @@ bool parse_app_manifest(const fs::path &manifest, SteamGame &game) {
 
 }  // namespace
 
+void ensure_steam_play_preconfig() {
+    std::string pgrep_out;
+    int pgrep_rc = 1;
+    run_argv_capture({"pgrep", "-x", "steam"}, pgrep_out, pgrep_rc);
+    if (pgrep_rc == 0) {
+        return;  // Never touch config.vdf while Steam is running
+    }
+
+    std::error_code ec;
+    fs::path cfg_dir = fs::path(home_dir()) / ".local/share/Steam/config";
+    fs::path cfg_file = cfg_dir / "config.vdf";
+    fs::create_directories(cfg_dir, ec);
+
+    const std::string compat_block =
+        "\t\t\t\t\"CompatToolMapping\"\n"
+        "\t\t\t\t{\n"
+        "\t\t\t\t\t\"0\"\n"
+        "\t\t\t\t\t{\n"
+        "\t\t\t\t\t\t\"name\"\t\t\"proton_experimental\"\n"
+        "\t\t\t\t\t\t\"config\"\t\t\"\"\n"
+        "\t\t\t\t\t\t\"Priority\"\t\t\"75\"\n"
+        "\t\t\t\t\t}\n"
+        "\t\t\t\t}\n";
+
+    if (!fs::exists(cfg_file, ec)) {
+        std::ofstream ofs(cfg_file);
+        if (ofs.is_open()) {
+            ofs << "\"InstallConfigStore\"\n"
+                << "{\n"
+                << "\t\"Software\"\n"
+                << "\t{\n"
+                << "\t\t\"Valve\"\n"
+                << "\t\t{\n"
+                << "\t\t\t\"Steam\"\n"
+                << "\t\t\t{\n"
+                << compat_block
+                << "\t\t\t}\n"
+                << "\t\t}\n"
+                << "\t}\n"
+                << "}\n";
+        }
+        return;
+    }
+
+    std::ifstream ifs(cfg_file);
+    if (!ifs.is_open()) return;
+    std::ostringstream buf;
+    buf << ifs.rdbuf();
+    std::string content = buf.str();
+    ifs.close();
+
+    if (content.find("\"CompatToolMapping\"") != std::string::npos) {
+        return;
+    }
+
+    auto steam_pos = content.find("\"Steam\"");
+    if (steam_pos == std::string::npos) return;
+    auto brace_pos = content.find('{', steam_pos);
+    if (brace_pos == std::string::npos) return;
+
+    content.insert(brace_pos + 1, "\n" + compat_block);
+    std::ofstream ofs(cfg_file, std::ios::trunc);
+    if (ofs.is_open()) {
+        ofs << content;
+    }
+}
+
 void push_steam_library(AppState *state) {
     if (!state || !state->hub_view) return;
 

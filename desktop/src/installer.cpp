@@ -24,11 +24,15 @@ struct IdleMessage {
 };
 
 struct InstallConfig {
+    std::string mode = "disk";
     std::string disk;
+    std::string root_part;
+    std::string efi_part;
     std::string username;
     std::string hostname;
     std::string timezone;
     std::string autologin = "true";
+    std::string os_prober = "false";
     std::string password;
 };
 
@@ -121,11 +125,15 @@ InstallConfig parse_install_payload(const std::string &payload) {
         if (eq == std::string::npos) continue;
         std::string key = line.substr(0, eq);
         std::string val = line.substr(eq + 1);
-        if (key == "disk") cfg.disk = val;
+        if (key == "mode") cfg.mode = (val == "partition" ? "partition" : "disk");
+        else if (key == "disk") cfg.disk = val;
+        else if (key == "root_part") cfg.root_part = val;
+        else if (key == "efi_part") cfg.efi_part = val;
         else if (key == "username") cfg.username = val;
         else if (key == "hostname") cfg.hostname = val;
         else if (key == "timezone") cfg.timezone = val;
         else if (key == "autologin") cfg.autologin = (val == "true" ? "true" : "false");
+        else if (key == "os_prober") cfg.os_prober = (val == "true" ? "true" : "false");
         else if (key == "password") cfg.password = val;
     }
     return cfg;
@@ -141,7 +149,9 @@ void push_installer_env(AppState *state) {
         "src=$(findmnt -n -o SOURCE /run/archiso/bootmnt 2>/dev/null || true); "
         "[ -n \"$src\" ] && lsblk -no PKNAME \"$src\" 2>/dev/null | head -n1 || true"
     );
-    std::string lsblk_json = run_cmd_capture("lsblk -J -d -b -o NAME,SIZE,MODEL,TRAN,RM,TYPE 2>/dev/null");
+    std::string lsblk_json = run_cmd_capture(
+        "lsblk -J -b -o NAME,PATH,SIZE,MODEL,TRAN,RM,TYPE,FSTYPE,PARTTYPENAME,MOUNTPOINT 2>/dev/null"
+    );
     if (lsblk_json.empty() || lsblk_json.front() != '{') {
         lsblk_json = "null";
     }
@@ -168,10 +178,22 @@ void start_disk_install(AppState *state, const std::string &payload) {
     }
 
     InstallConfig cfg = parse_install_payload(payload);
-    if (!is_valid_disk(cfg.disk)) {
-        emit_installer_error(state, "无效的目标磁盘路径: " + cfg.disk);
-        return;
+    if (cfg.mode == "disk") {
+        if (!is_valid_disk(cfg.disk)) {
+            emit_installer_error(state, "无效的目标磁盘路径: " + cfg.disk);
+            return;
+        }
+    } else {
+        if (!is_valid_disk(cfg.root_part)) {
+            emit_installer_error(state, "无效的目标根分区路径: " + cfg.root_part);
+            return;
+        }
+        if (fs::exists("/sys/firmware/efi/efivars") && !is_valid_disk(cfg.efi_part)) {
+            emit_installer_error(state, "UEFI 多分区安装需要选择有效的 FAT32 EFI 分区。");
+            return;
+        }
     }
+
     if (!is_valid_username(cfg.username)) {
         emit_installer_error(state, "用户名只能包含小写字母、数字、下划线或连字符。");
         return;
@@ -217,12 +239,25 @@ void start_disk_install(AppState *state, const std::string &payload) {
 
         std::vector<std::string> args = {
             "sudo", "-n", "/usr/local/bin/spinel-install",
-            "--disk", cfg.disk,
+            "--mode", cfg.mode,
             "--username", cfg.username,
             "--hostname", cfg.hostname,
             "--timezone", cfg.timezone,
-            "--autologin", cfg.autologin
+            "--autologin", cfg.autologin,
+            "--os-prober", cfg.os_prober
         };
+        if (cfg.mode == "disk") {
+            args.push_back("--disk");
+            args.push_back(cfg.disk);
+        } else {
+            args.push_back("--root-part");
+            args.push_back(cfg.root_part);
+            if (!cfg.efi_part.empty()) {
+                args.push_back("--efi-part");
+                args.push_back(cfg.efi_part);
+            }
+        }
+
         std::vector<char *> argv;
         argv.reserve(args.size() + 1);
         for (auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));

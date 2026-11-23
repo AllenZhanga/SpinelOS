@@ -13,11 +13,13 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 fi
 
-# Work around WebKitGTK DMABUF rendering issues on NVIDIA open/proprietary Wayland stacks
+# Work around WebKitGTK DMABUF rendering issues on NVIDIA or virtualized GPUs
 if [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GBM_BACKEND=nvidia-drm
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
+elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
 fi
 
 # Start PipeWire audio services in user session if systemd user instance is ready

@@ -30,6 +30,8 @@ grep -vE '^\s*(#|$)' "${WORKSPACE}/archiso/packages.custom.x86_64" >> "${PROFILE
 sort -u "${PROFILE_DIR}/packages.x86_64" -o "${PROFILE_DIR}/packages.x86_64"
 
 cp -a "${WORKSPACE}/archiso/airootfs/." "${PROFILE_DIR}/airootfs/"
+# Ensure custom os-release replaces releng symlink cleanly
+cp -f "${WORKSPACE}/archiso/airootfs/etc/os-release" "${PROFILE_DIR}/airootfs/etc/os-release"
 
 # Install compiled desktop shell binary and HTML/CSS/JS UI assets
 install -Dm755 "${BUILD_DIR}/spinel-shell" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-shell"
@@ -46,12 +48,18 @@ ln -sf /usr/lib/systemd/system/bluetooth.service \
 ln -sf /usr/lib/systemd/system/bluetooth.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
 
-echo "[4/5] Configuring bootloader kernel parameters & profiledef..."
+echo "[4/5] Configuring bootloader kernel parameters, branding & profiledef..."
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
-  [ -f "$cfg" ] && sed -i '/^options / s/$/ nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
+  if [ -f "$cfg" ]; then
+    sed -i 's/Arch Linux install medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i '/^options / s/$/ quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
+  fi
 done
 for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
-  [ -f "$cfg" ] && sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
+  if [ -f "$cfg" ]; then
+    sed -i 's/Arch Linux install medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
+  fi
 done
 
 cat <<'EOF' >> "${PROFILE_DIR}/profiledef.sh"

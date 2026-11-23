@@ -36,10 +36,13 @@ gboolean on_telemetry_tick(gpointer user_data) {
 
 void handle_command(AppState *state, const std::string &cmd) {
     if (cmd == "launch:steam") {
+        ensure_steam_play_preconfig();
         spawn_argv_detached({"steam"});
     } else if (cmd == "launch:steam-gamepadui") {
+        ensure_steam_play_preconfig();
         launch_steam_gamepadui(load_perf_config());
     } else if (cmd.rfind("steam:launch:", 0) == 0) {
+        ensure_steam_play_preconfig();
         launch_steam_game(cmd.substr(13), load_perf_config());
     } else if (cmd == "steam:scan") {
         push_steam_library(state);
@@ -122,11 +125,11 @@ void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer use
     }
 }
 
-WebKitWebView *create_configured_webview(AppState *state) {
+WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
-    GdkRGBA transparent{0.0, 0.0, 0.0, 0.0};
-    webkit_web_view_set_background_color(web, &transparent);
+    GdkRGBA bg = opaque_dark ? GdkRGBA{0.031, 0.043, 0.071, 1.0} : GdkRGBA{0.0, 0.0, 0.0, 0.0};
+    webkit_web_view_set_background_color(web, &bg);
 
     WebKitSettings *settings = webkit_web_view_get_settings(web);
     webkit_settings_set_enable_javascript(settings, TRUE);
@@ -156,7 +159,7 @@ GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
     gtk_layer_auto_exclusive_zone_enable(win);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
-    state->bar_view = create_configured_webview(state);
+    state->bar_view = create_configured_webview(state, false);
     gtk_widget_set_size_request(GTK_WIDGET(state->bar_view), -1, 48);
     gtk_window_set_child(win, GTK_WIDGET(state->bar_view));
 
@@ -178,7 +181,7 @@ GtkWindow *create_desktop_hub(GtkApplication *app, AppState *state) {
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
 
-    state->hub_view = create_configured_webview(state);
+    state->hub_view = create_configured_webview(state, true);
     gtk_window_set_child(win, GTK_WIDGET(state->hub_view));
 
     std::string uri = resolve_ui_uri("?mode=hub");
@@ -188,6 +191,7 @@ GtkWindow *create_desktop_hub(GtkApplication *app, AppState *state) {
 
 void on_activate(GtkApplication *app, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
+    ensure_steam_play_preconfig();
     GtkWindow *bar = create_top_bar(app, state);
     state->hub_window = create_desktop_hub(app, state);
 

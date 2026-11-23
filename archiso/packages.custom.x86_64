@@ -15,6 +15,7 @@ rsync
 arch-install-scripts
 grub
 efibootmgr
+os-prober
 
 # Graphics: AMD + Intel (64-bit & 32-bit for Steam/Proton)
 mesa

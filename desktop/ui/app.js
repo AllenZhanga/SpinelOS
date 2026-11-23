@@ -12,6 +12,8 @@
   }
 
   let selectedDisk = "";
+  let installMode = "disk";
+  let isUefiMode = true;
   let installRunning = false;
   let selectedWifiSsid = "";
   let btPowered = false;
@@ -524,11 +526,52 @@
     modal.classList.add("hidden");
   }
 
+  function setInstallMode(nextMode) {
+    installMode = nextMode === "partition" ? "partition" : "disk";
+    const diskSec = document.getElementById("inst-disk-section");
+    const partSec = document.getElementById("inst-part-section");
+    const btnDisk = document.getElementById("btn-mode-disk");
+    const btnPart = document.getElementById("btn-mode-part");
+    const confirmLabel = document.getElementById("inst-confirm-label");
+
+    if (diskSec) diskSec.classList.toggle("hidden", installMode !== "disk");
+    if (partSec) partSec.classList.toggle("hidden", installMode !== "partition");
+    if (btnDisk) btnDisk.classList.toggle("active", installMode === "disk");
+    if (btnPart) btnPart.classList.toggle("active", installMode === "partition");
+    if (confirmLabel) {
+      confirmLabel.textContent = installMode === "disk"
+        ? "我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 SpinelOS（测试建议优先使用空盘或副盘）。"
+        : "我已确认所选根分区 (/) 无重要数据，允许将其格式化为 ext4（其余分区与原 EFI 文件将保留）。";
+    }
+    showFormError("");
+  }
+
   function submitInstaller() {
     showFormError("");
-    if (!selectedDisk) {
-      showFormError("请先选择一个目标硬盘。");
-      return;
+    const rootPartEl = document.getElementById("inst-root-part");
+    const efiPartEl = document.getElementById("inst-efi-part");
+    const rootPart = rootPartEl ? rootPartEl.value : "";
+    const efiPart = efiPartEl ? efiPartEl.value : "";
+    const osProber = document.getElementById("inst-os-prober")?.checked ?? true;
+
+    if (installMode === "disk") {
+      if (!selectedDisk) {
+        showFormError("请先选择一个目标硬盘。");
+        return;
+      }
+    } else {
+      if (!rootPart) {
+        showFormError("请选择要格式化为根分区 (/) 的目标分区。");
+        return;
+      }
+      if (isUefiMode && !efiPart) {
+        showFormError("UEFI 模式下请选择一个已有的 FAT32 EFI 分区。");
+        return;
+      }
+      if (isUefiMode && rootPart === efiPart) {
+        showFormError("根分区和 EFI 分区不能选择同一个分区。");
+        return;
+      }
     }
 
     const username = document.getElementById("inst-username").value.trim();
@@ -556,7 +599,7 @@
       return;
     }
     if (!confirmWipe) {
-      showFormError("请勾选确认框以允许清空目标硬盘数据。");
+      showFormError("请勾选确认框以允许格式化目标位置并开始安装。");
       return;
     }
 
@@ -573,7 +616,11 @@
 
     const payload = [
       "installer:start",
+      `mode=${installMode}`,
       `disk=${selectedDisk}`,
+      `root_part=${rootPart}`,
+      `efi_part=${efiPart}`,
+      `os_prober=${osProber ? "true" : "false"}`,
       `username=${username}`,
       `hostname=${hostname}`,
       `timezone=${timezone}`,
@@ -586,12 +633,16 @@
 
   window.__spinelInstallerEnv = (env) => {
     installRunning = Boolean(env.installing);
+    isUefiMode = Boolean(env.uefi);
     const badge = document.getElementById("inst-env-badge");
     if (badge) {
       const modeText = env.is_live ? "Live ISO" : "已安装环境";
       const bootText = env.uefi ? "UEFI GPT" : "Legacy BIOS";
       badge.textContent = `${modeText} · ${bootText}`;
     }
+
+    const efiWrap = document.getElementById("inst-efi-wrap");
+    if (efiWrap) efiWrap.classList.toggle("hidden", !isUefiMode);
 
     const listEl = document.getElementById("inst-disk-list");
     if (!listEl) return;
@@ -600,6 +651,59 @@
     const disks = rawDevices.filter(
       (d) => d.type === "disk" && !/^loop|^zram/.test(d.name || "")
     );
+
+    const rootSel = document.getElementById("inst-root-part");
+    const efiSel = document.getElementById("inst-efi-part");
+    if (rootSel) rootSel.innerHTML = "";
+    if (efiSel) efiSel.innerHTML = "";
+
+    const nonBootParts = [];
+    disks.forEach((d) => {
+      const isBootDisk = env.boot_disk && d.name === env.boot_disk;
+      if (isBootDisk || !Array.isArray(d.children)) return;
+      d.children.forEach((p) => {
+        if (p.type === "part") {
+          nonBootParts.push({ ...p, parentName: d.name });
+        }
+      });
+    });
+
+    if (rootSel) {
+      if (nonBootParts.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "未检测到可用的非启动盘分区";
+        rootSel.appendChild(opt);
+      } else {
+        nonBootParts.forEach((p) => {
+          const path = p.path || `/dev/${p.name}`;
+          const fsType = p.fstype || "未格式化";
+          const opt = document.createElement("option");
+          opt.value = path;
+          opt.textContent = `${path} · ${formatBytes(p.size)} · ${fsType}${p.parttypename ? ` (${p.parttypename})` : ""}`;
+          rootSel.appendChild(opt);
+        });
+      }
+    }
+
+    if (efiSel) {
+      const vfatParts = nonBootParts.filter((p) => (p.fstype || "").toLowerCase() === "vfat");
+      if (vfatParts.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "未检测到 FAT32/vfat EFI 分区";
+        efiSel.appendChild(opt);
+      } else {
+        vfatParts.forEach((p, idx) => {
+          const path = p.path || `/dev/${p.name}`;
+          const opt = document.createElement("option");
+          opt.value = path;
+          opt.textContent = `${path} · ${formatBytes(p.size)} · FAT32${p.parttypename ? ` (${p.parttypename})` : ""}`;
+          if (idx === 0) opt.selected = true;
+          efiSel.appendChild(opt);
+        });
+      }
+    }
 
     if (disks.length === 0) {
       listEl.innerHTML = `<div class="disk-empty">未检测到可用磁盘设备，请点击“刷新磁盘”重试。</div>`;
@@ -733,6 +837,10 @@
 
     if (cmd === "installer:open") {
       openInstallerModal();
+    } else if (cmd === "installer:mode:disk") {
+      setInstallMode("disk");
+    } else if (cmd === "installer:mode:partition") {
+      setInstallMode("partition");
     } else if (cmd === "installer:close") {
       closeInstallerModal();
     } else if (cmd === "installer:submit") {
@@ -813,7 +921,201 @@
     }
   };
 
+  /* ---------------- Web Gamepad API Spatial Navigation ---------------- */
+  function initGamepadNavigation() {
+    if (mode !== "hub" || typeof navigator.getGamepads !== "function") return;
+
+    let gpFocusedEl = null;
+    let lastDir = "";
+    let lastDirTime = 0;
+    let dirRepeatCount = 0;
+    const prevButtons = new Map();
+
+    const updateChip = () => {
+      const chip = document.getElementById("hub-gamepad-chip");
+      if (!chip) return;
+      const pads = Array.from(navigator.getGamepads() || []).filter(Boolean);
+      if (pads.length === 0) {
+        chip.textContent = "手柄操控: 未连接";
+      } else {
+        const label = (pads[0].id || "Controller").replace(/\s*\(.*?\)\s*/g, "").slice(0, 26);
+        chip.textContent = `手柄已连接: ${label} (十字键/A/B)`;
+      }
+    };
+
+    window.addEventListener("gamepadconnected", updateChip);
+    window.addEventListener("gamepaddisconnected", updateChip);
+    window.addEventListener("pointerdown", () => {
+      if (gpFocusedEl) {
+        gpFocusedEl.classList.remove("gp-focused");
+        gpFocusedEl = null;
+      }
+    });
+
+    function getActiveRoot() {
+      const instModal = document.getElementById("installer-modal");
+      if (instModal && !instModal.classList.contains("hidden")) return instModal;
+      const setModal = document.getElementById("settings-modal");
+      if (setModal && !setModal.classList.contains("hidden")) return setModal;
+      return hub;
+    }
+
+    function getFocusables(root) {
+      const selector = "button:not(:disabled), input:not(:disabled), select:not(:disabled), .card.clickable, .disk-item:not(.disabled)";
+      return Array.from(root.querySelectorAll(selector)).filter((el) => {
+        if (el.closest(".hidden")) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    }
+
+    function setFocus(el) {
+      if (gpFocusedEl && gpFocusedEl !== el) {
+        gpFocusedEl.classList.remove("gp-focused");
+      }
+      gpFocusedEl = el || null;
+      if (gpFocusedEl) {
+        gpFocusedEl.classList.add("gp-focused");
+        gpFocusedEl.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
+
+    function moveFocus(dir) {
+      const root = getActiveRoot();
+      const items = getFocusables(root);
+      if (items.length === 0) return;
+      if (!gpFocusedEl || !items.includes(gpFocusedEl)) {
+        setFocus(items[0]);
+        return;
+      }
+
+      const cur = gpFocusedEl.getBoundingClientRect();
+      const cx = cur.left + cur.width / 2;
+      const cy = cur.top + cur.height / 2;
+
+      let best = null;
+      let bestScore = Infinity;
+      items.forEach((cand) => {
+        if (cand === gpFocusedEl) return;
+        const r = cand.getBoundingClientRect();
+        const tx = r.left + r.width / 2;
+        const ty = r.top + r.height / 2;
+        const dx = tx - cx;
+        const dy = ty - cy;
+
+        let primary = 0;
+        let ortho = 0;
+        if (dir === "right" && dx > 4) { primary = dx; ortho = Math.abs(dy); }
+        else if (dir === "left" && dx < -4) { primary = -dx; ortho = Math.abs(dy); }
+        else if (dir === "down" && dy > 4) { primary = dy; ortho = Math.abs(dx); }
+        else if (dir === "up" && dy < -4) { primary = -dy; ortho = Math.abs(dx); }
+        else return;
+
+        const score = primary + ortho * 2.5;
+        if (score < bestScore) {
+          bestScore = score;
+          best = cand;
+        }
+      });
+
+      if (best) setFocus(best);
+    }
+
+    function activateFocused() {
+      const root = getActiveRoot();
+      const items = getFocusables(root);
+      if (!gpFocusedEl || !items.includes(gpFocusedEl)) {
+        if (items.length > 0) setFocus(items[0]);
+        return;
+      }
+      const el = gpFocusedEl;
+      if (el.tagName === "SELECT" && el.options.length > 0) {
+        el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else if (el.tagName === "INPUT" && (el.type === "text" || el.type === "password")) {
+        el.focus();
+      } else {
+        el.click();
+      }
+    }
+
+    function backAction() {
+      const instModal = document.getElementById("installer-modal");
+      if (instModal && !instModal.classList.contains("hidden")) {
+        if (!installRunning) closeInstallerModal();
+        return;
+      }
+      const setModal = document.getElementById("settings-modal");
+      if (setModal && !setModal.classList.contains("hidden")) {
+        setModal.classList.add("hidden");
+      }
+    }
+
+    function switchModalTab(step) {
+      const setModal = document.getElementById("settings-modal");
+      if (setModal && !setModal.classList.contains("hidden")) {
+        const tabs = ["wifi", "bt", "display"];
+        const activeBtn = setModal.querySelector(".tab-btn.active");
+        const curCmd = activeBtn ? activeBtn.getAttribute("data-cmd") : "settings:tab:wifi";
+        const curIdx = Math.max(0, tabs.indexOf(curCmd.split(":")[2]));
+        switchSettingsTab(tabs[(curIdx + step + tabs.length) % tabs.length]);
+        return;
+      }
+      const instModal = document.getElementById("installer-modal");
+      if (instModal && !instModal.classList.contains("hidden") && !installRunning) {
+        setInstallMode(installMode === "disk" ? "partition" : "disk");
+      }
+    }
+
+    function tick(now) {
+      const pads = navigator.getGamepads() || [];
+      const pad = Array.from(pads).find(Boolean);
+      if (pad) {
+        const pressed = (idx) => Boolean(pad.buttons[idx] && pad.buttons[idx].pressed);
+        const justPressed = (idx) => {
+          const cur = pressed(idx);
+          const prev = prevButtons.get(idx) || false;
+          prevButtons.set(idx, cur);
+          return cur && !prev;
+        };
+
+        const ax = pad.axes[0] || 0;
+        const ay = pad.axes[1] || 0;
+        let dir = "";
+        if (pressed(12) || ay < -0.55) dir = "up";
+        else if (pressed(13) || ay > 0.55) dir = "down";
+        else if (pressed(14) || ax < -0.55) dir = "left";
+        else if (pressed(15) || ax > 0.55) dir = "right";
+
+        if (dir) {
+          const delay = dirRepeatCount === 0 ? 210 : 115;
+          if (dir !== lastDir || now - lastDirTime >= delay) {
+            moveFocus(dir);
+            dirRepeatCount = dir === lastDir ? dirRepeatCount + 1 : 1;
+            lastDir = dir;
+            lastDirTime = now;
+          }
+        } else {
+          lastDir = "";
+          dirRepeatCount = 0;
+        }
+
+        if (justPressed(0)) activateFocused();
+        if (justPressed(1)) backAction();
+        if (justPressed(4)) switchModalTab(-1);
+        if (justPressed(5)) switchModalTab(1);
+        if (justPressed(3) && getActiveRoot() === hub) sendCommand("steam:scan");
+        if (justPressed(9) && getActiveRoot() === hub) sendCommand("launch:steam-gamepadui");
+      }
+      window.requestAnimationFrame(tick);
+    }
+
+    updateChip();
+    window.requestAnimationFrame(tick);
+  }
+
   renderPerfState();
+  initGamepadNavigation();
   updateClock();
   setInterval(updateClock, 15000);
   sendCommand("telemetry:refresh");

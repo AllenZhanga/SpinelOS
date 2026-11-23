@@ -5,6 +5,7 @@
 
 #include <string>
 
+void ensure_steam_play_preconfig();
 void push_steam_library(AppState *state);
 void launch_steam_game(const std::string &appid, const PerfConfig &perf);
 void launch_steam_gamepadui(const PerfConfig &perf);
