@@ -1,0 +1,16 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+std::string json_escape(const std::string &input);
+std::string trim_copy(const std::string &s);
+std::string home_dir();
+std::string read_first_line(const std::string &path, const std::string &fallback = "");
+std::string run_cmd_capture(const char *cmd);
+bool run_argv_capture(const std::vector<std::string> &args, std::string &out, int &exit_code);
+void spawn_detached(const std::string &cmd);
+void spawn_argv_detached(const std::vector<std::string> &args,
+                         const std::vector<std::pair<std::string, std::string>> &env_overrides = {});
+bool is_live_iso_env();
+std::vector<std::string> split_lines(const std::string &text);

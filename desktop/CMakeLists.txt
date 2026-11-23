@@ -12,6 +12,10 @@ pkg_check_modules(LAYER_SHELL REQUIRED IMPORTED_TARGET gtk4-layer-shell-0)
 
 add_executable(spinel-shell
     src/main.cpp
+    src/common.cpp
+    src/steam_library.cpp
+    src/system_control.cpp
+    src/installer.cpp
 )
 
 target_link_libraries(spinel-shell PRIVATE

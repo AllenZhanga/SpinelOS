@@ -35,6 +35,8 @@ lib32-nvidia-utils
 # Wayland Compositor & Custom Desktop Shell Dependencies
 labwc
 xorg-xwayland
+wlr-randr
+wl-clipboard
 gtk4
 gtk4-layer-shell
 webkitgtk-6.0

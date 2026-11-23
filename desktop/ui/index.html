@@ -18,7 +18,7 @@
       <button class="bar-btn accent" data-cmd="launch:steam-gamepadui">主机全屏模式</button>
     </div>
     <div class="bar-right">
-      <span id="bar-net" class="status-chip clickable" data-cmd="system:wifi-ui">网络: 检测中</span>
+      <span id="bar-net" class="status-chip clickable" data-cmd="settings:open:wifi">网络: 检测中</span>
       <span id="bar-mem" class="status-chip">内存: --</span>
       <button class="icon-btn" title="音量-" data-cmd="system:audio-down">Vol-</button>
       <button class="icon-btn" title="音量+" data-cmd="system:audio-up">Vol+</button>
@@ -40,7 +40,8 @@
         <div class="hero-actions">
           <button class="btn primary" data-cmd="launch:steam">启动 Steam（桌面窗口）</button>
           <button class="btn glow" data-cmd="launch:steam-gamepadui">进入 Gamescope 主机大屏</button>
-          <button class="btn ghost" data-cmd="launch:terminal">打开终端 (Foot)</button>
+          <button class="btn ghost" data-cmd="settings:open:display">系统设置中心</button>
+          <button class="btn ghost" data-cmd="launch:terminal">终端 (Foot)</button>
         </div>
       </div>
 
@@ -64,23 +65,94 @@
       </div>
     </section>
 
-    <section class="grid-cards">
-      <article class="card glass clickable" data-cmd="launch:steam">
-        <div class="card-tag">GAME ENGINE</div>
-        <h2>Steam + Proton 兼容层</h2>
-        <p>联网登录 Steam 后，在 设置 → 兼容性 中勾选为所有产品启用 Steam Play，即可运行 Windows 游戏。</p>
-      </article>
+    <!-- Single-Player Performance Control Strip -->
+    <section id="perf-bar" class="perf-strip glass">
+      <div class="perf-head">
+        <div>
+          <span class="card-tag">PERFORMANCE CONTROL</span>
+          <h3>单机性能与画质控制条</h3>
+        </div>
+        <div class="perf-launch-preview">
+          <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun gamescope -f -- %command%</code>
+          <button class="btn small" id="btn-copy-launch" data-cmd="perf:copy">复制 Steam 启动参数</button>
+        </div>
+      </div>
 
-      <article class="card glass clickable" data-cmd="system:wifi-ui">
+      <div class="perf-controls">
+        <div class="perf-group">
+          <span class="perf-label">MangoHud 监控浮窗</span>
+          <div class="pill-group" id="ctrl-mangohud">
+            <button class="pill-btn" data-perf-key="mangohud" data-perf-val="off">关闭</button>
+            <button class="pill-btn active" data-perf-key="mangohud" data-perf-val="compact">精简</button>
+            <button class="pill-btn" data-perf-key="mangohud" data-perf-val="full">详细</button>
+          </div>
+        </div>
+
+        <div class="perf-group">
+          <span class="perf-label">Gamescope 锁帧</span>
+          <div class="pill-group" id="ctrl-fps">
+            <button class="pill-btn active" data-perf-key="fps_limit" data-perf-val="0">不限</button>
+            <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="60">60</button>
+            <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="90">90</button>
+            <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="120">120</button>
+            <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="144">144</button>
+          </div>
+        </div>
+
+        <div class="perf-group">
+          <span class="perf-label">渲染分辨率 (FSR 缩放)</span>
+          <div class="pill-group" id="ctrl-res">
+            <button class="pill-btn active" data-perf-key="render_res" data-perf-val="native">原生</button>
+            <button class="pill-btn" data-perf-key="render_res" data-perf-val="1080p">1080p</button>
+            <button class="pill-btn" data-perf-key="render_res" data-perf-val="900p">900p</button>
+            <button class="pill-btn" data-perf-key="render_res" data-perf-val="720p">720p</button>
+          </div>
+        </div>
+
+        <div class="perf-group">
+          <span class="perf-label">FSR 锐化 &amp; GameMode</span>
+          <div class="pill-group">
+            <button class="pill-btn" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr">FSR 锐化: 关</button>
+            <button class="pill-btn active" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode">GameMode: 开</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Native Steam Game Library Wall -->
+    <section id="steam-library-section" class="library-section glass">
+      <div class="section-head">
+        <div class="lib-title-wrap">
+          <span class="card-tag">STEAM LIBRARY</span>
+          <h3>本地 Steam 游戏库</h3>
+          <span id="steam-count-badge" class="status-chip">0 款游戏</span>
+        </div>
+        <button class="btn small" data-cmd="steam:scan">扫描游戏库</button>
+      </div>
+
+      <div id="steam-game-grid" class="game-grid">
+        <div class="lib-empty">正在扫描本地 Steam 游戏库...</div>
+      </div>
+    </section>
+
+    <!-- System Quick Cards -->
+    <section class="grid-cards">
+      <article class="card glass clickable" data-cmd="settings:open:wifi">
         <div class="card-tag">NETWORK</div>
         <h2>Wi-Fi / 有线网络</h2>
-        <p>调用 NetworkManager TUI 快速连接无线网络，开始下载 Steam 游戏与 Proton 运行时。</p>
+        <p>图形化扫描周边 Wi-Fi 热点、输入密码连接并查看当前网卡状态。</p>
       </article>
 
-      <article class="card glass clickable" data-cmd="system:bt-ui">
+      <article class="card glass clickable" data-cmd="settings:open:bt">
         <div class="card-tag">CONTROLLER</div>
         <h2>蓝牙手柄配对</h2>
-        <p>支持 Xbox、DualSense、Switch Pro 等常见蓝牙游戏手柄配对管理。</p>
+        <p>一键扫描并配对 Xbox、DualSense、Switch Pro 等无线游戏手柄。</p>
+      </article>
+
+      <article class="card glass clickable" data-cmd="settings:open:display">
+        <div class="card-tag">DISPLAY</div>
+        <h2>显示器与刷新率</h2>
+        <p>基于 wlr-randr 读取显示输出，自由切换分辨率、高刷与桌面缩放并持久化保存。</p>
       </article>
 
       <article class="card glass">
@@ -94,6 +166,87 @@
         </div>
       </article>
     </section>
+
+    <!-- Graphical Settings Center Modal -->
+    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal-panel glass">
+        <header class="modal-header">
+          <div>
+            <span class="badge">SpinelOS Settings</span>
+            <h2>系统设置中心</h2>
+          </div>
+          <div class="modal-header-right">
+            <div class="tab-bar">
+              <button class="tab-btn active" data-cmd="settings:tab:wifi">Wi-Fi 网络</button>
+              <button class="tab-btn" data-cmd="settings:tab:bt">蓝牙手柄</button>
+              <button class="tab-btn" data-cmd="settings:tab:display">显示器</button>
+            </div>
+            <button class="icon-btn" data-cmd="settings:close">关闭</button>
+          </div>
+        </header>
+
+        <!-- Wi-Fi Tab -->
+        <div id="tab-wifi" class="modal-body">
+          <div class="section-head">
+            <h3>网络接口状态</h3>
+            <button class="btn small" id="btn-wifi-rescan" data-cmd="settings:wifi-scan">扫描周边 Wi-Fi</button>
+          </div>
+          <div id="wifi-iface-list" class="status-list"></div>
+
+          <div id="wifi-connect-box" class="connect-box hidden">
+            <div class="connect-head">
+              <strong id="wifi-target-ssid">连接到 Wi-Fi</strong>
+              <button class="icon-btn" data-cmd="settings:wifi-cancel">取消</button>
+            </div>
+            <div class="connect-row">
+              <input type="password" id="wifi-password-input" placeholder="输入 Wi-Fi 密码（开放网络可留空）" />
+              <button class="btn primary small" data-cmd="settings:wifi-do-connect">连接</button>
+            </div>
+          </div>
+
+          <div id="wifi-feedback" class="feedback-banner hidden"></div>
+
+          <div class="inst-section">
+            <h3>可用 Wi-Fi 列表</h3>
+            <div id="wifi-network-list" class="disk-list">
+              <div class="disk-empty">正在读取网络列表...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bluetooth Tab -->
+        <div id="tab-bt" class="modal-body hidden">
+          <div class="section-head">
+            <div class="bt-head-left">
+              <h3>蓝牙适配器</h3>
+              <span id="bt-power-badge" class="status-chip">状态检测中</span>
+            </div>
+            <div class="footer-actions">
+              <button class="btn small" id="btn-bt-power" data-cmd="settings:bt-toggle">开关蓝牙</button>
+              <button class="btn primary small" id="btn-bt-scan" data-cmd="settings:bt-scan">扫描手柄 (6s)</button>
+            </div>
+          </div>
+
+          <div id="bt-feedback" class="feedback-banner hidden"></div>
+
+          <div id="bt-device-list" class="disk-list">
+            <div class="disk-empty">正在读取蓝牙设备...</div>
+          </div>
+        </div>
+
+        <!-- Display Tab -->
+        <div id="tab-display" class="modal-body hidden">
+          <div class="section-head">
+            <h3>显示器输出与刷新率 (Wayland wlr-randr)</h3>
+            <button class="btn small" data-cmd="settings:display-scan">刷新显示器</button>
+          </div>
+          <div id="display-feedback" class="feedback-banner hidden"></div>
+          <div id="display-output-list" class="disk-list">
+            <div class="disk-empty">正在读取显示器信息...</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Graphical Disk Installer Modal -->
     <div id="installer-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">

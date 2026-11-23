@@ -1,2 +1,7 @@
+# Apply saved Wayland display mode if configured
+if [ -x "$HOME/.config/spinelos/display.sh" ]; then
+  "$HOME/.config/spinelos/display.sh" &
+fi
+
 # Start our custom C++20 + WebKitGTK6 Wayland Desktop Shell
 /usr/local/bin/spinel-shell &
