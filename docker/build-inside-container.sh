@@ -57,6 +57,8 @@ iso_name="spinelos"
 iso_label="SPINELOS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
 iso_publisher="SpinelOS <https://github.com/AllenZhanga/SpinelOS>"
 iso_application="SpinelOS Gaming Linux Live ISO"
+airootfs_image_type="squashfs"
+airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '10' '-b' '1M')
 file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"
 file_permissions["/usr/local/bin/start-spinel-desktop"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-shell"]="0:0:0755"
