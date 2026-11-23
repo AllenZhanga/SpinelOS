@@ -1,0 +1,2 @@
+# Start our custom C++20 + WebKitGTK6 Wayland Desktop Shell
+/usr/local/bin/spinel-shell &

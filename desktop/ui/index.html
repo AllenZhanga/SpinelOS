@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpinelOS Desktop Shell</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Top Panel Mode (?mode=bar) -->
+  <header id="top-bar" class="hidden">
+    <div class="bar-left">
+      <button class="brand-pill" data-cmd="system:toggle-hub">
+        <span class="dot"></span>
+        <span>SPINEL OS</span>
+      </button>
+      <button class="bar-btn" data-cmd="launch:steam">Steam 桌面版</button>
+      <button class="bar-btn accent" data-cmd="launch:steam-gamepadui">主机全屏模式</button>
+    </div>
+    <div class="bar-right">
+      <span id="bar-net" class="status-chip clickable" data-cmd="system:wifi-ui">网络: 检测中</span>
+      <span id="bar-mem" class="status-chip">内存: --</span>
+      <button class="icon-btn" title="音量-" data-cmd="system:audio-down">Vol-</button>
+      <button class="icon-btn" title="音量+" data-cmd="system:audio-up">Vol+</button>
+      <span id="bar-clock" class="clock">--:--</span>
+    </div>
+  </header>
+
+  <!-- Desktop Hub Mode (?mode=hub) -->
+  <main id="desktop-hub" class="hidden">
+    <div class="ambient-glow"></div>
+
+    <section class="hero-card glass">
+      <div class="hero-text">
+        <span class="badge">Wayland · Arch Linux · Proton Ready</span>
+        <h1>欢迎来到 SpinelOS 游戏桌面</h1>
+        <p>
+          独立构建的 C++20 / WebKitGTK6 Wayland 桌面环境，内置 AMD / Intel / NVIDIA RTX（nvidia-open）图形栈与 32 位 Steam Play 转译支持。
+        </p>
+        <div class="hero-actions">
+          <button class="btn primary" data-cmd="launch:steam">启动 Steam（桌面窗口）</button>
+          <button class="btn glow" data-cmd="launch:steam-gamepadui">进入 Gamescope 主机大屏</button>
+          <button class="btn ghost" data-cmd="launch:terminal">打开终端 (Foot)</button>
+        </div>
+      </div>
+
+      <div class="telemetry-panel">
+        <div class="metric">
+          <span class="label">图形处理器 (GPU)</span>
+          <strong id="hub-gpu">扫描中...</strong>
+        </div>
+        <div class="metric">
+          <span class="label">内存占用</span>
+          <strong id="hub-mem">-- / -- MB</strong>
+        </div>
+        <div class="metric">
+          <span class="label">网络状态</span>
+          <strong id="hub-net">检测中...</strong>
+        </div>
+        <div class="metric">
+          <span class="label">Linux 内核</span>
+          <strong id="hub-kernel">--</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-cards">
+      <article class="card glass clickable" data-cmd="launch:steam">
+        <div class="card-tag">GAME ENGINE</div>
+        <h2>Steam + Proton 兼容层</h2>
+        <p>联网登录 Steam 后，在 设置 → 兼容性 中勾选为所有产品启用 Steam Play，即可运行 Windows 游戏。</p>
+      </article>
+
+      <article class="card glass clickable" data-cmd="system:wifi-ui">
+        <div class="card-tag">NETWORK</div>
+        <h2>Wi-Fi / 有线网络</h2>
+        <p>调用 NetworkManager TUI 快速连接无线网络，开始下载 Steam 游戏与 Proton 运行时。</p>
+      </article>
+
+      <article class="card glass clickable" data-cmd="system:bt-ui">
+        <div class="card-tag">CONTROLLER</div>
+        <h2>蓝牙手柄配对</h2>
+        <p>支持 Xbox、DualSense、Switch Pro 等常见蓝牙游戏手柄配对管理。</p>
+      </article>
+
+      <article class="card glass">
+        <div class="card-tag">SYSTEM POWER</div>
+        <h2>电源与安装管理</h2>
+        <p>Live 模式用于测试硬件兼容；若需持久化游戏库，请安装至本地 NVMe/SSD。</p>
+        <div class="card-actions">
+          <button class="btn small" data-cmd="power:reboot">重启</button>
+          <button class="btn small danger" data-cmd="power:shutdown">关机</button>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
