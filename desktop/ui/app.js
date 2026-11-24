@@ -7,6 +7,7 @@
     bar: "top-bar",
     desktop: "desktop-canvas",
     dock: "dock-shell",
+    cc: "cc-shell",
     games: "app-games",
     settings: "app-settings",
     installer: "app-installer"
@@ -413,6 +414,22 @@
       gmBtn.textContent = `GameMode: ${perfState.gamemode ? "开" : "关"}`;
       gmBtn.classList.toggle("active", Boolean(perfState.gamemode));
     }
+    const ccGmCircle = document.getElementById("cc-gm-circle");
+    const ccGmVal = document.getElementById("cc-gm-val");
+    if (ccGmCircle) ccGmCircle.classList.toggle("active-blue", Boolean(perfState.gamemode));
+    if (ccGmVal) ccGmVal.textContent = perfState.gamemode ? "已开启" : "已关闭";
+
+    const ccMhCircle = document.getElementById("cc-mh-circle");
+    const ccMhVal = document.getElementById("cc-mh-val");
+    if (ccMhCircle) ccMhCircle.classList.toggle("active-indigo", perfState.mangohud !== "off");
+    if (ccMhVal) {
+      const mhMap = { off: "已关闭", compact: "精简监控", full: "详细监控" };
+      ccMhVal.textContent = mhMap[perfState.mangohud] || perfState.mangohud;
+    }
+
+    const ccFsrOrb = document.getElementById("cc-btn-fsr");
+    if (ccFsrOrb) ccFsrOrb.classList.toggle("active", Boolean(perfState.fsr));
+
     const preview = document.getElementById("perf-cmd-preview");
     if (preview) preview.textContent = buildLaunchOptionString(perfState);
   }
@@ -1022,6 +1039,10 @@
       sendPerfUpdate({ fsr: !perfState.fsr });
     } else if (cmd === "perf:toggle-gamemode") {
       sendPerfUpdate({ gamemode: !perfState.gamemode });
+    } else if (cmd === "perf:cycle-mangohud") {
+      const order = ["off", "compact", "full"];
+      const next = order[(order.indexOf(perfState.mangohud) + 1) % order.length];
+      sendPerfUpdate({ mangohud: next });
     } else if (cmd === "perf:copy") {
       const str = buildLaunchOptionString(perfState);
       navigator.clipboard?.writeText(str).then(() => {
@@ -1162,6 +1183,50 @@
     el.textContent = `${m}月${d}日 ${days[now.getDay()]} ${hh}:${mm}`;
   }
 
+  window.__spinelCcOpen = (isOpen) => {
+    document.getElementById("bar-cc-btn")?.classList.toggle("cc-open", Boolean(isOpen));
+  };
+
+  window.__spinelControlState = (data) => {
+    if (!data) return;
+    if (typeof data.volume === "number") {
+      const vs = document.getElementById("cc-vol-slider");
+      const vp = document.getElementById("cc-vol-pct");
+      if (vs) vs.value = String(data.volume);
+      if (vp) vp.textContent = `${data.volume}%`;
+    }
+    const bs = document.getElementById("cc-bright-slider");
+    const bp = document.getElementById("cc-bright-pct");
+    if (bs && bp) {
+      if (typeof data.brightness === "number" && data.brightness >= 0) {
+        bs.disabled = false;
+        bs.value = String(data.brightness);
+        bp.textContent = `${data.brightness}%`;
+      } else {
+        bs.disabled = true;
+        bp.textContent = "外接/VM";
+      }
+    }
+  };
+
+  if (mode === "cc") {
+    const volSlider = document.getElementById("cc-vol-slider");
+    const volPct = document.getElementById("cc-vol-pct");
+    volSlider?.addEventListener("input", () => {
+      if (volPct) volPct.textContent = `${volSlider.value}%`;
+      sendCommand(`system:audio-set:${volSlider.value}`);
+    });
+    const brSlider = document.getElementById("cc-bright-slider");
+    const brPct = document.getElementById("cc-bright-pct");
+    brSlider?.addEventListener("input", () => {
+      if (brPct) brPct.textContent = `${brSlider.value}%`;
+      sendCommand(`system:brightness-set:${brSlider.value}`);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") sendCommand("cc:close");
+    });
+  }
+
   window.__spinelUpdateTelemetry = (data) => {
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.textContent = val; };
     const barNetEl = document.getElementById("bar-net");
@@ -1173,6 +1238,9 @@
       const match = String(data.mem).match(/^(\d+)\s*\/\s*(\d+)/);
       barMemText.textContent = match ? `${match[1]}M` : data.mem;
     }
+    set("cc-net-val", data.net);
+    set("cc-mem-val", data.mem ? `内存 ${data.mem}` : "");
+    set("cc-gpu-short", data.gpu);
     set("desk-gpu", data.gpu);
     set("desk-mem", data.mem);
     set("desk-net", data.net);

@@ -17,6 +17,7 @@ void push_perf_config(AppState *state);
 void update_perf_config(AppState *state, const std::string &payload);
 
 void push_telemetry_to_view(WebKitWebView *view);
+void push_cc_media_state(AppState *state);
 
 void push_wifi_state(AppState *state, bool rescan);
 void connect_wifi(AppState *state, const std::string &payload);

@@ -31,6 +31,21 @@ std::string resolve_ui_uri(const std::string &page_query) {
 }
 
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data);
+GtkWindow *create_control_center_layer(GtkApplication *app, AppState *state);
+
+void set_control_center_visible(AppState *state, bool visible) {
+    if (!state || !state->cc_window) return;
+    gtk_widget_set_visible(GTK_WIDGET(state->cc_window), visible ? TRUE : FALSE);
+    if (visible) {
+        gtk_window_present(state->cc_window);
+        push_telemetry_to_view(state->cc_view);
+        push_perf_config(state);
+        push_cc_media_state(state);
+    }
+    eval_js(state->bar_view, visible
+        ? "window.__spinelCcOpen && window.__spinelCcOpen(true);"
+        : "window.__spinelCcOpen && window.__spinelCcOpen(false);");
+}
 
 WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
@@ -110,6 +125,9 @@ void push_all_telemetry(AppState *state) {
     push_telemetry_to_view(state->bar_view);
     push_telemetry_to_view(state->desktop_view);
     push_telemetry_to_view(state->dock_view);
+    if (state->cc_window && gtk_widget_get_visible(GTK_WIDGET(state->cc_window))) {
+        push_telemetry_to_view(state->cc_view);
+    }
     if (state->games_win && gtk_widget_get_visible(GTK_WIDGET(state->games_win))) {
         push_telemetry_to_view(state->games_view);
     }
@@ -125,33 +143,65 @@ gboolean on_telemetry_tick(gpointer user_data) {
 
 void handle_command(AppState *state, const std::string &cmd) {
     if (cmd == "launch:steam") {
+        set_control_center_visible(state, false);
         ensure_steam_play_preconfig();
         spawn_argv_detached({"steam"});
     } else if (cmd == "launch:steam-gamepadui") {
+        set_control_center_visible(state, false);
         ensure_steam_play_preconfig();
         launch_steam_gamepadui(load_perf_config());
     } else if (cmd.rfind("steam:launch:", 0) == 0) {
+        set_control_center_visible(state, false);
         ensure_steam_play_preconfig();
         launch_steam_game(cmd.substr(13), load_perf_config());
     } else if (cmd == "steam:scan") {
         push_steam_library(state);
     } else if (cmd == "launch:terminal") {
+        set_control_center_visible(state, false);
         spawn_argv_detached({"foot"});
     } else if (cmd == "launch:files") {
+        set_control_center_visible(state, false);
         spawn_argv_detached({"thunar"});
     } else if (cmd == "launch:browser") {
+        set_control_center_visible(state, false);
         spawn_argv_detached({"chromium", "--ozone-platform-hint=auto"});
     } else if (cmd.rfind("app:launch:", 0) == 0) {
+        set_control_center_visible(state, false);
         launch_desktop_app_id(cmd.substr(11));
     } else if (cmd == "games:open") {
+        set_control_center_visible(state, false);
         open_games_window(state);
     } else if (cmd == "installer:open") {
+        set_control_center_visible(state, false);
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
         if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "appearance") {
+            set_control_center_visible(state, false);
             open_settings_window(state, tab);
         }
+    } else if (cmd == "cc:toggle") {
+        if (!state->cc_window && g_app) {
+            state->cc_window = create_control_center_layer(g_app, state);
+        }
+        if (state->cc_window) {
+            bool vis = gtk_widget_get_visible(GTK_WIDGET(state->cc_window));
+            set_control_center_visible(state, !vis);
+        }
+    } else if (cmd == "cc:close") {
+        set_control_center_visible(state, false);
+    } else if (cmd.rfind("system:audio-set:", 0) == 0) {
+        int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
+        spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
+    } else if (cmd.rfind("system:brightness-set:", 0) == 0) {
+        int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 10, 100);
+        spawn_argv_detached({
+            "sh", "-c",
+            "for d in /sys/class/backlight/*; do "
+            "[ -w \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+            "max=$(cat \"$d/max_brightness\"); "
+            "echo $(( max * " + std::to_string(pct) + " / 100 )) > \"$d/brightness\"; break; done"
+        });
     } else if (cmd.rfind("window:toggle:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(14).c_str(), nullptr, 10);
         if (wid > 0) toggle_or_activate_window(wid);
@@ -181,6 +231,9 @@ void handle_command(AppState *state, const std::string &cmd) {
         push_desktop_apps(state);
         push_wallpaper_pref(state);
         push_windows_to_ui(state);
+        if (state->cc_window && gtk_widget_get_visible(GTK_WIDGET(state->cc_window))) {
+            push_cc_media_state(state);
+        }
     } else if (cmd == "perf:get") {
         push_perf_config(state);
     } else if (cmd.rfind("perf:set\n", 0) == 0) {
@@ -289,6 +342,30 @@ GtkWindow *create_dock_layer(GtkApplication *app, AppState *state) {
     gtk_window_set_child(win, GTK_WIDGET(state->dock_view));
 
     webkit_web_view_load_uri(state->dock_view, resolve_ui_uri("?mode=dock").c_str());
+    return win;
+}
+
+GtkWindow *create_control_center_layer(GtkApplication *app, AppState *state) {
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelControlCenter");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 356, 466);
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-controlcenter");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 34);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
+    g_signal_connect(win, "close-request", G_CALLBACK(on_hide_window_instead_of_destroy), nullptr);
+
+    state->cc_view = create_configured_webview(state, false);
+    gtk_widget_set_size_request(GTK_WIDGET(state->cc_view), 356, 466);
+    gtk_window_set_child(win, GTK_WIDGET(state->cc_view));
+
+    webkit_web_view_load_uri(state->cc_view, resolve_ui_uri("?mode=cc").c_str());
     return win;
 }
 

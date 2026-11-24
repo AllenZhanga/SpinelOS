@@ -15,6 +15,8 @@ struct AppState {
     WebKitWebView *desktop_view = nullptr;
     WebKitWebView *dock_view = nullptr;
     GtkWindow *dock_window = nullptr;
+    WebKitWebView *cc_view = nullptr;
+    GtkWindow *cc_window = nullptr;
 
     // Normal macOS-style managed Application Windows
     GtkWindow *games_win = nullptr;

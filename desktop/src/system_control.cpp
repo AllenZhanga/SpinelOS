@@ -3,6 +3,7 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -232,6 +233,7 @@ void push_perf_config(AppState *state) {
     eval_js(state->games_view, script);
     eval_js(state->desktop_view, script);
     eval_js(state->bar_view, script);
+    eval_js(state->cc_view, script);
 }
 
 void update_perf_config(AppState *state, const std::string &payload) {
@@ -285,6 +287,35 @@ void push_telemetry_to_view(WebKitWebView *view) {
        << "\"low_fx\":" << (low_fx ? "true" : "false")
        << "});";
     eval_js(view, js.str());
+}
+
+void push_cc_media_state(AppState *state) {
+    if (!state || !state->cc_view) return;
+    int vol_pct = 75;
+    std::string vol_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null");
+    auto pos = vol_out.find("Volume:");
+    if (pos != std::string::npos) {
+        double v = std::atof(vol_out.c_str() + pos + 7);
+        vol_pct = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+    }
+
+    int bright_pct = -1;
+    std::string br_out = run_cmd_capture(
+        "for d in /sys/class/backlight/*; do "
+        "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+        "cur=$(cat \"$d/brightness\"); max=$(cat \"$d/max_brightness\"); "
+        "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
+        "done 2>/dev/null");
+    if (!br_out.empty()) {
+        bright_pct = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+    }
+
+    std::ostringstream js;
+    js << "window.__spinelControlState && window.__spinelControlState({"
+       << "\"volume\":" << vol_pct << ","
+       << "\"brightness\":" << bright_pct
+       << "});";
+    eval_js(state->cc_view, js.str());
 }
 
 void push_wifi_state(AppState *state, bool rescan) {
