@@ -36,24 +36,27 @@ std::string resolve_icon_uri(const std::string &icon) {
     fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
     const std::vector<fs::path> search_dirs = {
         local_icons / "scalable/apps",
-        local_icons / "256x256/apps",
         local_icons / "128x128/apps",
+        local_icons / "64x64/apps",
+        local_icons / "256x256/apps",
         flatpak_user_icons / "scalable/apps",
-        flatpak_user_icons / "256x256/apps",
         flatpak_user_icons / "128x128/apps",
+        flatpak_user_icons / "64x64/apps",
+        flatpak_user_icons / "256x256/apps",
         flatpak_sys_icons / "scalable/apps",
-        flatpak_sys_icons / "256x256/apps",
         flatpak_sys_icons / "128x128/apps",
+        flatpak_sys_icons / "64x64/apps",
+        flatpak_sys_icons / "256x256/apps",
         "/usr/share/icons/hicolor/scalable/apps",
-        "/usr/share/icons/hicolor/512x512/apps",
-        "/usr/share/icons/hicolor/256x256/apps",
         "/usr/share/icons/hicolor/128x128/apps",
         "/usr/share/icons/hicolor/64x64/apps",
+        "/usr/share/icons/hicolor/256x256/apps",
+        "/usr/share/icons/hicolor/512x512/apps",
         "/usr/share/icons/hicolor/48x48/apps",
         "/usr/share/icons/Adwaita/scalable/apps",
         "/usr/share/icons/Adwaita/scalable/places",
-        "/usr/share/icons/Adwaita/256x256/apps",
         "/usr/share/icons/Adwaita/128x128/apps",
+        "/usr/share/icons/Adwaita/256x256/apps",
         "/usr/share/pixmaps"
     };
     const std::vector<std::string> exts = {".svg", ".png", ""};

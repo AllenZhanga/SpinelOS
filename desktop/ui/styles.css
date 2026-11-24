@@ -244,22 +244,26 @@ html, body {
 .shortcut-icon {
   width: 56px;
   height: 56px;
-  border-radius: 14px;
+  border-radius: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.38));
 }
 
 .shortcut-icon img,
 .shortcut-icon svg {
-  width: 100%;
-  height: 100%;
+  width: 56px;
+  height: 56px;
   display: block;
 }
 
 .shortcut-icon img {
   object-fit: contain;
+}
+
+.shortcut-icon svg {
+  border-radius: 13px;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
 }
 
 .shortcut-icon.is-cover img {
@@ -407,6 +411,7 @@ html, body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: width 0.16s cubic-bezier(0.22, 1.15, 0.36, 1);
 }
 
 .dock-icon {
@@ -415,16 +420,21 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transform-origin: bottom center;
-  transition: transform 0.18s cubic-bezier(0.22, 1.15, 0.36, 1), filter 0.15s ease;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.35));
+  transition: width 0.16s cubic-bezier(0.22, 1.15, 0.36, 1),
+              height 0.16s cubic-bezier(0.22, 1.15, 0.36, 1),
+              transform 0.16s cubic-bezier(0.22, 1.15, 0.36, 1);
 }
 
 .dock-icon img,
 .dock-icon svg {
-  width: 48px;
-  height: 48px;
+  width: 100%;
+  height: 100%;
   display: block;
+}
+
+.dock-icon svg {
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.32);
 }
 
 .dock-icon img {
@@ -432,25 +442,33 @@ html, body {
 }
 
 .dock-item:hover {
+  width: 56px;
   z-index: 6;
 }
 
 .dock-item:hover .dock-icon {
-  transform: translateY(-8px) scale(1.22);
+  width: 58px;
+  height: 58px;
+  transform: translateY(-7px);
 }
 
 .dock-item:has(+ .dock-item:hover),
 .dock-item:hover + .dock-item {
+  width: 52px;
   z-index: 3;
 }
 
 .dock-item:has(+ .dock-item:hover) .dock-icon,
 .dock-item:hover + .dock-item .dock-icon {
-  transform: translateY(-3px) scale(1.08);
+  width: 52px;
+  height: 52px;
+  transform: translateY(-3px);
 }
 
 .dock-item:active .dock-icon {
-  transform: translateY(-4px) scale(1.1);
+  width: 52px;
+  height: 52px;
+  transform: translateY(-3px);
 }
 
 .dock-tooltip {

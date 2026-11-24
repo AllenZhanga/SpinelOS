@@ -213,10 +213,10 @@
             <stop offset="100%" stop-color="#000000" stop-opacity="0.14"/>
           </linearGradient>
         </defs>
-        <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#${uid}_bg)"/>
+        <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#${uid}_bg)"/>
         ${body}
-        <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#${uid}_sheen)"/>
-        <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="13.8" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.2"/>
+        <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#${uid}_sheen)"/>
+        <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14.2" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.2"/>
       </svg>
     `;
   }
