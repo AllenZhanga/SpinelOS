@@ -90,7 +90,6 @@ struct NativeShellState {
     GtkWidget *cc_gm_val = nullptr;
     GtkWidget *cc_mh_circle = nullptr;
     GtkWidget *cc_mh_val = nullptr;
-    GtkWidget *cc_fsr_btn = nullptr;
     GtkWidget *cc_bright_pct = nullptr;
     GtkWidget *cc_bright_scale = nullptr;
     GtkWidget *cc_vol_pct = nullptr;
@@ -1886,12 +1885,12 @@ GtkWidget *make_cc_circle_icon(BarGlyph kind, const char *circle_cls) {
     GtkWidget *wrap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(wrap, "spinel-cc-circle");
     if (circle_cls) gtk_widget_add_css_class(wrap, circle_cls);
-    gtk_widget_set_size_request(wrap, 32, 32);
+    gtk_widget_set_size_request(wrap, 28, 28);
     gtk_widget_set_halign(wrap, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(wrap, GTK_ALIGN_CENTER);
 
     GtkWidget *da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(da, 16, 16);
+    gtk_widget_set_size_request(da, 14, 14);
     gtk_widget_set_hexpand(da, TRUE);
     gtk_widget_set_vexpand(da, TRUE);
     gtk_widget_set_halign(da, GTK_ALIGN_CENTER);
@@ -2040,7 +2039,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelControlCenter");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 384, 448);
+    gtk_window_set_default_size(win, 344, -1);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-controlcenter");
@@ -2070,27 +2069,31 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     g_signal_connect(key, "key-pressed", G_CALLBACK(on_cc_key_pressed), ns);
     gtk_widget_add_controller(GTK_WIDGET(win), key);
 
-    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_widget_set_margin_top(root, 4);
-    gtk_widget_set_margin_bottom(root, 4);
-    gtk_widget_set_margin_start(root, 4);
-    gtk_widget_set_margin_end(root, 4);
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(root, "spinel-cc-panel");
 
-    // Top Row: Left Connectivity Stack + Right Hub Card
-    GtkWidget *top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    GtkWidget *stack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_hexpand(stack, TRUE);
-    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, nullptr, &ns->cc_net_val));
-    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, nullptr, nullptr));
-    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val));
+    // Top Bento Grid: Left grouped connectivity card + Right status & MangoHud column
+    GtkWidget *top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_set_homogeneous(GTK_BOX(top_row), TRUE);
 
-    GtkWidget *hub = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    GtkWidget *conn_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_add_css_class(conn_card, "spinel-cc-card");
+    gtk_widget_add_css_class(conn_card, "spinel-cc-group");
+    gtk_widget_set_hexpand(conn_card, TRUE);
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, nullptr, &ns->cc_net_val));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, nullptr, nullptr));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val));
+
+    GtkWidget *right_col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_hexpand(right_col, TRUE);
+
+    GtkWidget *hub = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_add_css_class(hub, "spinel-cc-card");
-    gtk_widget_set_hexpand(hub, TRUE);
+    gtk_widget_set_vexpand(hub, TRUE);
 
     GtkWidget *hub_top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *hub_gem = gtk_drawing_area_new();
-    gtk_widget_set_size_request(hub_gem, 26, 26);
+    gtk_widget_set_size_request(hub_gem, 22, 22);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(hub_gem), draw_gem_glyph, nullptr, nullptr);
     ns->cc_gpu_badge = gtk_label_new("GPU");
     gtk_widget_add_css_class(ns->cc_gpu_badge, "spinel-cc-badge");
@@ -2101,82 +2104,42 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(hub_top), hub_gem);
     gtk_box_append(GTK_BOX(hub_top), ns->cc_gpu_badge);
 
-    GtkWidget *hub_title = gtk_label_new("SpinelOS 控制");
+    GtkWidget *hub_title = gtk_label_new("SpinelOS");
     gtk_widget_add_css_class(hub_title, "spinel-cc-title");
     gtk_widget_set_halign(hub_title, GTK_ALIGN_START);
     ns->cc_mem_val = gtk_label_new("内存 --");
     gtk_widget_add_css_class(ns->cc_mem_val, "spinel-cc-sub");
     gtk_widget_set_halign(ns->cc_mem_val, GTK_ALIGN_START);
-    gtk_widget_set_vexpand(ns->cc_mem_val, TRUE);
-
-    GtkWidget *hub_btns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_box_set_homogeneous(GTK_BOX(hub_btns), TRUE);
-    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "游戏", "spinel-cc-chip-btn", "games:open"));
-    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "商店", "spinel-cc-chip-btn", "store:open"));
-    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "大屏", "spinel-cc-chip-btn", "launch:steam-gamepadui"));
 
     gtk_box_append(GTK_BOX(hub), hub_top);
     gtk_box_append(GTK_BOX(hub), hub_title);
     gtk_box_append(GTK_BOX(hub), ns->cc_mem_val);
-    gtk_box_append(GTK_BOX(hub), hub_btns);
 
-    gtk_box_append(GTK_BOX(top_row), stack);
-    gtk_box_append(GTK_BOX(top_row), hub);
+    GtkWidget *mh_card = make_cc_pill(state, BarGlyph::Hud, "active-indigo", "MangoHud", "精简监控", "perf:cycle-mangohud", false, &ns->cc_mh_circle, &ns->cc_mh_val);
+    gtk_widget_add_css_class(mh_card, "spinel-cc-card-btn");
 
-    // Mid Row: MangoHud + FSR + Appearance
-    GtkWidget *mid_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    GtkWidget *mh_pill = make_cc_pill(state, BarGlyph::Hud, "active-indigo", "MangoHud", "精简监控", "perf:cycle-mangohud", false, &ns->cc_mh_circle, &ns->cc_mh_val);
-    gtk_widget_set_hexpand(mh_pill, TRUE);
-    ns->cc_fsr_btn = make_cmd_button(state, "FSR", "spinel-cc-orb", "perf:toggle-fsr");
-    gtk_widget_set_size_request(ns->cc_fsr_btn, 52, 52);
+    gtk_box_append(GTK_BOX(right_col), hub);
+    gtk_box_append(GTK_BOX(right_col), mh_card);
 
-    GtkWidget *ap_btn = make_cmd_button(state, nullptr, "spinel-cc-orb", "settings:open:appearance");
-    gtk_widget_set_size_request(ap_btn, 52, 52);
-    gtk_widget_set_tooltip_text(ap_btn, "外观与壁纸");
-    GtkWidget *ap_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(ap_da, 18, 18);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ap_da), draw_glyph_cb,
-                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Appearance)), nullptr);
-    gtk_button_set_child(GTK_BUTTON(ap_btn), ap_da);
-
-    gtk_box_append(GTK_BOX(mid_row), mh_pill);
-    gtk_box_append(GTK_BOX(mid_row), ns->cc_fsr_btn);
-    gtk_box_append(GTK_BOX(mid_row), ap_btn);
-
-    // Util Row: Settings + Screenshot + Lock + Reboot + Power
-    auto make_orb = [&](BarGlyph glyph, const char *tip, const char *cmd, const char *extra_cls = nullptr) -> GtkWidget * {
-        GtkWidget *orb = make_cmd_button(state, nullptr, "spinel-cc-orb", cmd);
-        if (extra_cls) gtk_widget_add_css_class(orb, extra_cls);
-        gtk_widget_set_size_request(orb, 44, 48);
-        gtk_widget_set_tooltip_text(orb, tip);
-        GtkWidget *da = gtk_drawing_area_new();
-        gtk_widget_set_size_request(da, 17, 17);
-        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_glyph_cb,
-                                       reinterpret_cast<gpointer>(static_cast<intptr_t>(glyph)), nullptr);
-        gtk_button_set_child(GTK_BUTTON(orb), da);
-        return orb;
-    };
-
-    GtkWidget *util_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *set_pill = make_cmd_button(state, "声音与设置", "spinel-cc-pill", "settings:open:audio");
-    gtk_widget_set_hexpand(set_pill, TRUE);
-    gtk_widget_set_size_request(set_pill, -1, 48);
-
-    gtk_box_append(GTK_BOX(util_row), set_pill);
-    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Screenshot, "区域截图", "system:screenshot:area"));
-    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Lock, "锁定屏幕", "system:lock"));
-    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Reboot, "重启系统", "power:reboot"));
-    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Power, "关机", "power:shutdown", "danger-orb"));
+    gtk_box_append(GTK_BOX(top_row), conn_card);
+    gtk_box_append(GTK_BOX(top_row), right_col);
 
     // Sliders
-    GtkWidget *br_card = make_cc_slider_card(ns, "显示器", 15.0, 85.0, false, &ns->cc_bright_pct, &ns->cc_bright_scale);
-    GtkWidget *vo_card = make_cc_slider_card(ns, "声音", 0.0, 75.0, true, &ns->cc_vol_pct, &ns->cc_vol_scale);
+    GtkWidget *br_card = make_cc_slider_card(ns, "显示器亮度", 15.0, 85.0, false, &ns->cc_bright_pct, &ns->cc_bright_scale);
+    GtkWidget *vo_card = make_cc_slider_card(ns, "声音输出", 0.0, 75.0, true, &ns->cc_vol_pct, &ns->cc_vol_scale);
+
+    // Bottom Clean Quick Nav Row (no ugly circle orbs)
+    GtkWidget *foot_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_set_homogeneous(GTK_BOX(foot_row), TRUE);
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "游戏中心", "spinel-cc-chip-btn", "games:open"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "应用商店", "spinel-cc-chip-btn", "store:open"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "主机大屏", "spinel-cc-chip-btn", "launch:steam-gamepadui"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "系统设置", "spinel-cc-chip-btn", "settings:open:audio"));
 
     gtk_box_append(GTK_BOX(root), top_row);
-    gtk_box_append(GTK_BOX(root), mid_row);
-    gtk_box_append(GTK_BOX(root), util_row);
     gtk_box_append(GTK_BOX(root), br_card);
     gtk_box_append(GTK_BOX(root), vo_card);
+    gtk_box_append(GTK_BOX(root), foot_row);
 
     gtk_window_set_child(win, root);
     ns->cc_win = win;
@@ -2190,8 +2153,8 @@ void apply_native_css(NativeShellState *ns) {
     const char *sc_hover = t.is_light ? "rgba(255, 255, 255, 0.45)" : "rgba(255, 255, 255, 0.12)";
     const char *sc_lbl_shadow = t.is_light ? "0 1px 2px rgba(255, 255, 255, 0.75)" : "0 1px 3px rgba(0, 0, 0, 0.85)";
     const char *cc_sub_fg = t.is_light ? "rgba(15, 23, 42, 0.72)" : "rgba(255, 255, 255, 0.78)";
-    const char *cc_chip_bg = t.is_light ? "rgba(15, 23, 42, 0.08)" : "rgba(255, 255, 255, 0.16)";
-    const char *cc_chip_hover = t.is_light ? "rgba(15, 23, 42, 0.15)" : "rgba(255, 255, 255, 0.28)";
+    const char *cc_chip_bg = t.is_light ? "rgba(15, 23, 42, 0.05)" : "rgba(255, 255, 255, 0.08)";
+    const char *cc_chip_hover = t.is_light ? "rgba(15, 23, 42, 0.10)" : "rgba(255, 255, 255, 0.14)";
     const char *trough_bg = t.is_light ? "rgba(15, 23, 42, 0.14)" : "rgba(255, 255, 255, 0.22)";
     const char *fill_bg = t.is_light ? t.cc_accent.c_str() : "rgba(255, 255, 255, 0.90)";
 
@@ -2286,25 +2249,35 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-clip-idx { font-size: 11px; font-weight: 700; min-width: 18px; padding: 1px 5px; border-radius: 5px; background-color: " + std::string(cc_chip_bg) + "; color: " + t.bar_fg + "; }\n"
         ".spinel-clip-txt { font-size: 12px; color: " + t.bar_fg + "; }\n"
         ".spinel-clip-meta { font-size: 11px; color: " + std::string(cc_sub_fg) + "; }\n"
-        ".spinel-cc-pill, .spinel-cc-card, .spinel-cc-orb {\n"
-        "  background-image: linear-gradient(155deg, " + t.cc_top + ", " + t.cc_bot + ");\n"
+        ".spinel-cc-panel {\n"
+        "  background-color: " + t.popover_bg + ";\n"
         "  border: 1px solid " + t.cc_border + ";\n"
-        "  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 10px 24px rgba(0, 0, 0, 0.24);\n"
+        "  border-radius: 18px;\n"
+        "  padding: 12px;\n"
+        "  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
-        ".spinel-cc-pill { border-radius: 999px; padding: 7px 11px 7px 8px; }\n"
-        ".spinel-cc-pill:hover, .spinel-cc-orb:hover { filter: brightness(1.06); }\n"
-        ".spinel-cc-card { border-radius: 20px; padding: 12px 13px; }\n"
-        ".spinel-cc-orb { border-radius: 999px; padding: 0; font-size: 11px; font-weight: 800; }\n"
-        ".spinel-cc-orb.active {\n"
+        ".spinel-cc-card, .spinel-cc-card-btn {\n"
+        "  background-color: " + std::string(cc_chip_bg) + ";\n"
         "  background-image: none;\n"
-        "  background-color: " + t.cc_accent + ";\n"
-        "  color: #ffffff;\n"
+        "  border: 1px solid " + t.bar_border + ";\n"
+        "  box-shadow: none;\n"
+        "  border-radius: 12px;\n"
+        "  padding: 10px 11px;\n"
+        "  color: " + t.bar_fg + ";\n"
         "}\n"
-        ".spinel-cc-orb.danger-orb:hover {\n"
-        "  background-image: linear-gradient(145deg, rgba(244, 63, 94, 0.65), rgba(190, 18, 60, 0.70));\n"
-        "  color: #ffffff;\n"
+        ".spinel-cc-group { padding: 5px; }\n"
+        ".spinel-cc-pill {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  border-radius: 8px;\n"
+        "  padding: 5px 6px;\n"
+        "  color: " + t.bar_fg + ";\n"
         "}\n"
+        ".spinel-cc-pill:hover, .spinel-cc-card-btn:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-cc-card-btn { padding: 8px 10px; }\n"
         ".spinel-cc-circle {\n"
         "  border-radius: 999px;\n"
         "  background-color: " + std::string(cc_chip_bg) + ";\n"
@@ -2314,9 +2287,9 @@ void apply_native_css(NativeShellState *ns) {
         "  background-color: " + t.cc_accent + ";\n"
         "  color: #ffffff;\n"
         "}\n"
-        ".spinel-cc-title { font-size: 12.5px; font-weight: 600; color: " + t.bar_fg + "; }\n"
+        ".spinel-cc-title { font-size: 12px; font-weight: 600; color: " + t.bar_fg + "; }\n"
         ".spinel-cc-sub { font-size: 10.5px; color: " + std::string(cc_sub_fg) + "; }\n"
-        ".spinel-cc-chev { font-size: 15px; color: " + std::string(cc_sub_fg) + "; }\n"
+        ".spinel-cc-chev { font-size: 14px; color: " + std::string(cc_sub_fg) + "; }\n"
         ".spinel-cc-badge {\n"
         "  font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;\n"
         "  background-color: " + std::string(cc_chip_bg) + "; color: " + t.bar_fg + ";\n"
@@ -2325,13 +2298,14 @@ void apply_native_css(NativeShellState *ns) {
         "  background-color: " + std::string(cc_chip_bg) + ";\n"
         "  background-image: none;\n"
         "  border: 1px solid " + t.bar_border + ";\n"
-        "  border-radius: 999px; color: " + t.bar_fg + ";\n"
-        "  font-size: 11px; font-weight: 600; padding: 4px 2px; min-height: 24px;\n"
+        "  box-shadow: none;\n"
+        "  border-radius: 10px; color: " + t.bar_fg + ";\n"
+        "  font-size: 11.5px; font-weight: 600; padding: 6px 4px; min-height: 28px;\n"
         "}\n"
         ".spinel-cc-chip-btn:hover { background-color: " + std::string(cc_chip_hover) + "; }\n"
-        ".spinel-cc-scale trough { min-height: 14px; border-radius: 999px; background-color: " + std::string(trough_bg) + "; }\n"
-        ".spinel-cc-scale highlight { min-height: 14px; border-radius: 999px; background-color: " + std::string(fill_bg) + "; }\n"
-        ".spinel-cc-scale slider { min-width: 16px; min-height: 16px; border-radius: 999px; background-color: #ffffff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }\n";
+        ".spinel-cc-scale trough { min-height: 12px; border-radius: 999px; background-color: " + std::string(trough_bg) + "; }\n"
+        ".spinel-cc-scale highlight { min-height: 12px; border-radius: 999px; background-color: " + std::string(fill_bg) + "; }\n"
+        ".spinel-cc-scale slider { min-width: 15px; min-height: 15px; border-radius: 999px; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.30); }\n";
 
     GdkDisplay *display = gdk_display_get_default();
     if (!display) return;
@@ -2500,11 +2474,6 @@ void native_shell_sync_perf(AppState *state) {
     if (ns->cc_mh_val) {
         const char *lbl = cfg.mangohud == "full" ? "详细监控" : (cfg.mangohud == "off" ? "已关闭" : "精简监控");
         gtk_label_set_text(GTK_LABEL(ns->cc_mh_val), lbl);
-    }
-
-    if (ns->cc_fsr_btn) {
-        if (cfg.fsr) gtk_widget_add_css_class(ns->cc_fsr_btn, "active");
-        else gtk_widget_remove_css_class(ns->cc_fsr_btn, "active");
     }
 }
 
