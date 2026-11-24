@@ -60,7 +60,6 @@ fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
 
 if [[ "${MODE}" == "full" ]]; then
-  mkdir -p /tmp/spinel-sys-stage
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
   rsync -avz -e "${SSH_CMD}" \
@@ -114,7 +113,7 @@ elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; t
 fi
 
 if [ "$MODE" = "full" ]; then
-  labwc --reconfigure 2>/dev/null || true
+  pkill -HUP -x labwc 2>/dev/null || labwc --reconfigure 2>/dev/null || true
 fi
 
 pkill -x spinel-shell 2>/dev/null || true
