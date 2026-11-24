@@ -36,6 +36,14 @@ add_custom_command(
     COMMENT "Generating wlr-foreign-toplevel-management protocol code"
 )
 
+add_custom_target(spinel_wayland_protos
+    DEPENDS "${TOPLEVEL_HDR}" "${TOPLEVEL_SRC}"
+)
+
+set_source_files_properties(src/window_tracker.cpp PROPERTIES
+    OBJECT_DEPENDS "${TOPLEVEL_HDR}"
+)
+
 add_executable(spinel-shell
     src/main.cpp
     src/common.cpp
@@ -47,6 +55,8 @@ add_executable(spinel-shell
     "${TOPLEVEL_HDR}"
     "${TOPLEVEL_SRC}"
 )
+
+add_dependencies(spinel-shell spinel_wayland_protos)
 
 target_include_directories(spinel-shell PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"
