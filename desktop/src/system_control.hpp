@@ -27,6 +27,18 @@ struct MediaSnapshot {
     int brightness = -1;
 };
 
+struct ProxyConfig {
+    bool enabled = false;
+    std::string http_proxy;
+    std::string socks_proxy;
+    std::string no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8";
+};
+
+ProxyConfig load_proxy_config();
+void sync_process_proxy_env();
+void push_proxy_config(AppState *state);
+void update_proxy_config(AppState *state, const std::string &payload);
+
 PerfConfig load_perf_config();
 void push_perf_config(AppState *state);
 void update_perf_config(AppState *state, const std::string &payload);

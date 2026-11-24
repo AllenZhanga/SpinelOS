@@ -300,6 +300,40 @@
           <div class="disk-empty">正在读取网络列表...</div>
         </div>
       </div>
+
+      <div class="inst-section" style="margin-top: 8px;">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div class="bt-head-left">
+            <h3>系统网络代理 (Steam / 应用商店 / 终端全局生效)</h3>
+            <span id="proxy-status-chip" class="status-chip">已关闭</span>
+          </div>
+          <div class="footer-actions">
+            <button class="btn small" id="btn-proxy-gw">填入网关:7890</button>
+          </div>
+        </div>
+        <div class="part-section">
+          <p class="muted-hint" id="proxy-gw-hint" style="margin-bottom: 10px;">适用于 NAT 模式连接 Windows/Mac 宿主机代理软件（如 Clash / v2rayN，需开启“允许局域网连接”）。</p>
+          <div class="form-grid">
+            <label class="field">
+              <span>HTTP / HTTPS 代理地址</span>
+              <input type="text" id="proxy-http-input" placeholder="例如 http://192.168.0.1:7890" />
+            </label>
+            <label class="field">
+              <span>SOCKS5 代理地址（可选）</span>
+              <input type="text" id="proxy-socks-input" placeholder="例如 socks5://192.168.0.1:7891" />
+            </label>
+            <label class="field" style="grid-column: 1 / -1;">
+              <span>绕过代理地址 (NO_PROXY)</span>
+              <input type="text" id="proxy-noproxy-input" value="localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8" />
+            </label>
+          </div>
+          <div class="footer-actions" style="margin-top: 12px;">
+            <button class="btn small primary" id="btn-proxy-save">保存并启用代理</button>
+            <button class="btn small danger" id="btn-proxy-clear">关闭代理</button>
+          </div>
+          <div id="proxy-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+        </div>
+      </div>
     </div>
 
     <div id="tab-bt" class="win-body hidden">

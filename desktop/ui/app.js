@@ -751,15 +751,16 @@
       const btn = document.createElement("button");
       btn.className = "launchpad-item";
       btn.setAttribute("data-cmd", `app:launch:${app.id}`);
-      if (app.icon_uri) {
+      const kind = matchAppKind(`${app.id} ${app.name}`);
+      if (app.icon_uri && kind !== "files" && kind !== "terminal") {
         const img = document.createElement("img");
         img.src = app.icon_uri;
         img.alt = app.name;
-        img.onerror = () => { img.outerHTML = makeSvgIcon(matchAppKind(app.id)); };
+        img.onerror = () => { img.outerHTML = makeSvgIcon(kind); };
         btn.appendChild(img);
       } else {
         const wrap = document.createElement("div");
-        wrap.innerHTML = makeSvgIcon(matchAppKind(app.id));
+        wrap.innerHTML = makeSvgIcon(kind);
         btn.appendChild(wrap.firstElementChild);
       }
       const label = document.createElement("span");
@@ -835,6 +836,56 @@
   });
 
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
+
+  let detectedGateway = "";
+
+  window.__spinelProxyConfig = (data) => {
+    if (!data) return;
+    detectedGateway = data.gateway || "";
+    const chip = document.getElementById("proxy-status-chip");
+    if (chip) chip.textContent = data.enabled ? "已启用" : "已关闭";
+    const hint = document.getElementById("proxy-gw-hint");
+    if (hint) {
+      hint.textContent = detectedGateway
+        ? `当前默认网关: ${detectedGateway}（NAT 模式下一般即为宿主机代理可达网关，需开启宿主机的“允许局域网连接”）。`
+        : "适用于 NAT 模式连接 Windows/Mac 宿主机代理软件（如 Clash / v2rayN，需开启“允许局域网连接”）。";
+    }
+    const httpEl = document.getElementById("proxy-http-input");
+    const socksEl = document.getElementById("proxy-socks-input");
+    const noEl = document.getElementById("proxy-noproxy-input");
+    if (httpEl && typeof data.http_proxy === "string") httpEl.value = data.http_proxy;
+    if (socksEl && typeof data.socks_proxy === "string") socksEl.value = data.socks_proxy;
+    if (noEl && data.no_proxy) noEl.value = data.no_proxy;
+  };
+
+  window.__spinelProxyAction = (ok, msg) => showFeedback("proxy-feedback", msg || (ok ? "代理设置已保存" : "保存失败"), !ok);
+
+  document.getElementById("btn-proxy-gw")?.addEventListener("click", () => {
+    const gw = detectedGateway || "192.168.0.1";
+    const httpEl = document.getElementById("proxy-http-input");
+    if (httpEl) httpEl.value = `http://${gw}:7890`;
+  });
+
+  document.getElementById("btn-proxy-save")?.addEventListener("click", () => {
+    const httpVal = (document.getElementById("proxy-http-input")?.value || "").trim();
+    const socksVal = (document.getElementById("proxy-socks-input")?.value || "").trim();
+    const noVal = (document.getElementById("proxy-noproxy-input")?.value || "").trim();
+    if (!httpVal && !socksVal) {
+      showFeedback("proxy-feedback", "请至少填写 HTTP 或 SOCKS5 代理地址。", true);
+      return;
+    }
+    sendCommand([
+      "settings:proxy-save",
+      "enabled=true",
+      `http_proxy=${httpVal}`,
+      `socks_proxy=${socksVal}`,
+      `no_proxy=${noVal}`
+    ].join("\n"));
+  });
+
+  document.getElementById("btn-proxy-clear")?.addEventListener("click", () => {
+    sendCommand("settings:proxy-clear");
+  });
 
   window.__spinelWifiState = (data) => {
     const rescanBtn = document.getElementById("btn-wifi-rescan");

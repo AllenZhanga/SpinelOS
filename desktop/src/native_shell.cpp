@@ -283,6 +283,13 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
         set_rgb_hex(bg, 0.0, 0xF43F5E);
         set_rgb_hex(bg, 0.55, 0xA855F7);
         set_rgb_hex(bg, 1.0, 0x6366F1);
+    } else if (kind == "files") {
+        set_rgb_hex(bg, 0.0, 0x7DD3FC);
+        set_rgb_hex(bg, 0.55, 0x38BDF8);
+        set_rgb_hex(bg, 1.0, 0x0284C7);
+    } else if (kind == "terminal") {
+        set_rgb_hex(bg, 0.0, 0xE2E8F0);
+        set_rgb_hex(bg, 1.0, 0x94A3B8);
     } else if (kind == "settings") {
         set_rgb_hex(bg, 0.0, 0xE5E7EB);
         set_rgb_hex(bg, 1.0, 0x9CA3AF);
@@ -376,6 +383,53 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
         cairo_set_source_rgba(cr, 0.20, 0.25, 0.33, 1.0);
         cairo_fill(cr);
         cairo_restore(cr);
+    } else if (kind == "files") {
+        // macOS Finder/Files inspired two-tone rounded folder card
+        cairo_rounded_rect(cr, 11, 14, 22, 10, 4.5);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.88);
+        cairo_fill(cr);
+
+        cairo_pattern_t *folder = cairo_pattern_create_linear(11, 20, 53, 50);
+        set_rgb_hex(folder, 0.0, 0xEFF6FF, 0.96);
+        set_rgb_hex(folder, 1.0, 0xDBEAFE, 0.94);
+        cairo_rounded_rect(cr, 11, 20, 42, 30, 7.5);
+        cairo_set_source(cr, folder);
+        cairo_fill_preserve(cr);
+        cairo_pattern_destroy(folder);
+
+        cairo_set_source_rgba(cr, 0.06, 0.35, 0.72, 0.22);
+        cairo_set_line_width(cr, 1.4);
+        cairo_stroke(cr);
+
+        cairo_set_source_rgba(cr, 0.01, 0.52, 0.78, 0.85);
+        cairo_set_line_width(cr, 2.6);
+        cairo_move_to(cr, 21, 31);
+        cairo_line_to(cr, 43, 31);
+        cairo_move_to(cr, 21, 39);
+        cairo_line_to(cr, 35, 39);
+        cairo_stroke(cr);
+    } else if (kind == "terminal") {
+        // macOS Terminal sleek dark screen inside metallic squircle frame
+        cairo_pattern_t *scr = cairo_pattern_create_linear(6, 7, 58, 57);
+        set_rgb_hex(scr, 0.0, 0x1E293B);
+        set_rgb_hex(scr, 1.0, 0x090D16);
+        cairo_rounded_rect(cr, 6.5, 7.0, 51, 50, 11);
+        cairo_set_source(cr, scr);
+        cairo_fill(cr);
+        cairo_pattern_destroy(scr);
+
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+        cairo_set_line_width(cr, 3.8);
+        cairo_move_to(cr, 16, 23);
+        cairo_line_to(cr, 25, 30);
+        cairo_line_to(cr, 16, 37);
+        cairo_stroke(cr);
+
+        cairo_set_source_rgba(cr, 0.22, 0.74, 0.97, 1.0);
+        cairo_set_line_width(cr, 3.8);
+        cairo_move_to(cr, 29, 37);
+        cairo_line_to(cr, 43, 37);
+        cairo_stroke(cr);
     } else if (kind == "installer") {
         cairo_rounded_rect(cr, 15, 16, 34, 32, 8);
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
@@ -748,8 +802,40 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
     GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "游戏与启动中心", "games:open");
     ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
-    GtkWidget *reboot_btn = make_glyph_icon_btn(state, BarGlyph::Reboot, "重启系统", "power:reboot");
-    GtkWidget *power_btn = make_glyph_icon_btn(state, BarGlyph::Power, "关机", "power:shutdown", "danger-hover");
+
+    GtkWidget *power_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(power_btn), FALSE);
+    gtk_widget_add_css_class(power_btn, "spinel-bar-menubtn");
+    gtk_widget_add_css_class(power_btn, "danger-hover");
+    gtk_widget_set_tooltip_text(power_btn, "电源菜单（重启 / 关机）");
+    GtkWidget *power_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(power_da, 15, 15);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(power_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Power)), nullptr);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(power_btn), power_da);
+
+    GtkWidget *power_pop = gtk_popover_new();
+    gtk_widget_add_css_class(power_pop, "spinel-ctx-popover");
+    gtk_popover_set_has_arrow(GTK_POPOVER(power_pop), FALSE);
+    GtkWidget *pbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    auto add_power_entry = [&](const char *lbl, const char *cmd) {
+        GtkWidget *b = gtk_button_new_with_label(lbl);
+        gtk_widget_add_css_class(b, "spinel-ctx-item");
+        GtkWidget *c = gtk_button_get_child(GTK_BUTTON(b));
+        if (GTK_IS_LABEL(c)) gtk_widget_set_halign(c, GTK_ALIGN_START);
+        g_object_set_data_full(G_OBJECT(b), "spinel-cmd", g_strdup(cmd), g_free);
+        g_object_set_data(G_OBJECT(b), "spinel-pop", power_pop);
+        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer u) {
+            GtkWidget *pop = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "spinel-pop"));
+            if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
+            on_cmd_button_clicked(btn, u);
+        }), state);
+        gtk_box_append(GTK_BOX(pbox), b);
+    };
+    add_power_entry("重新启动...", "power:reboot");
+    add_power_entry("关机...", "power:shutdown");
+    gtk_popover_set_child(GTK_POPOVER(power_pop), pbox);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(power_btn), power_pop);
 
     ns->bar_clock_lbl = gtk_label_new("--:--");
     gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
@@ -758,7 +844,6 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), search_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
-    gtk_box_append(GTK_BOX(right), reboot_btn);
     gtk_box_append(GTK_BOX(right), power_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_clock_lbl);
 
@@ -844,8 +929,8 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
         {"应用商店", "store:open", "store", ""},
         {"Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"})},
         {"主机大屏", "launch:steam-gamepadui", "gamepad", ""},
-        {"文件管理", "launch:files", "files", find_app_icon_path(ns->desktop_apps, {"thunar", "org.xfce.thunar"})},
-        {"终端", "launch:terminal", "terminal", find_app_icon_path(ns->desktop_apps, {"foot"})},
+        {"文件管理", "launch:files", "files", ""},
+        {"终端", "launch:terminal", "terminal", ""},
         {"系统设置", "settings:open:display", "settings", ""}
     };
     if (ns->telemetry.is_live) {
@@ -1293,8 +1378,8 @@ void rebuild_dock_items(NativeShellState *ns, const std::vector<TrackedWindowInf
         {"应用商店", "store:open", "store", {}, {"spinelos 应用商店"}},
         {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
         {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
-        {"Thunar 文件管理", "launch:files", "files", {"thunar", "org.xfce.thunar"}, {"thunar"}},
-        {"Foot 终端", "launch:terminal", "terminal", {"foot"}, {"foot"}},
+        {"文件管理", "launch:files", "files", {}, {"thunar"}},
+        {"终端", "launch:terminal", "terminal", {}, {"foot"}},
         {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}}
     };
     if (ns->telemetry.is_live) {
@@ -1697,7 +1782,7 @@ void apply_native_css(NativeShellState *ns) {
         "  font-size: 12.5px;\n"
         "  padding: 0 8px 0 4px;\n"
         "}\n"
-        ".spinel-bar-btn, .spinel-bar-icon-btn {\n"
+        ".spinel-bar-btn, .spinel-bar-icon-btn, .spinel-bar-menubtn > button {\n"
         "  background: transparent;\n"
         "  background-image: none;\n"
         "  border: none;\n"
@@ -1710,10 +1795,10 @@ void apply_native_css(NativeShellState *ns) {
         "  min-width: 20px;\n"
         "  border-radius: 5px;\n"
         "}\n"
-        ".spinel-bar-icon-btn { padding: 2px 6px; }\n"
-        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-bar-icon-btn, .spinel-bar-menubtn > button { padding: 2px 6px; }\n"
+        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover, .spinel-bar-menubtn > button:hover { background-color: " + std::string(hover_bg) + "; }\n"
         ".spinel-bar-icon-btn.cc-open { background-color: " + std::string(open_bg) + "; }\n"
-        ".spinel-bar-icon-btn.danger-hover:hover { background-color: rgba(244, 63, 94, 0.34); }\n"
+        ".spinel-bar-icon-btn.danger-hover:hover, .spinel-bar-menubtn.danger-hover > button:hover { background-color: rgba(244, 63, 94, 0.34); }\n"
         ".spinel-bar-mem, .spinel-bar-clock {\n"
         "  color: " + t.bar_fg + ";\n"
         "  font-size: 12px;\n"

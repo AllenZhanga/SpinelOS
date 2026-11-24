@@ -1,6 +1,7 @@
 #include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "system_control.hpp"
 
 #include <sys/wait.h>
 #include <unistd.h>
@@ -341,8 +342,19 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 return;
             }
             std::vector<std::string> cmd = nopass
-                ? std::vector<std::string>{"sudo", "-n", "pacman"}
-                : std::vector<std::string>{"sudo", "-S", "-p", "", "pacman"};
+                ? std::vector<std::string>{"sudo", "-n"}
+                : std::vector<std::string>{"sudo", "-S", "-p", ""};
+            ProxyConfig pc = load_proxy_config();
+            if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
+                std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
+                std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
+                cmd.push_back("env");
+                cmd.push_back("http_proxy=" + hv);
+                cmd.push_back("https_proxy=" + hv);
+                cmd.push_back("all_proxy=" + av);
+                cmd.push_back("no_proxy=" + pc.no_proxy);
+            }
+            cmd.push_back("pacman");
 
             if (action == "install") {
                 emit_store_line(state, "==> 正在同步数据库并安装 " + pkg + " ...");

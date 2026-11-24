@@ -143,6 +143,32 @@ bool is_valid_scale_str(const std::string &s) {
     return true;
 }
 
+bool is_valid_proxy_url(const std::string &s) {
+    if (s.empty()) return true;
+    if (s.size() > 256) return false;
+    bool ok_scheme = s.rfind("http://", 0) == 0 || s.rfind("https://", 0) == 0 ||
+                     s.rfind("socks5://", 0) == 0 || s.rfind("socks5h://", 0) == 0 ||
+                     s.rfind("socks4://", 0) == 0;
+    if (!ok_scheme) return false;
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (c <= 0x20 || c == '"' || c == '\'' || c == '\\' || c == ';') return false;
+    }
+    return true;
+}
+
+std::string sanitize_no_proxy(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || c == ',' || c == '.' || c == ':' || c == '/' || c == '-' || c == '_') {
+            out += ch;
+        }
+    }
+    return out;
+}
+
 std::string detect_gpu_summary() {
     std::string gpu = run_cmd_capture(
         "lspci -mm 2>/dev/null | awk -F'\"' '/VGA|3D|Display/ {print $6; exit}'"
@@ -218,6 +244,117 @@ PerfConfig load_perf_config() {
         }
     }
     return cfg;
+}
+
+ProxyConfig load_proxy_config() {
+    ProxyConfig cfg;
+    std::ifstream ifs(config_dir() / "proxy.conf");
+    if (!ifs.is_open()) return cfg;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "enabled") cfg.enabled = (v == "true" || v == "1");
+        else if (k == "http_proxy" && is_valid_proxy_url(v)) cfg.http_proxy = v;
+        else if (k == "socks_proxy" && is_valid_proxy_url(v)) cfg.socks_proxy = v;
+        else if (k == "no_proxy") {
+            std::string clean = sanitize_no_proxy(v);
+            if (!clean.empty()) cfg.no_proxy = clean;
+        }
+    }
+    return cfg;
+}
+
+void sync_process_proxy_env() {
+    ProxyConfig cfg = load_proxy_config();
+    const char *vars[] = {
+        "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+        "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"
+    };
+    if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) {
+        for (const char *v : vars) unsetenv(v);
+        return;
+    }
+    std::string http_val = !cfg.http_proxy.empty() ? cfg.http_proxy : cfg.socks_proxy;
+    std::string all_val = !cfg.socks_proxy.empty() ? cfg.socks_proxy : cfg.http_proxy;
+    setenv("http_proxy", http_val.c_str(), 1);
+    setenv("https_proxy", http_val.c_str(), 1);
+    setenv("HTTP_PROXY", http_val.c_str(), 1);
+    setenv("HTTPS_PROXY", http_val.c_str(), 1);
+    setenv("all_proxy", all_val.c_str(), 1);
+    setenv("ALL_PROXY", all_val.c_str(), 1);
+    setenv("no_proxy", cfg.no_proxy.c_str(), 1);
+    setenv("NO_PROXY", cfg.no_proxy.c_str(), 1);
+}
+
+void push_proxy_config(AppState *state) {
+    if (!state || !state->settings_view) return;
+    ProxyConfig cfg = load_proxy_config();
+    std::string gw = run_cmd_capture("ip route 2>/dev/null | awk '/default/ {print $3; exit}'");
+    std::ostringstream js;
+    js << "window.__spinelProxyConfig && window.__spinelProxyConfig({"
+       << "\"enabled\":" << (cfg.enabled ? "true" : "false") << ","
+       << "\"http_proxy\":\"" << json_escape(cfg.http_proxy) << "\","
+       << "\"socks_proxy\":\"" << json_escape(cfg.socks_proxy) << "\","
+       << "\"no_proxy\":\"" << json_escape(cfg.no_proxy) << "\","
+       << "\"gateway\":\"" << json_escape(gw) << "\""
+       << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void update_proxy_config(AppState *state, const std::string &payload) {
+    ProxyConfig cfg = load_proxy_config();
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "enabled") cfg.enabled = (v == "true" || v == "1");
+        else if (k == "http_proxy") {
+            if (!is_valid_proxy_url(v)) {
+                eval_js(state ? state->settings_view : nullptr,
+                        "window.__spinelProxyAction && window.__spinelProxyAction(false, \"HTTP 代理地址格式无效（需以 http://、https:// 或 socks5:// 开头）\");");
+                return;
+            }
+            cfg.http_proxy = v;
+        } else if (k == "socks_proxy") {
+            if (!is_valid_proxy_url(v)) {
+                eval_js(state ? state->settings_view : nullptr,
+                        "window.__spinelProxyAction && window.__spinelProxyAction(false, \"SOCKS 代理地址格式无效（需以 socks5:// 等开头）\");");
+                return;
+            }
+            cfg.socks_proxy = v;
+        } else if (k == "no_proxy") {
+            std::string clean = sanitize_no_proxy(v);
+            if (!clean.empty()) cfg.no_proxy = clean;
+        }
+    }
+    if (cfg.http_proxy.empty() && cfg.socks_proxy.empty()) {
+        cfg.enabled = false;
+    }
+
+    std::error_code ec;
+    fs::create_directories(config_dir(), ec);
+    std::ofstream ofs(config_dir() / "proxy.conf");
+    if (ofs.is_open()) {
+        ofs << "enabled=" << (cfg.enabled ? "true" : "false") << "\n"
+            << "http_proxy=" << cfg.http_proxy << "\n"
+            << "socks_proxy=" << cfg.socks_proxy << "\n"
+            << "no_proxy=" << cfg.no_proxy << "\n";
+    }
+    sync_process_proxy_env();
+    append_app_log(cfg.enabled
+        ? ("[Proxy] 已启用系统代理: http=" + cfg.http_proxy + " socks=" + cfg.socks_proxy)
+        : "[Proxy] 已关闭系统代理（直连模式）");
+    if (state) {
+        push_proxy_config(state);
+        eval_js(state->settings_view,
+                cfg.enabled
+                    ? "window.__spinelProxyAction && window.__spinelProxyAction(true, \"系统代理已启用，对新启动的 Steam / 商店 / 终端立即生效。\");"
+                    : "window.__spinelProxyAction && window.__spinelProxyAction(true, \"已关闭代理并恢复直连。\");");
+    }
 }
 
 void push_perf_config(AppState *state) {

@@ -398,6 +398,13 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         update_perf_config(state, cmd);
     } else if (cmd == "settings:wifi-list") {
         push_wifi_state(state, false);
+        push_proxy_config(state);
+    } else if (cmd == "settings:proxy-get") {
+        push_proxy_config(state);
+    } else if (cmd.rfind("settings:proxy-save\n", 0) == 0) {
+        update_proxy_config(state, cmd);
+    } else if (cmd == "settings:proxy-clear") {
+        update_proxy_config(state, "enabled=false");
     } else if (cmd == "settings:wifi-scan") {
         push_wifi_state(state, true);
     } else if (cmd.rfind("settings:wifi-connect\n", 0) == 0) {
@@ -444,6 +451,8 @@ int main(int argc, char **argv) {
         setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
         setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     }
+
+    sync_process_proxy_env();
 
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);
