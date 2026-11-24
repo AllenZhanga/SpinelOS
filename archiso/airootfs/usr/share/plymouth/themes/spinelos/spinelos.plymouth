@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=SpinelOS
+Description=SpinelOS Gaming Linux Colorful Crystal Splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/spinelos
+ScriptFile=/usr/share/plymouth/themes/spinelos/spinelos.script

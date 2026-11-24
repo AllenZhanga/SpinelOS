@@ -106,6 +106,12 @@ struct NativeShellState {
     GtkWindow *cc_backdrop_win = nullptr;
     GtkWindow *cc_win = nullptr;
     bool cc_was_active = false;
+
+    // Startup Logo Splash
+    GtkWindow *splash_win = nullptr;
+    GtkWidget *splash_da = nullptr;
+    guint splash_timer = 0;
+    double splash_elapsed = 0.0;
     GtkWidget *cc_net_val = nullptr;
     GtkWidget *cc_gpu_badge = nullptr;
     GtkWidget *cc_mem_val = nullptr;
@@ -625,24 +631,98 @@ GtkWidget *make_cmd_button(AppState *state, const char *label, const char *css_c
 
 /* ==================== Native Monochrome Vector Glyphs (Bar & CC) ==================== */
 
-void draw_gem_glyph(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer) {
-    GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
-    gtk_widget_get_color(GTK_WIDGET(da), &fg);
-    double s = std::min(w, h) / 18.0;
+std::string find_spinel_logo_path() {
+    static const char *kCandidates[] = {
+        "/usr/share/spinel-shell/ui/spinel-logo.png",
+        "/usr/share/pixmaps/spinelos.png",
+        "/usr/local/share/spinel-shell/ui/spinel-logo.png",
+        "desktop/ui/spinel-logo.png"
+    };
+    for (const char *p : kCandidates) {
+        if (g_file_test(p, G_FILE_TEST_EXISTS)) return p;
+    }
+    return "";
+}
+
+void draw_spinel_gem_vector(cairo_t *cr, double x, double y, double sz) {
+    double s = sz / 128.0;
     cairo_save(cr);
-    cairo_translate(cr, (w - 18.0 * s) * 0.5, (h - 18.0 * s) * 0.5);
+    cairo_translate(cr, x, y);
     cairo_scale(cr, s, s);
-    cairo_move_to(cr, 9, 1.8);
-    cairo_line_to(cr, 15.5, 6.5);
-    cairo_line_to(cr, 9, 16.2);
-    cairo_line_to(cr, 2.5, 6.5);
+
+    auto tri = [&](double x1, double y1, double x2, double y2, double x3, double y3,
+                   double r, double g, double b, double a = 1.0) {
+        cairo_move_to(cr, x1, y1);
+        cairo_line_to(cr, x2, y2);
+        cairo_line_to(cr, x3, y3);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, r, g, b, a);
+        cairo_fill(cr);
+    };
+    auto quad = [&](double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4,
+                    double r, double g, double b) {
+        cairo_move_to(cr, x1, y1);
+        cairo_line_to(cr, x2, y2);
+        cairo_line_to(cr, x3, y3);
+        cairo_line_to(cr, x4, y4);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, r, g, b, 1.0);
+        cairo_fill(cr);
+    };
+
+    // Faceted colorful octahedral crystal (coral-pink, ruby, electric violet, cyan-sapphire)
+    quad(64, 8, 28, 44, 45, 64, 64, 64, 0.98, 0.38, 0.50);
+    tri(64, 8, 45, 64, 64, 64, 1.00, 0.45, 0.56);
+    tri(64, 8, 64, 64, 83, 64, 0.94, 0.14, 0.39);
+    quad(64, 8, 83, 64, 100, 44, 64, 8, 0.49, 0.23, 0.93);
+    tri(28, 44, 10, 64, 45, 64, 0.94, 0.22, 0.43);
+    tri(100, 44, 118, 64, 83, 64, 0.22, 0.74, 0.97);
+    tri(10, 64, 45, 64, 64, 120, 0.30, 0.11, 0.58);
+    tri(45, 64, 64, 64, 64, 120, 0.93, 0.18, 0.43);
+    tri(64, 64, 83, 64, 64, 120, 0.36, 0.13, 0.71);
+    tri(83, 64, 118, 64, 64, 120, 0.23, 0.51, 0.96);
+
+    cairo_set_line_width(cr, 2.0);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_set_source_rgba(cr, 0.99, 0.81, 0.91, 0.85);
+    cairo_move_to(cr, 10, 64);
+    cairo_line_to(cr, 118, 64);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.96, 0.82, 1.00, 0.78);
+    cairo_move_to(cr, 64, 8);
+    cairo_line_to(cr, 45, 64);
+    cairo_line_to(cr, 64, 120);
+    cairo_line_to(cr, 83, 64);
     cairo_close_path(cr);
-    cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, fg.alpha);
-    cairo_fill_preserve(cr);
-    cairo_set_source_rgba(cr, 0.08, 0.12, 0.22, 0.25);
-    cairo_set_line_width(cr, 0.9);
     cairo_stroke(cr);
     cairo_restore(cr);
+}
+
+void draw_spinel_logo_at(NativeShellState *ns, cairo_t *cr, double x, double y, double sz) {
+    std::string logo_path = find_spinel_logo_path();
+    int target_px = std::max(24, static_cast<int>(std::round(sz * 2.0)));
+    cairo_surface_t *surf = ns && !logo_path.empty() ? get_cached_surface(ns, logo_path, target_px) : nullptr;
+    if (surf) {
+        int sw = cairo_image_surface_get_width(surf);
+        int sh = cairo_image_surface_get_height(surf);
+        if (sw > 0 && sh > 0) {
+            cairo_save(cr);
+            cairo_translate(cr, x, y);
+            cairo_scale(cr, sz / static_cast<double>(sw), sz / static_cast<double>(sh));
+            cairo_set_source_surface(cr, surf, 0.0, 0.0);
+            cairo_paint(cr);
+            cairo_restore(cr);
+            return;
+        }
+    }
+    draw_spinel_gem_vector(cr, x, y, sz);
+}
+
+void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    double sz = std::max(12.0, static_cast<double>(std::min(w, h)) - 1.0);
+    draw_spinel_logo_at(ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz);
 }
 
 enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard };
@@ -1079,8 +1159,8 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(brand_btn, "spinel-bar-menubtn");
     gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 系统菜单");
     GtkWidget *gem_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(gem_da, 16, 16);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, nullptr, nullptr);
+    gtk_widget_set_size_request(gem_da, 18, 18);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, ns, nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(brand_btn), gem_da);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
         {"关于 SpinelOS", "settings:open:appearance"},
@@ -2637,8 +2717,8 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
 
     GtkWidget *hub_top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *hub_gem = gtk_drawing_area_new();
-    gtk_widget_set_size_request(hub_gem, 22, 22);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(hub_gem), draw_gem_glyph, nullptr, nullptr);
+    gtk_widget_set_size_request(hub_gem, 24, 24);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(hub_gem), draw_gem_glyph, ns, nullptr);
     ns->cc_gpu_badge = gtk_label_new("GPU");
     gtk_widget_add_css_class(ns->cc_gpu_badge, "spinel-cc-badge");
     gtk_widget_set_hexpand(ns->cc_gpu_badge, TRUE);
@@ -2865,6 +2945,134 @@ void apply_native_css(NativeShellState *ns) {
     gtk_css_provider_load_from_string(ns->css_provider, css_str.c_str());
 }
 
+void close_startup_splash(NativeShellState *ns) {
+    if (!ns) return;
+    if (ns->splash_timer) {
+        g_source_remove(ns->splash_timer);
+        ns->splash_timer = 0;
+    }
+    if (ns->splash_win) {
+        GtkWindow *w = ns->splash_win;
+        ns->splash_win = nullptr;
+        ns->splash_da = nullptr;
+        gtk_window_destroy(w);
+    }
+}
+
+void draw_startup_splash_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns) return;
+
+    double fade = 1.0;
+    if (ns->splash_elapsed > 1.05) {
+        fade = std::clamp(1.0 - (ns->splash_elapsed - 1.05) / 0.35, 0.0, 1.0);
+    }
+    double prog = std::clamp(ns->splash_elapsed / 1.05, 0.05, 1.0);
+
+    cairo_save(cr);
+    cairo_push_group(cr);
+
+    double pad = 12.0;
+    double cw = w - pad * 2.0;
+    double ch = h - pad * 2.0;
+    cairo_rounded_rect(cr, pad, pad + 4.0, cw, ch, 24.0);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.36);
+    cairo_fill(cr);
+
+    cairo_pattern_t *bg = cairo_pattern_create_linear(0, pad, 0, pad + ch);
+    if (ns->theme.is_light) {
+        cairo_pattern_add_color_stop_rgba(bg, 0.0, 0.97, 0.98, 1.00, 0.94);
+        cairo_pattern_add_color_stop_rgba(bg, 1.0, 0.91, 0.95, 0.99, 0.94);
+    } else {
+        cairo_pattern_add_color_stop_rgba(bg, 0.0, 0.09, 0.13, 0.23, 0.94);
+        cairo_pattern_add_color_stop_rgba(bg, 1.0, 0.05, 0.08, 0.15, 0.96);
+    }
+    cairo_rounded_rect(cr, pad, pad, cw, ch, 24.0);
+    cairo_set_source(cr, bg);
+    cairo_fill_preserve(cr);
+    cairo_pattern_destroy(bg);
+
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, ns->theme.is_light ? 0.72 : 0.22);
+    cairo_set_line_width(cr, 1.2);
+    cairo_stroke(cr);
+
+    double logo_sz = 92.0;
+    draw_spinel_logo_at(ns, cr, (w - logo_sz) * 0.5, pad + 26.0, logo_sz);
+
+    int tw = 0, th = 0;
+    double fg_r = ns->theme.is_light ? 0.06 : 0.96;
+    double fg_g = ns->theme.is_light ? 0.09 : 0.98;
+    double fg_b = ns->theme.is_light ? 0.16 : 1.00;
+    draw_pango_text(cr, "SpinelOS", 0, 0, 19.0, true, fg_r, fg_g, fg_b, 1.0, &tw, &th, true);
+    draw_pango_text(cr, "SpinelOS", (w - tw) * 0.5, pad + 128.0, 19.0, true, fg_r, fg_g, fg_b, 1.0);
+
+    int sw = 0, sh = 0;
+    draw_pango_text(cr, "Gaming Linux · Wayland", 0, 0, 11.5, false, fg_r, fg_g, fg_b, 0.65, &sw, &sh, true);
+    draw_pango_text(cr, "Gaming Linux · Wayland", (w - sw) * 0.5, pad + 156.0, 11.5, false, fg_r, fg_g, fg_b, 0.65);
+
+    double bar_w = 176.0;
+    double bar_h = 4.0;
+    double bar_x = (w - bar_w) * 0.5;
+    double bar_y = pad + ch - 26.0;
+    cairo_rounded_rect(cr, bar_x, bar_y, bar_w, bar_h, 2.0);
+    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, 0.14);
+    cairo_fill(cr);
+
+    cairo_pattern_t *gp = cairo_pattern_create_linear(bar_x, 0, bar_x + bar_w, 0);
+    cairo_pattern_add_color_stop_rgba(gp, 0.0, 0.98, 0.36, 0.49, 1.0);
+    cairo_pattern_add_color_stop_rgba(gp, 0.5, 0.55, 0.24, 1.00, 1.0);
+    cairo_pattern_add_color_stop_rgba(gp, 1.0, 0.22, 0.74, 0.97, 1.0);
+    cairo_rounded_rect(cr, bar_x, bar_y, std::max(6.0, bar_w * prog), bar_h, 2.0);
+    cairo_set_source(cr, gp);
+    cairo_fill(cr);
+    cairo_pattern_destroy(gp);
+
+    cairo_pop_group_to_source(cr);
+    cairo_paint_with_alpha(cr, fade);
+    cairo_restore(cr);
+}
+
+gboolean on_startup_splash_tick(gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns || !ns->splash_win) return G_SOURCE_REMOVE;
+    ns->splash_elapsed += 0.032;
+    if (ns->splash_elapsed >= 1.42) {
+        close_startup_splash(ns);
+        return G_SOURCE_REMOVE;
+    }
+    if (ns->splash_da) gtk_widget_queue_draw(ns->splash_da);
+    return G_SOURCE_CONTINUE;
+}
+
+void show_desktop_startup_splash(GtkApplication *app, NativeShellState *ns) {
+    if (!app || !ns) return;
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelSplash");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 336, 240);
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-splash");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    ns->splash_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(ns->splash_da, 336, 240);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ns->splash_da), draw_startup_splash_cb, ns, nullptr);
+
+    GtkGesture *tap = gtk_gesture_click_new();
+    g_signal_connect(tap, "pressed", G_CALLBACK(+[](GtkGestureClick *, int, double, double, gpointer d) {
+        close_startup_splash(static_cast<NativeShellState *>(d));
+    }), ns);
+    gtk_widget_add_controller(ns->splash_da, GTK_EVENT_CONTROLLER(tap));
+
+    gtk_window_set_child(win, ns->splash_da);
+    ns->splash_win = win;
+    ns->splash_elapsed = 0.0;
+    ns->splash_timer = g_timeout_add(32, on_startup_splash_tick, ns);
+    gtk_window_present(win);
+}
+
 }  // namespace
 
 void init_native_shell(GtkApplication *app, AppState *state) {
@@ -2882,6 +3090,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     build_native_top_bar(app, ns);
     build_native_dock(app, ns);
     build_native_control_center(app, ns);
+    show_desktop_startup_splash(app, ns);
 
     native_shell_sync_telemetry(state);
     native_shell_sync_perf(state);
@@ -2890,6 +3099,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
 void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
+    close_startup_splash(ns);
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
     if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
     if (ns->css_provider) {

@@ -48,6 +48,13 @@ install -Dm755 "${BUILD_DIR}/spinel-terminal" "${PROFILE_DIR}/airootfs/usr/local
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui"
 cp -a "${WORKSPACE}/desktop/ui/." "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui/"
 
+# Inject Plymouth into Live ISO initramfs hooks (after udev)
+if [ -f "${PROFILE_DIR}/airootfs/etc/mkinitcpio.conf.d/archiso.conf" ]; then
+  sed -i 's/\budev\b/udev plymouth/' "${PROFILE_DIR}/airootfs/etc/mkinitcpio.conf.d/archiso.conf"
+elif [ -f "${PROFILE_DIR}/airootfs/etc/mkinitcpio.conf" ]; then
+  sed -i 's/\budev\b/udev plymouth/' "${PROFILE_DIR}/airootfs/etc/mkinitcpio.conf"
+fi
+
 # Enable NetworkManager and Bluetooth systemd services
 mkdir -p "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants"
 mkdir -p "${PROFILE_DIR}/airootfs/etc/systemd/system/bluetooth.target.wants"
@@ -76,7 +83,7 @@ fi
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
   if [ -f "$cfg" ]; then
     sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux/SpinelOS/g' "$cfg"
-    sed -i '/^options / s/$/ quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
+    sed -i '/^options / s/$/ quiet splash loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
   fi
 done
 for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
@@ -85,7 +92,7 @@ for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
     sed -i 's/^MENU BACKGROUND splash.png/# SpinelOS dark menu/' "$cfg"
     sed -i 's/^TIMEOUT 150/TIMEOUT 30/' "$cfg"
     sed -i 's/^timeout=15/timeout=3/' "$cfg"
-    sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
+    sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet splash loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
   fi
 done
 

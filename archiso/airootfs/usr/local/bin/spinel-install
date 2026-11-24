@@ -310,6 +310,7 @@ ID_LIKE=arch
 BUILD_ID=rolling
 ANSI_COLOR="38;2;56;189;248"
 HOME_URL="https://github.com/AllenZhanga/SpinelOS"
+LOGO=spinelos
 EOF
 
 cat > /mnt/etc/motd <<'EOF'
@@ -371,6 +372,11 @@ progress 82 "正在重建标准硬盘 initramfs 与快照配置..."
 if [[ "$FS_TYPE" == "btrfs" ]] && [[ -x /mnt/usr/bin/snapper ]]; then
   arch-chroot /mnt bash -c 'umount /.snapshots 2>/dev/null || true; rm -rf /.snapshots; snapper --no-dbus -c root create-config / 2>/dev/null || true; btrfs subvolume delete /.snapshots 2>/dev/null || rm -rf /.snapshots; mkdir -p /.snapshots; mount -a 2>/dev/null || true'
 fi
+if [[ -f /mnt/etc/mkinitcpio.conf ]] && [[ -x /mnt/usr/bin/plymouthd ]]; then
+  if ! grep -q '\bplymouth\b' /mnt/etc/mkinitcpio.conf; then
+    sed -i 's/\budev\b/udev plymouth/' /mnt/etc/mkinitcpio.conf
+  fi
+fi
 arch-chroot /mnt mkinitcpio -P
 
 progress 92 "正在安装 GRUB 引导程序并写入 SpinelOS 引导项..."
@@ -382,9 +388,9 @@ if [[ -f /mnt/etc/default/grub ]]; then
   fi
 
   if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /mnt/etc/default/grub; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 quiet nvidia_drm.modeset=1 nvidia_drm.fbdev=1"/' /mnt/etc/default/grub
+    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 quiet splash nvidia_drm.modeset=1 nvidia_drm.fbdev=1"/' /mnt/etc/default/grub
   else
-    echo 'GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet nvidia_drm.modeset=1 nvidia_drm.fbdev=1"' >> /mnt/etc/default/grub
+    echo 'GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash nvidia_drm.modeset=1 nvidia_drm.fbdev=1"' >> /mnt/etc/default/grub
   fi
   sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /mnt/etc/default/grub
 

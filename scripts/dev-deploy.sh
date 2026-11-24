@@ -78,9 +78,9 @@ sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 
 if [ "$MODE" = "full" ]; then
-  echo "==> Updating SpinelDark theme, labwc/terminal config & desktop packages..."
+  echo "==> Updating SpinelDark theme, Plymouth splash, labwc/terminal config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak vte4 mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+    flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
     spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
@@ -97,12 +97,30 @@ if [ "$MODE" = "full" ]; then
   fi
   sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo cp -a /tmp/spinel-dev/SpinelLight/. /usr/share/themes/SpinelLight/
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
+  sudo cp -a /tmp/spinel-dev/plymouth-theme/. /usr/share/plymouth/themes/spinelos/
+  sudo install -Dm644 /tmp/spinel-dev/plymouthd.conf /etc/plymouth/plymouthd.conf
+  sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/pixmaps/spinelos.png
+  sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/icons/hicolor/256x256/apps/spinelos.png
+  sudo install -Dm644 /tmp/spinel-dev/spinelos.svg /usr/share/icons/hicolor/scalable/apps/spinelos.svg
+  sudo gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+  if [ -f /etc/mkinitcpio.conf ] && ! grep -q '\bplymouth\b' /etc/mkinitcpio.conf; then
+    echo "==> Enabling Plymouth boot splash in /etc/mkinitcpio.conf..."
+    sudo sed -i 's/\budev\b/udev plymouth/' /etc/mkinitcpio.conf
+    sudo mkinitcpio -P
+  else
+    sudo mkinitcpio -P
+  fi
+  if [ -f /etc/default/grub ] && ! grep -q '\bsplash\b' /etc/default/grub; then
+    echo "==> Enabling kernel splash parameter in GRUB..."
+    sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash"/' /etc/default/grub
+    sudo grub-mkconfig -o /boot/grub/grub.cfg
+  fi
   sudo install -Dm644 /tmp/spinel-dev/zram-generator.conf /etc/systemd/zram-generator.conf
   sudo install -Dm644 /tmp/spinel-dev/90-spinel-backlight.rules /etc/udev/rules.d/90-spinel-backlight.rules
   sudo install -Dm644 /tmp/spinel-dev/75-spinel-fonts.conf /etc/fonts/conf.d/75-spinel-fonts.conf
@@ -233,6 +251,11 @@ if [[ "${MODE}" == "full" ]]; then
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/fcitx5/themes/" "${DEV_HOST}:/tmp/spinel-dev/fcitx5-themes/"
   rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/plymouth/themes/spinelos/" "${DEV_HOST}:/tmp/spinel-dev/plymouth-theme/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/etc/plymouth/plymouthd.conf" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/pixmaps/spinelos.png" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinelos.svg" \
     "${ROOT_DIR}/archiso/airootfs/etc/systemd/zram-generator.conf" \
     "${ROOT_DIR}/archiso/airootfs/etc/udev/rules.d/90-spinel-backlight.rules" \
     "${ROOT_DIR}/archiso/airootfs/etc/fonts/conf.d/75-spinel-fonts.conf" \

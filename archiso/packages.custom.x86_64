@@ -48,6 +48,7 @@ xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
 polkit
 polkit-gnome
+plymouth
 vte4
 mako
 libnotify

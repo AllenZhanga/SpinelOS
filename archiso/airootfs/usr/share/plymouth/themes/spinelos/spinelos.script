@@ -1,0 +1,66 @@
+// SpinelOS Plymouth Boot Splash Script
+Window.SetBackgroundTopColor(0.024, 0.043, 0.086);
+Window.SetBackgroundBottomColor(0.043, 0.078, 0.160);
+
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo_x = screen_w / 2 - logo.image.GetWidth() / 2;
+logo_y = screen_h * 0.42 - logo.image.GetHeight() / 2;
+logo.sprite.SetPosition(logo_x, logo_y, 10);
+
+title.image = Image.Text("SpinelOS", 0.96, 0.98, 1.0, 1.0, "Sans Bold 24");
+title.sprite = Sprite(title.image);
+title.sprite.SetPosition(screen_w / 2 - title.image.GetWidth() / 2,
+                         logo_y + logo.image.GetHeight() + 22, 10);
+
+sub.image = Image.Text("Gaming Linux", 0.58, 0.66, 0.80, 0.9, "Sans 12");
+sub.sprite = Sprite(sub.image);
+sub.sprite.SetPosition(screen_w / 2 - sub.image.GetWidth() / 2,
+                       logo_y + logo.image.GetHeight() + 58, 10);
+
+track.image = Image("bar_track.png");
+track.sprite = Sprite(track.image);
+bar_x = screen_w / 2 - track.image.GetWidth() / 2;
+bar_y = logo_y + logo.image.GetHeight() + 92;
+track.sprite.SetPosition(bar_x, bar_y, 10);
+
+fill.base = Image("bar_fill.png");
+fill.sprite = Sprite();
+fill.sprite.SetPosition(bar_x, bar_y, 11);
+
+status.sprite = Sprite();
+status.sprite.SetPosition(screen_w / 2, bar_y + 22, 12);
+
+tick = 0;
+current_progress = 0.08;
+
+fun refresh_callback() {
+    tick++;
+    // Smooth subtle breathing glow on logo during boot
+    pulse = 0.90 + 0.10 * Math.Sin(tick * 0.08);
+    logo.sprite.SetOpacity(pulse);
+    if (current_progress < 0.12) {
+        w = 32 + 20 * (0.5 + 0.5 * Math.Sin(tick * 0.09));
+        fill.sprite.SetImage(fill.base.Scale(w, track.image.GetHeight()));
+    }
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+fun boot_progress_callback(duration, progress) {
+    if (progress > current_progress) current_progress = progress;
+    p = Math.Min(1.0, Math.Max(0.08, current_progress));
+    w = Math.Int(track.image.GetWidth() * p);
+    if (w < 4) w = 4;
+    fill.sprite.SetImage(fill.base.Scale(w, track.image.GetHeight()));
+}
+Plymouth.SetBootProgressFunction(boot_progress_callback);
+
+fun message_callback(text) {
+    msg_img = Image.Text(text, 0.82, 0.88, 0.96, 1.0, "Sans 11");
+    status.sprite.SetImage(msg_img);
+    status.sprite.SetPosition(screen_w / 2 - msg_img.GetWidth() / 2, bar_y + 22, 12);
+}
+Plymouth.SetMessageFunction(message_callback);
