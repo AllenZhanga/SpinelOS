@@ -42,12 +42,19 @@ std::string resolve_ui_uri(const std::string &page_query) {
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data);
 
 void on_webview_load_failed(WebKitWebView *, WebKitLoadEvent, gchar *uri, GError *err, gpointer) {
-    std::fprintf(stderr, "[spinel-shell] WebKit load-failed (%s): %s\n",
-                 uri ? uri : "", err ? err->message : "unknown");
+    std::string msg = std::string("WebKit load-failed (") + (uri ? uri : "") + "): " + (err ? err->message : "unknown");
+    std::fprintf(stderr, "[spinel-shell] %s\n", msg.c_str());
+    append_app_log("[WebKit] " + msg);
 }
 
-void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReason reason, gpointer) {
-    std::fprintf(stderr, "[spinel-shell] WebKitWebProcess terminated (reason=%d)\n", static_cast<int>(reason));
+void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReason reason, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    std::string msg = "WebKitWebProcess 渲染进程异常终止 (reason=" + std::to_string(static_cast<int>(reason)) + ")";
+    std::fprintf(stderr, "[spinel-shell] %s\n", msg.c_str());
+    append_app_log("[WebKit] " + msg);
+    if (state && !state->shutting_down.load()) {
+        open_native_log_window(state, msg + "。可查看下方日志与环境参数定位原因。");
+    }
 }
 
 WebKitWebView *create_configured_webview(AppState *state) {
@@ -75,8 +82,8 @@ WebKitWebView *create_configured_webview(AppState *state) {
     g_signal_connect(ucm, "script-message-received::sysbridge", G_CALLBACK(on_script_message), state);
     webkit_user_content_manager_register_script_message_handler(ucm, "sysbridge", nullptr);
 
-    g_signal_connect(web, "load-failed", G_CALLBACK(on_webview_load_failed), nullptr);
-    g_signal_connect(web, "web-process-terminated", G_CALLBACK(on_web_process_terminated), nullptr);
+    g_signal_connect(web, "load-failed", G_CALLBACK(on_webview_load_failed), state);
+    g_signal_connect(web, "web-process-terminated", G_CALLBACK(on_web_process_terminated), state);
 
     return web;
 }
@@ -185,6 +192,32 @@ void push_all_telemetry(AppState *state) {
     }
 }
 
+void on_power_confirm_reply(GObject *source, GAsyncResult *res, gpointer user_data) {
+    bool is_shutdown = (user_data != nullptr);
+    int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), res, nullptr);
+    if (choice == 1) {
+        append_app_log(is_shutdown ? "[Power] 用户确认关机 (systemctl poweroff)" : "[Power] 用户确认重启 (systemctl reboot)");
+        spawn_argv_detached({"systemctl", is_shutdown ? "poweroff" : "reboot"});
+    }
+}
+
+void confirm_power_action(AppState *state, bool is_shutdown) {
+    native_shell_set_cc_visible(state, false);
+    GtkAlertDialog *dlg = gtk_alert_dialog_new(
+        "%s", is_shutdown ? "确定要关闭 SpinelOS 电源吗？" : "确定要立即重启系统吗？"
+    );
+    gtk_alert_dialog_set_detail(
+        dlg, is_shutdown ? "关机前请确认正在运行的游戏或文档已保存。" : "重启会关闭所有打开的窗口与应用。"
+    );
+    const char *buttons[] = {"取消", is_shutdown ? "确定关机" : "确定重启", nullptr};
+    gtk_alert_dialog_set_buttons(dlg, buttons);
+    gtk_alert_dialog_set_cancel_button(dlg, 0);
+    gtk_alert_dialog_set_default_button(dlg, 0);
+    gtk_alert_dialog_choose(dlg, nullptr, nullptr, on_power_confirm_reply,
+                            is_shutdown ? GINT_TO_POINTER(1) : nullptr);
+    g_object_unref(dlg);
+}
+
 gboolean on_telemetry_tick(gpointer user_data) {
     push_all_telemetry(static_cast<AppState *>(user_data));
     return G_SOURCE_CONTINUE;
@@ -231,10 +264,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_steam_library(state);
     } else if (cmd == "launch:terminal") {
         native_shell_set_cc_visible(state, false);
-        spawn_argv_detached({"foot"});
+        spawn_argv_logged({"foot"}, "Terminal");
     } else if (cmd == "launch:files") {
         native_shell_set_cc_visible(state, false);
-        spawn_argv_detached({"thunar"});
+        spawn_argv_logged({"thunar"}, "Files");
     } else if (cmd == "desktop:open-folder") {
         std::error_code ec;
         fs::path desk = fs::path(home_dir()) / "Desktop";
@@ -288,10 +321,13 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "appearance") {
+        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "appearance" || tab == "logs") {
             native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
         }
+    } else if (cmd == "logs:native") {
+        native_shell_set_cc_visible(state, false);
+        open_native_log_window(state);
     } else if (cmd == "cc:toggle") {
         native_shell_toggle_cc(state);
     } else if (cmd == "cc:close") {
@@ -332,9 +368,9 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     } else if (cmd == "system:audio-up") {
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"});
     } else if (cmd == "power:reboot") {
-        spawn_argv_detached({"systemctl", "reboot"});
+        confirm_power_action(state, false);
     } else if (cmd == "power:shutdown") {
-        spawn_argv_detached({"systemctl", "poweroff"});
+        confirm_power_action(state, true);
     } else if (cmd == "telemetry:refresh") {
         push_all_telemetry(state);
         push_theme_state(state);
@@ -383,6 +419,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_display_state(state);
     } else if (cmd.rfind("settings:display-apply\n", 0) == 0) {
         apply_display_mode(state, cmd);
+    } else if (cmd.rfind("settings:logs:", 0) == 0) {
+        push_system_logs(state, cmd.substr(14));
+    } else if (cmd.rfind("settings:logs-clear:", 0) == 0) {
+        clear_system_logs(state, cmd.substr(20));
     } else if (cmd == "installer:scan-disks") {
         push_installer_env(state);
     } else if (cmd.rfind("installer:start\n", 0) == 0) {
@@ -398,6 +438,8 @@ int main(int argc, char **argv) {
         setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
     } else if (collect_telemetry().low_fx) {
         setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+        setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
+        setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     }
 
     AppState state;

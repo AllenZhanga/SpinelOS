@@ -933,6 +933,8 @@ void build_desktop_popover(NativeShellState *ns) {
         {nullptr, nullptr},
         {"更换壁纸与外观...", "settings:open:appearance"},
         {"显示与缩放设置...", "settings:open:display"},
+        {"查看系统日志与诊断...", "settings:open:logs"},
+        {"原生日志窗口 (排障)", "logs:native"},
         {"刷新桌面", "telemetry:refresh"}
     };
 

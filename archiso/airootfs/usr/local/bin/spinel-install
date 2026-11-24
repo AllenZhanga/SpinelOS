@@ -205,6 +205,13 @@ SFS_PATH="/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
 if [[ -f "$SFS_PATH" ]]; then
   echo "==> Extracting $SFS_PATH to /mnt..."
   unsquashfs -f -d /mnt "$SFS_PATH"
+  # Carry over any hot-updated desktop shell / launcher / UI from Live session overlay
+  [[ -x /usr/local/bin/spinel-shell ]] && cp -f /usr/local/bin/spinel-shell /mnt/usr/local/bin/spinel-shell
+  [[ -x /usr/local/bin/start-spinel-desktop ]] && cp -f /usr/local/bin/start-spinel-desktop /mnt/usr/local/bin/start-spinel-desktop
+  if [[ -d /usr/share/spinel-shell/ui ]]; then
+    mkdir -p /mnt/usr/share/spinel-shell/ui
+    cp -a /usr/share/spinel-shell/ui/. /mnt/usr/share/spinel-shell/ui/
+  fi
 elif [[ -d /run/archiso/airootfs ]]; then
   echo "==> Syncing /run/archiso/airootfs to /mnt..."
   rsync -aAXH /run/archiso/airootfs/ /mnt/

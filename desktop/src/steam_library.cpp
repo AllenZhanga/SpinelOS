@@ -335,12 +335,17 @@ void show_steam_alert(const std::string &title, const std::string &detail) {
 void launch_steam_client(AppState *state) {
     (void)state;
     if (!has_executable("steam")) {
+        append_app_log("[Steam] 启动失败: 未检测到 /usr/bin/steam");
         show_steam_alert("未检测到 Steam 客户端",
                          "当前系统尚未安装 steam。请联网后在终端执行 sudo pacman -Sy steam 安装。");
         return;
     }
+    std::error_code ec;
+    if (!fs::exists(fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steam", ec)) {
+        append_app_log("[Steam] 检测到首次运行环境，正在初始化 Steam 运行时（需保持联网下载约 300MB）...");
+    }
     std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
-    spawn_argv_detached({"steam"});
+    spawn_argv_logged({"steam"}, "Steam");
 }
 
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
@@ -354,12 +359,13 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
         envs.emplace_back("GAMEMODERUN", "1");
     }
 
-    spawn_argv_detached({"steam", "steam://rungameid/" + appid}, envs);
+    spawn_argv_logged({"steam", "steam://rungameid/" + appid}, "SteamGame:" + appid, envs);
 }
 
 void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
     (void)state;
     if (!has_executable("steam")) {
+        append_app_log("[GamepadUI] 启动失败: 未检测到 /usr/bin/steam");
         show_steam_alert("无法启动主机大屏模式",
                          "当前系统未检测到 Steam 客户端（可在终端执行 sudo pacman -Sy steam 安装，或在应用商店安装 Heroic / Lutris）。");
         return;
@@ -376,7 +382,7 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
         std::fprintf(stderr,
                      "[spinel-shell] Launching Steam GamepadUI directly (low_fx=%d, gamescope=%d)\n",
                      tel.low_fx ? 1 : 0, has_executable("gamescope") ? 1 : 0);
-        spawn_argv_detached(direct_args, envs);
+        spawn_argv_logged(direct_args, "SteamGamepadUI", envs);
         return;
     }
 
@@ -413,18 +419,26 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
     gs_args.push_back("steam");
     gs_args.push_back("-gamepadui");
 
+    append_app_log("[Gamescope] 启动主机大屏: gamescope + steam -gamepadui");
     std::fprintf(stderr, "[spinel-shell] Launching Gamescope + Steam GamepadUI\n");
-    std::thread([gs_args, direct_args, envs]() {
+    std::string log_path = (fs::path(spinel_state_dir()) / "apps.log").string();
+    std::thread([gs_args, direct_args, envs, log_path]() {
         pid_t pid = fork();
         if (pid == 0) {
             setsid();
             for (const auto &kv : envs) {
                 setenv(kv.first.c_str(), kv.second.c_str(), 1);
             }
-            int devnull = open("/dev/null", O_RDWR);
+            int devnull = open("/dev/null", O_RDONLY);
             if (devnull >= 0) {
                 dup2(devnull, STDIN_FILENO);
                 if (devnull > 2) close(devnull);
+            }
+            int logfd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (logfd >= 0) {
+                dup2(logfd, STDOUT_FILENO);
+                dup2(logfd, STDERR_FILENO);
+                if (logfd > 2) close(logfd);
             }
             std::vector<char *> argv;
             argv.reserve(gs_args.size() + 1);
@@ -443,10 +457,11 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
             if (r == pid) {
                 int code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
                 if (code != 0) {
+                    append_app_log("[Gamescope] 提前退出 (code=" + std::to_string(code) + ")，自动回退到直连 steam -gamepadui");
                     std::fprintf(stderr,
                                  "[spinel-shell] gamescope exited early (code=%d), falling back to steam -gamepadui\n",
                                  code);
-                    spawn_argv_detached(direct_args, envs);
+                    spawn_argv_logged(direct_args, "SteamGamepadUI", envs);
                 }
                 return;
             }

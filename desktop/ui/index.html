@@ -312,6 +312,7 @@
         <button class="tab-btn" data-cmd="settings:tab:bt">蓝牙手柄</button>
         <button class="tab-btn" data-cmd="settings:tab:display">显示器</button>
         <button class="tab-btn" data-cmd="settings:tab:appearance">外观与系统</button>
+        <button class="tab-btn" data-cmd="settings:tab:logs">系统日志</button>
       </div>
     </header>
 
@@ -394,12 +395,31 @@
           <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
           <div class="footer-actions" style="margin-top: 8px;">
+            <button class="btn small" data-cmd="settings:tab:logs">查看系统日志</button>
             <button class="btn small" data-cmd="installer:open">打开磁盘安装 / 重装工具</button>
             <button class="btn small" data-cmd="power:reboot">重启系统</button>
             <button class="btn small danger" data-cmd="power:shutdown">关机</button>
           </div>
         </div>
       </div>
+    </div>
+
+    <div id="tab-logs" class="win-body hidden">
+      <div class="section-head">
+        <div class="pill-group" id="logs-source-tabs">
+          <button class="pill-btn active" data-cmd="settings:logs:apps">应用与 Steam</button>
+          <button class="pill-btn" data-cmd="settings:logs:shell">桌面壳 (spinel-shell)</button>
+          <button class="pill-btn" data-cmd="settings:logs:compositor">合成器 (labwc)</button>
+          <button class="pill-btn" data-cmd="settings:logs:system">系统与内核</button>
+        </div>
+        <div class="footer-actions">
+          <button class="btn small" id="btn-logs-refresh">刷新</button>
+          <button class="btn small" id="btn-logs-copy">复制全部</button>
+          <button class="btn small" id="btn-logs-clear">清空应用日志</button>
+          <button class="btn small ghost" data-cmd="logs:native">独立原生弹窗</button>
+        </div>
+      </div>
+      <pre id="sys-logs-box" class="log-box selectable" style="height: 410px;">正在读取系统日志...</pre>
     </div>
   </section>
 

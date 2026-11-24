@@ -765,8 +765,10 @@
   };
 
   /* ---------------- 5. Settings Window ---------------- */
+  let activeLogSource = "apps";
+
   function switchSettingsTab(tab) {
-    const tabs = ["wifi", "bt", "display", "appearance"];
+    const tabs = ["wifi", "bt", "display", "appearance", "logs"];
     const target = tabs.includes(tab) ? tab : "wifi";
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
@@ -779,7 +781,38 @@
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
     else if (target === "appearance") sendCommand("theme:refresh");
+    else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
   }
+
+  window.__spinelLogsData = (data) => {
+    if (!data) return;
+    if (data.source) activeLogSource = data.source;
+    document.querySelectorAll("#logs-source-tabs .pill-btn").forEach((b) => {
+      b.classList.toggle("active", b.getAttribute("data-cmd") === `settings:logs:${activeLogSource}`);
+    });
+    const box = document.getElementById("sys-logs-box");
+    if (box) {
+      box.textContent = data.text || "(暂无日志内容)";
+      box.scrollTop = box.scrollHeight;
+    }
+  };
+
+  document.getElementById("btn-logs-refresh")?.addEventListener("click", () => {
+    sendCommand(`settings:logs:${activeLogSource}`);
+  });
+  document.getElementById("btn-logs-clear")?.addEventListener("click", () => {
+    sendCommand(`settings:logs-clear:${activeLogSource}`);
+  });
+  document.getElementById("btn-logs-copy")?.addEventListener("click", () => {
+    const text = document.getElementById("sys-logs-box")?.textContent || "";
+    const btn = document.getElementById("btn-logs-copy");
+    navigator.clipboard?.writeText(text).then(() => {
+      if (btn) {
+        btn.textContent = "已复制!";
+        setTimeout(() => { btn.textContent = "复制全部"; }, 1400);
+      }
+    }).catch(() => {});
+  });
 
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
 

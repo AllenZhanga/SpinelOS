@@ -241,7 +241,7 @@ void launch_desktop_app_id(const std::string &desktop_id) {
             if (args[0].find("chromium") != std::string::npos) {
                 args.push_back("--ozone-platform-hint=auto");
             }
-            spawn_argv_detached(args);
+            spawn_argv_logged(args, "App:" + app.id);
             return;
         }
     }

@@ -609,3 +609,205 @@ void apply_display_mode(AppState *state, const std::string &payload) {
     eval_js(state->settings_view, js.str());
     push_display_state(state);
 }
+
+namespace {
+
+std::string read_tail_lines(const fs::path &p, size_t max_lines) {
+    std::ifstream ifs(p);
+    if (!ifs.is_open()) return "";
+    std::vector<std::string> ring;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        ring.push_back(std::move(line));
+        if (ring.size() > max_lines) {
+            ring.erase(ring.begin());
+        }
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < ring.size(); ++i) {
+        if (i > 0) oss << '\n';
+        oss << ring[i];
+    }
+    return oss.str();
+}
+
+std::string collect_logs_bundle_text(const std::string &source) {
+    if (source == "shell") {
+        std::string txt = read_tail_lines("/tmp/spinel-shell.log", 260);
+        if (txt.empty()) {
+            txt = "暂无 /tmp/spinel-shell.log 记录（请确认从桌面自启或 dev-deploy 启动）。";
+        }
+        return "=== /tmp/spinel-shell.log ===\n" + txt;
+    }
+
+    if (source == "compositor") {
+        std::string txt = read_tail_lines("/tmp/spinel-labwc.log", 220);
+        if (txt.empty()) {
+            txt = "暂无 /tmp/spinel-labwc.log 记录。";
+        }
+        return "=== /tmp/spinel-labwc.log ===\n" + txt;
+    }
+
+    if (source == "system") {
+        std::ostringstream oss;
+        oss << "=== 运行环境与图形诊断 ===\n";
+        oss << "User: " << run_cmd_capture("id 2>/dev/null") << "\n";
+        oss << "Kernel: " << read_first_line("/proc/sys/kernel/osrelease", "unknown") << "\n";
+        oss << "Session: WAYLAND_DISPLAY=" << (std::getenv("WAYLAND_DISPLAY") ? std::getenv("WAYLAND_DISPLAY") : "")
+            << " | WLR_RENDERER=" << (std::getenv("WLR_RENDERER") ? std::getenv("WLR_RENDERER") : "auto")
+            << " | GSK_RENDERER=" << (std::getenv("GSK_RENDERER") ? std::getenv("GSK_RENDERER") : "auto") << "\n";
+        oss << "WebKit: DMABUF_DISABLED=" << (std::getenv("WEBKIT_DISABLE_DMABUF_RENDERER") ? std::getenv("WEBKIT_DISABLE_DMABUF_RENDERER") : "0")
+            << " | COMPOSITING_DISABLED=" << (std::getenv("WEBKIT_DISABLE_COMPOSITING_MODE") ? std::getenv("WEBKIT_DISABLE_COMPOSITING_MODE") : "0") << "\n";
+        oss << "GPU:\n" << run_cmd_capture("lspci -k 2>/dev/null | grep -EA3 'VGA|3D|Display' || true") << "\n";
+        oss << "DRM:\n" << run_cmd_capture("ls -l /dev/dri 2>/dev/null || true") << "\n\n";
+        oss << "=== journalctl -b (最近 100 条) ===\n";
+        std::string j = run_cmd_capture("journalctl -b -n 100 --no-pager 2>&1 || dmesg 2>&1 | tail -n 80");
+        oss << (j.empty() ? "(无可用系统日志)" : j);
+        return oss.str();
+    }
+
+    fs::path app_log = fs::path(spinel_state_dir()) / "apps.log";
+    std::string txt = read_tail_lines(app_log, 300);
+    if (txt.empty()) {
+        txt = "暂无应用启动日志。\n点击桌面或游戏中心中的 Steam、主机大屏、终端或应用商店软件后，输出与报错会实时记录在:\n" + app_log.string();
+    }
+    return "=== " + app_log.string() + " ===\n" + txt;
+}
+
+struct NativeLogWindowCtx {
+    AppState *state = nullptr;
+    GtkWindow *win = nullptr;
+    GtkTextView *text_view = nullptr;
+    std::string current_source = "apps";
+    std::string banner;
+};
+
+void refresh_native_log_view(NativeLogWindowCtx *ctx) {
+    if (!ctx || !ctx->text_view) return;
+    std::string content;
+    if (!ctx->banner.empty()) {
+        content = "[提示] " + ctx->banner + "\n\n";
+    }
+    content += collect_logs_bundle_text(ctx->current_source);
+    GtkTextBuffer *buf = gtk_text_view_get_buffer(ctx->text_view);
+    gtk_text_buffer_set_text(buf, content.c_str(), -1);
+}
+
+void on_native_log_tab_clicked(GtkButton *btn, gpointer user_data) {
+    auto *ctx = static_cast<NativeLogWindowCtx *>(user_data);
+    const char *src = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "log-src"));
+    if (ctx && src) {
+        ctx->current_source = src;
+        refresh_native_log_view(ctx);
+    }
+}
+
+void on_native_log_refresh_clicked(GtkButton *, gpointer user_data) {
+    refresh_native_log_view(static_cast<NativeLogWindowCtx *>(user_data));
+}
+
+void on_native_log_copy_clicked(GtkButton *btn, gpointer user_data) {
+    auto *ctx = static_cast<NativeLogWindowCtx *>(user_data);
+    if (!ctx || !ctx->text_view) return;
+    GtkTextBuffer *buf = gtk_text_view_get_buffer(ctx->text_view);
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buf, &start, &end);
+    g_autofree char *txt = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
+    if (txt) {
+        GdkDisplay *display = gdk_display_get_default();
+        if (display) {
+            gdk_clipboard_set_text(gdk_display_get_clipboard(display), txt);
+            gtk_button_set_label(btn, "已复制!");
+        }
+    }
+}
+
+}  // namespace
+
+void push_system_logs(AppState *state, const std::string &source) {
+    if (!state || !state->settings_view) return;
+    std::string src = (source == "shell" || source == "compositor" || source == "system") ? source : "apps";
+    std::thread([state, src]() {
+        std::string txt = collect_logs_bundle_text(src);
+        std::ostringstream js;
+        js << "window.__spinelLogsData && window.__spinelLogsData({"
+           << "\"source\":\"" << src << "\","
+           << "\"text\":\"" << json_escape(txt) << "\""
+           << "});";
+        post_js_to_main(state, js.str(), false);
+    }).detach();
+}
+
+void clear_system_logs(AppState *state, const std::string &source) {
+    if (!state) return;
+    fs::path app_log = fs::path(spinel_state_dir()) / "apps.log";
+    std::error_code ec;
+    fs::resize_file(app_log, 0, ec);
+    append_app_log("[Logs] 已清空应用启动日志");
+    push_system_logs(state, source);
+}
+
+void open_native_log_window(AppState *state, const std::string &banner) {
+    (void)state;
+    auto *ctx = new NativeLogWindowCtx{state, nullptr, nullptr, "apps", banner};
+
+    GtkWidget *win = gtk_window_new();
+    ctx->win = GTK_WINDOW(win);
+    gtk_window_set_title(ctx->win, "SpinelOS 系统日志与诊断 (原生排障视图)");
+    gtk_window_set_default_size(ctx->win, 880, 580);
+
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(root, 12);
+    gtk_widget_set_margin_bottom(root, 12);
+    gtk_widget_set_margin_start(root, 12);
+    gtk_widget_set_margin_end(root, 12);
+
+    GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    struct SrcBtn { const char *label; const char *src; };
+    const SrcBtn btns[] = {
+        {"应用 / Steam", "apps"},
+        {"桌面壳 (spinel-shell)", "shell"},
+        {"合成器 (labwc)", "compositor"},
+        {"系统与环境", "system"}
+    };
+    for (const auto &b : btns) {
+        GtkWidget *w = gtk_button_new_with_label(b.label);
+        g_object_set_data_full(G_OBJECT(w), "log-src", g_strdup(b.src), g_free);
+        g_signal_connect(w, "clicked", G_CALLBACK(on_native_log_tab_clicked), ctx);
+        gtk_box_append(GTK_BOX(bar), w);
+    }
+
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(bar), spacer);
+
+    GtkWidget *refresh_btn = gtk_button_new_with_label("刷新");
+    g_signal_connect(refresh_btn, "clicked", G_CALLBACK(on_native_log_refresh_clicked), ctx);
+    gtk_box_append(GTK_BOX(bar), refresh_btn);
+
+    GtkWidget *copy_btn = gtk_button_new_with_label("复制日志");
+    g_signal_connect(copy_btn, "clicked", G_CALLBACK(on_native_log_copy_clicked), ctx);
+    gtk_box_append(GTK_BOX(bar), copy_btn);
+
+    gtk_box_append(GTK_BOX(root), bar);
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_widget_set_hexpand(scroll, TRUE);
+
+    GtkWidget *tv = gtk_text_view_new();
+    ctx->text_view = GTK_TEXT_VIEW(tv);
+    gtk_text_view_set_editable(ctx->text_view, FALSE);
+    gtk_text_view_set_monospace(ctx->text_view, TRUE);
+    gtk_text_view_set_wrap_mode(ctx->text_view, GTK_WRAP_WORD_CHAR);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), tv);
+    gtk_box_append(GTK_BOX(root), scroll);
+
+    gtk_window_set_child(ctx->win, root);
+    g_signal_connect_swapped(win, "destroy", G_CALLBACK(+[](gpointer data) {
+        delete static_cast<NativeLogWindowCtx *>(data);
+    }), ctx);
+
+    refresh_native_log_view(ctx);
+    gtk_window_present(ctx->win);
+}

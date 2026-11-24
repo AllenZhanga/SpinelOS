@@ -46,3 +46,7 @@ void bt_device_action(AppState *state, const std::string &action, const std::str
 
 void push_display_state(AppState *state);
 void apply_display_mode(AppState *state, const std::string &payload);
+
+void push_system_logs(AppState *state, const std::string &source);
+void clear_system_logs(AppState *state, const std::string &source);
+void open_native_log_window(AppState *state, const std::string &banner = "");

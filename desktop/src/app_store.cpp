@@ -363,14 +363,14 @@ void launch_store_app(AppState *state, const std::string &app_id) {
     const StoreAppEntry *entry = find_catalog_entry(app_id);
     if (!entry) return;
     if (std::string(entry->backend) == "flatpak") {
-        spawn_argv_detached({"flatpak", "run", entry->pkg});
+        spawn_argv_logged({"flatpak", "run", entry->pkg}, "Store:" + app_id);
         return;
     }
     if (app_id == "chromium") {
-        spawn_argv_detached({"chromium", "--ozone-platform-hint=auto"});
+        spawn_argv_logged({"chromium", "--ozone-platform-hint=auto"}, "Store:" + app_id);
     } else if (app_id == "obs") {
-        spawn_argv_detached({"obs"});
+        spawn_argv_logged({"obs"}, "Store:" + app_id);
     } else {
-        spawn_argv_detached({entry->pkg});
+        spawn_argv_logged({entry->pkg}, "Store:" + app_id);
     }
 }

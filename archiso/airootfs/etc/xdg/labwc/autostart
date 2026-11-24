@@ -3,5 +3,5 @@ if [ -x "$HOME/.config/spinelos/display.sh" ]; then
   "$HOME/.config/spinelos/display.sh" &
 fi
 
-# Start our custom C++20 + WebKitGTK6 Wayland Desktop Shell
-/usr/local/bin/spinel-shell &
+# Start our custom C++20 + GTK4/WebKitGTK6 Wayland Desktop Shell (with persistent startup log)
+/usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 &
