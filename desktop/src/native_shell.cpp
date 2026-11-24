@@ -55,6 +55,8 @@ struct NativeShellState {
     std::string bar_menu_key;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_bat_lbl = nullptr;
+    GtkWidget *clip_popover = nullptr;
+    GtkWidget *clip_list_box = nullptr;
     GtkWidget *bar_net_btn = nullptr;
     GtkWidget *bar_cc_btn = nullptr;
     GtkWidget *bar_clock_lbl = nullptr;
@@ -613,7 +615,7 @@ void draw_gem_glyph(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer) {
     cairo_restore(cr);
 }
 
-enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot };
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard };
 
 void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
@@ -736,6 +738,17 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             cairo_line_to(cr, 2.5, 10.5);
             cairo_stroke(cr);
             cairo_arc(cr, 8.0, 8.0, 2.3, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Clipboard:
+            cairo_rounded_rect(cr, 3.2, 3.4, 9.6, 10.4, 1.8);
+            cairo_stroke(cr);
+            cairo_rounded_rect(cr, 5.6, 1.8, 4.8, 2.6, 1.0);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 5.5, 7.2);
+            cairo_line_to(cr, 10.5, 7.2);
+            cairo_move_to(cr, 5.5, 10.0);
+            cairo_line_to(cr, 9.2, 10.0);
             cairo_stroke(cr);
             break;
     }
@@ -1079,6 +1092,115 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
     gtk_widget_set_tooltip_text(mem_btn, "内存占用（点击打开进程监控）");
 
+    auto rebuild_clip_popover = +[](NativeShellState *n) {
+        if (!n || !n->clip_list_box) return;
+        while (GtkWidget *c = gtk_widget_get_first_child(n->clip_list_box)) {
+            gtk_box_remove(GTK_BOX(n->clip_list_box), c);
+        }
+
+        GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *title = gtk_label_new("剪贴板历史（最多 10 条）");
+        gtk_widget_add_css_class(title, "spinel-clip-head");
+        gtk_widget_set_hexpand(title, TRUE);
+        gtk_widget_set_halign(title, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(head), title);
+
+        GtkWidget *clr = gtk_button_new_with_label("清空");
+        gtk_widget_add_css_class(clr, "spinel-clip-clr");
+        g_signal_connect(clr, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *st_ns = static_cast<NativeShellState *>(d);
+            trigger_cmd(st_ns->app_state, "clip:clear");
+            if (st_ns->clip_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->clip_popover));
+        }), n);
+        gtk_box_append(GTK_BOX(head), clr);
+        gtk_box_append(GTK_BOX(n->clip_list_box), head);
+        gtk_box_append(GTK_BOX(n->clip_list_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+
+        auto items = load_clipboard_history();
+        if (items.empty()) {
+            GtkWidget *empty = gtk_label_new("暂无记录 · 复制文字后自动保留于此\n（关闭原应用窗口内容仍不会丢失）");
+            gtk_widget_add_css_class(empty, "spinel-clip-empty");
+            gtk_label_set_justify(GTK_LABEL(empty), GTK_JUSTIFY_CENTER);
+            gtk_box_append(GTK_BOX(n->clip_list_box), empty);
+            return;
+        }
+
+        for (size_t i = 0; i < items.size(); ++i) {
+            std::string preview;
+            preview.reserve(items[i].text.size());
+            for (char ch : items[i].text) {
+                if (ch == '\n' || ch == '\r' || ch == '\t') {
+                    if (preview.empty() || preview.back() != ' ') preview += ' ';
+                } else {
+                    preview += ch;
+                }
+            }
+            preview = trim_copy(preview);
+            if (preview.empty()) preview = "(空白文本)";
+
+            char tbuf[16]{};
+            if (items[i].ts > 0) {
+                std::time_t tt = static_cast<std::time_t>(items[i].ts);
+                std::tm tmv{};
+                localtime_r(&tt, &tmv);
+                std::strftime(tbuf, sizeof(tbuf), "%H:%M", &tmv);
+            }
+
+            std::string cmd = "clip:copy:" + std::to_string(i);
+            GtkWidget *btn = make_cmd_button(n->app_state, nullptr, "spinel-clip-row", cmd.c_str());
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            GtkWidget *idx_lbl = gtk_label_new(std::to_string(i + 1).c_str());
+            gtk_widget_add_css_class(idx_lbl, "spinel-clip-idx");
+
+            GtkWidget *txt_lbl = gtk_label_new(preview.c_str());
+            gtk_widget_add_css_class(txt_lbl, "spinel-clip-txt");
+            gtk_widget_set_hexpand(txt_lbl, TRUE);
+            gtk_widget_set_halign(txt_lbl, GTK_ALIGN_START);
+            gtk_label_set_ellipsize(GTK_LABEL(txt_lbl), PANGO_ELLIPSIZE_END);
+            gtk_label_set_max_width_chars(GTK_LABEL(txt_lbl), 34);
+
+            GtkWidget *meta_lbl = gtk_label_new(tbuf);
+            gtk_widget_add_css_class(meta_lbl, "spinel-clip-meta");
+
+            gtk_box_append(GTK_BOX(row), idx_lbl);
+            gtk_box_append(GTK_BOX(row), txt_lbl);
+            gtk_box_append(GTK_BOX(row), meta_lbl);
+            gtk_button_set_child(GTK_BUTTON(btn), row);
+            g_signal_connect(btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+                auto *st_ns = static_cast<NativeShellState *>(d);
+                if (st_ns && st_ns->clip_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->clip_popover));
+            }), n);
+            gtk_box_append(GTK_BOX(n->clip_list_box), btn);
+        }
+    };
+
+    GtkWidget *clip_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(clip_btn), FALSE);
+    gtk_widget_add_css_class(clip_btn, "spinel-bar-menubtn");
+    gtk_widget_set_tooltip_text(clip_btn, "剪贴板历史（最多 10 条）");
+    GtkWidget *clip_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(clip_da, 15, 15);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(clip_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Clipboard)), nullptr);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(clip_btn), clip_da);
+
+    GtkWidget *cpop = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(cpop), FALSE);
+    gtk_widget_add_css_class(cpop, "spinel-ctx-popover");
+    GtkWidget *cbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+    gtk_widget_set_size_request(cbox, 310, -1);
+    gtk_popover_set_child(GTK_POPOVER(cpop), cbox);
+    ns->clip_popover = cpop;
+    ns->clip_list_box = cbox;
+    g_object_set_data(G_OBJECT(cpop), "rebuild_fn", reinterpret_cast<gpointer>(rebuild_clip_popover));
+    g_signal_connect(cpop, "notify::visible", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        if (gtk_widget_get_visible(GTK_WIDGET(obj))) {
+            auto fn = reinterpret_cast<void (*)(NativeShellState *)>(g_object_get_data(obj, "rebuild_fn"));
+            if (fn) fn(static_cast<NativeShellState *>(d));
+        }
+    }), ns);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(clip_btn), cpop);
+
     ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
     GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "游戏与启动中心", "games:open");
     ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
@@ -1110,6 +1232,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
 
     gtk_box_append(GTK_BOX(right), mem_btn);
+    gtk_box_append(GTK_BOX(right), clip_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), search_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
@@ -2154,6 +2277,15 @@ void apply_native_css(NativeShellState *ns) {
         "  border-radius: 8px;\n"
         "}\n"
         ".spinel-ctx-item:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-clip-head { font-size: 12px; font-weight: 700; color: " + t.bar_fg + "; padding: 2px 4px; }\n"
+        ".spinel-clip-clr { background: transparent; border: none; box-shadow: none; font-size: 11.5px; padding: 2px 8px; border-radius: 6px; color: " + t.cc_accent + "; }\n"
+        ".spinel-clip-clr:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-clip-empty { font-size: 11.5px; color: " + std::string(cc_sub_fg) + "; padding: 14px 8px; }\n"
+        ".spinel-clip-row { background: transparent; background-image: none; border: none; box-shadow: none; padding: 6px 8px; border-radius: 8px; color: " + t.bar_fg + "; }\n"
+        ".spinel-clip-row:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-clip-idx { font-size: 11px; font-weight: 700; min-width: 18px; padding: 1px 5px; border-radius: 5px; background-color: " + std::string(cc_chip_bg) + "; color: " + t.bar_fg + "; }\n"
+        ".spinel-clip-txt { font-size: 12px; color: " + t.bar_fg + "; }\n"
+        ".spinel-clip-meta { font-size: 11px; color: " + std::string(cc_sub_fg) + "; }\n"
         ".spinel-cc-pill, .spinel-cc-card, .spinel-cc-orb {\n"
         "  background-image: linear-gradient(155deg, " + t.cc_top + ", " + t.cc_bot + ");\n"
         "  border: 1px solid " + t.cc_border + ";\n"

@@ -77,7 +77,7 @@ if [ "$MODE" = "full" ]; then
   sudo pacman -Syu --noconfirm --needed \
     flatpak ptyxis mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
-    spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
+    spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-chinese-addons fcitx5-rime fcitx5-gtk fcitx5-qt fcitx5-configtool
   fc-cache -f >/dev/null 2>&1 || true
@@ -190,6 +190,11 @@ nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
 if command -v mako >/dev/null 2>&1; then
   pkill -x mako 2>/dev/null || true
   nohup mako >/tmp/spinel-mako.log 2>&1 </dev/null &
+fi
+
+if command -v wl-clip-persist >/dev/null 2>&1; then
+  pkill -x wl-clip-persist 2>/dev/null || true
+  nohup wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 </dev/null &
 fi
 
 if command -v fcitx5 >/dev/null 2>&1; then

@@ -243,6 +243,7 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     init_native_shell(app, state);
     init_window_tracker(state);
     start_gamepad_hotkey_listener(state);
+    start_clipboard_watcher();
 
     g_timeout_add_seconds(3, on_telemetry_tick, state);
 }
@@ -524,12 +525,23 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         kill_process_by_pid(state, std::atoi(cmd.substr(11).c_str()), false);
     } else if (cmd.rfind("procs:force:", 0) == 0) {
         kill_process_by_pid(state, std::atoi(cmd.substr(12).c_str()), true);
+    } else if (cmd.rfind("clip:copy:", 0) == 0) {
+        size_t idx = static_cast<size_t>(std::strtoul(cmd.substr(10).c_str(), nullptr, 10));
+        auto items = load_clipboard_history();
+        if (idx < items.size()) {
+            copy_text_to_clipboard(items[idx].text);
+        }
+    } else if (cmd == "clip:clear") {
+        clear_clipboard_history();
     } else if (cmd.rfind("installer:start\n", 0) == 0) {
         start_disk_install(state, cmd);
     }
 }
 
 int main(int argc, char **argv) {
+    if (argc > 1 && std::string(argv[1]) == "--clip-hook") {
+        return run_clipboard_hook_from_stdin();
+    }
     ensure_display_env();
     const char *wlr = std::getenv("WLR_RENDERER");
     if (wlr && std::string(wlr) == "pixman") {
@@ -554,6 +566,7 @@ int main(int argc, char **argv) {
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &state);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     state.shutting_down.store(true);
+    stop_clipboard_watcher();
     stop_gamepad_hotkey_listener();
     shutdown_window_tracker();
     shutdown_native_shell(&state);

@@ -21,6 +21,11 @@ if command -v mako >/dev/null 2>&1; then
   mako >/tmp/spinel-mako.log 2>&1 &
 fi
 
+# Persist Wayland clipboard contents across closed source windows
+if command -v wl-clip-persist >/dev/null 2>&1; then
+  wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 &
+fi
+
 # Start idle lock daemon when swayidle is enabled (default 15m lock unless disabled in power.conf)
 if command -v swayidle >/dev/null 2>&1 && ! grep -qx "idle_lock=false" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
   swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 &

@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 
 #include <string>
+#include <vector>
 
 struct PerfConfig {
     std::string mangohud = "compact";  // off | compact | full
@@ -95,3 +96,15 @@ void toggle_mic_mute(AppState *state);
 void set_power_profile(AppState *state, const std::string &profile);
 void start_gamepad_hotkey_listener(AppState *state);
 void stop_gamepad_hotkey_listener();
+
+struct ClipboardItem {
+    std::string text;
+    long long ts = 0;
+};
+
+int run_clipboard_hook_from_stdin();
+std::vector<ClipboardItem> load_clipboard_history();
+void clear_clipboard_history();
+void copy_text_to_clipboard(const std::string &text);
+void start_clipboard_watcher();
+void stop_clipboard_watcher();

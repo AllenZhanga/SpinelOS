@@ -7,14 +7,19 @@
 #include <linux/joystick.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/file.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -2114,5 +2119,214 @@ void stop_gamepad_hotkey_listener() {
     g_gamepad_stop.store(true);
     if (g_gamepad_thread.joinable()) {
         g_gamepad_thread.join();
+    }
+}
+
+namespace {
+
+constexpr size_t kMaxClipboardItems = 10;
+constexpr size_t kMaxClipboardBytes = 65536;
+
+std::string clip_history_path() {
+    return (fs::path(spinel_state_dir()) / "clipboard_history.tsv").string();
+}
+
+std::string escape_clip_field(const std::string &s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else out += c;
+    }
+    return out;
+}
+
+std::string unescape_clip_field(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char nx = s[++i];
+            if (nx == 'n') out += '\n';
+            else if (nx == 'r') out += '\r';
+            else if (nx == 't') out += '\t';
+            else out += nx;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+std::vector<ClipboardItem> read_clip_items_unlocked() {
+    std::vector<ClipboardItem> items;
+    std::ifstream ifs(clip_history_path());
+    if (!ifs.is_open()) return items;
+    std::string line;
+    while (std::getline(ifs, line) && items.size() < kMaxClipboardItems) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        auto tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        long long ts = std::strtoll(line.substr(0, tab).c_str(), nullptr, 10);
+        std::string txt = unescape_clip_field(line.substr(tab + 1));
+        if (!txt.empty()) {
+            items.push_back({std::move(txt), ts});
+        }
+    }
+    return items;
+}
+
+void write_clip_items_unlocked(const std::vector<ClipboardItem> &items) {
+    std::ostringstream oss;
+    size_t count = std::min(items.size(), kMaxClipboardItems);
+    for (size_t i = 0; i < count; ++i) {
+        oss << items[i].ts << "\t" << escape_clip_field(items[i].text) << "\n";
+    }
+    write_text_file(clip_history_path(), oss.str());
+}
+
+void push_clip_item_locked(const std::string &text) {
+    if (text.empty() || text.size() > kMaxClipboardBytes) return;
+    bool has_non_ws = false;
+    for (unsigned char c : text) {
+        if (!std::isspace(c)) { has_non_ws = true; break; }
+    }
+    if (!has_non_ws) return;
+
+    std::string lock_path = (fs::path(spinel_state_dir()) / "clipboard.lock").string();
+    int lfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+    if (lfd >= 0) ::flock(lfd, LOCK_EX);
+
+    std::vector<ClipboardItem> items = read_clip_items_unlocked();
+    long long now_ts = static_cast<long long>(std::time(nullptr));
+    items.erase(std::remove_if(items.begin(), items.end(), [&](const ClipboardItem &it) {
+        return it.text == text;
+    }), items.end());
+    items.insert(items.begin(), ClipboardItem{text, now_ts});
+    if (items.size() > kMaxClipboardItems) items.resize(kMaxClipboardItems);
+    write_clip_items_unlocked(items);
+
+    if (lfd >= 0) {
+        ::flock(lfd, LOCK_UN);
+        ::close(lfd);
+    }
+}
+
+pid_t g_clip_watcher_pid = -1;
+
+}  // namespace
+
+int run_clipboard_hook_from_stdin() {
+    std::string buf;
+    std::array<char, 4096> chunk{};
+    ssize_t n = 0;
+    while ((n = ::read(STDIN_FILENO, chunk.data(), chunk.size())) > 0) {
+        if (buf.size() + static_cast<size_t>(n) > kMaxClipboardBytes) {
+            return 0;  // Skip huge clipboard blobs
+        }
+        buf.append(chunk.data(), static_cast<size_t>(n));
+    }
+    push_clip_item_locked(buf);
+    return 0;
+}
+
+std::vector<ClipboardItem> load_clipboard_history() {
+    std::string lock_path = (fs::path(spinel_state_dir()) / "clipboard.lock").string();
+    int lfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+    if (lfd >= 0) ::flock(lfd, LOCK_SH);
+    auto items = read_clip_items_unlocked();
+    if (lfd >= 0) {
+        ::flock(lfd, LOCK_UN);
+        ::close(lfd);
+    }
+    return items;
+}
+
+void clear_clipboard_history() {
+    std::string lock_path = (fs::path(spinel_state_dir()) / "clipboard.lock").string();
+    int lfd = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+    if (lfd >= 0) ::flock(lfd, LOCK_EX);
+    std::error_code ec;
+    fs::remove(clip_history_path(), ec);
+    if (lfd >= 0) {
+        ::flock(lfd, LOCK_UN);
+        ::close(lfd);
+    }
+}
+
+void copy_text_to_clipboard(const std::string &text) {
+    if (text.empty()) return;
+    push_clip_item_locked(text);
+    if (!has_executable("wl-copy")) return;
+
+    int pipefd[2]{-1, -1};
+    if (::pipe(pipefd) != 0) return;
+
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        pid_t grand = ::fork();
+        if (grand != 0) _exit(0);
+        ::setsid();
+        ::dup2(pipefd[0], STDIN_FILENO);
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+        int devnull = ::open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            ::dup2(devnull, STDOUT_FILENO);
+            ::dup2(devnull, STDERR_FILENO);
+            if (devnull > 2) ::close(devnull);
+        }
+        ::execlp("wl-copy", "wl-copy", nullptr);
+        _exit(127);
+    }
+    ::close(pipefd[0]);
+    if (pid > 0) {
+        size_t off = 0;
+        while (off < text.size()) {
+            ssize_t w = ::write(pipefd[1], text.data() + off, text.size() - off);
+            if (w <= 0) break;
+            off += static_cast<size_t>(w);
+        }
+        ::close(pipefd[1]);
+        ::waitpid(pid, nullptr, 0);
+    } else {
+        ::close(pipefd[1]);
+    }
+}
+
+void start_clipboard_watcher() {
+    if (g_clip_watcher_pid > 0 || !has_executable("wl-paste")) return;
+    std::array<char, 512> self_buf{};
+    ssize_t slen = ::readlink("/proc/self/exe", self_buf.data(), self_buf.size() - 1);
+    std::string self_exe = (slen > 0) ? std::string(self_buf.data(), static_cast<size_t>(slen))
+                                      : "/usr/local/bin/spinel-shell";
+
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+        int devnull = ::open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            ::dup2(devnull, STDIN_FILENO);
+            ::dup2(devnull, STDOUT_FILENO);
+            ::dup2(devnull, STDERR_FILENO);
+            if (devnull > 2) ::close(devnull);
+        }
+        ::execlp("wl-paste", "wl-paste", "--no-newline", "--type", "text", "--watch",
+                 self_exe.c_str(), "--clip-hook", nullptr);
+        _exit(127);
+    }
+    if (pid > 0) {
+        g_clip_watcher_pid = pid;
+    }
+}
+
+void stop_clipboard_watcher() {
+    if (g_clip_watcher_pid > 0) {
+        ::kill(g_clip_watcher_pid, SIGTERM);
+        ::waitpid(g_clip_watcher_pid, nullptr, 0);
+        g_clip_watcher_pid = -1;
     }
 }
