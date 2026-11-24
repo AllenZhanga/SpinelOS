@@ -218,7 +218,6 @@
   <section id="app-games" class="app-window hidden">
     <header class="win-toolbar">
       <div>
-        <span class="badge">SpinelOS Games</span>
         <h2>游戏与应用中心</h2>
       </div>
       <div class="footer-actions">
@@ -230,7 +229,6 @@
       <section class="library-section glass">
         <div class="section-head">
           <div class="lib-title-wrap">
-            <span class="card-tag">STEAM LIBRARY</span>
             <h3>本地 Steam 游戏库</h3>
             <span id="steam-count-badge" class="status-chip">0 款游戏</span>
           </div>
@@ -247,7 +245,6 @@
       <section class="library-section glass">
         <div class="section-head">
           <div class="lib-title-wrap">
-            <span class="card-tag">LAUNCHPAD</span>
             <h3>全部桌面应用程序</h3>
           </div>
           <button class="btn small primary" data-cmd="store:open">前往应用商店下载</button>
@@ -258,22 +255,48 @@
   </section>
 
   <!-- 5. System Settings Window (?mode=settings) -->
-  <section id="app-settings" class="app-window hidden">
-    <header class="win-toolbar">
-      <div>
-        <span class="badge">SpinelOS Settings</span>
+  <section id="app-settings" class="app-window settings-shell hidden">
+    <aside class="settings-sidebar">
+      <div class="settings-sidebar-head">
         <h2>系统设置</h2>
       </div>
-      <div class="tab-bar">
-        <button class="tab-btn active" data-cmd="settings:tab:wifi">Wi-Fi 网络</button>
-        <button class="tab-btn" data-cmd="settings:tab:bt">蓝牙手柄</button>
-        <button class="tab-btn" data-cmd="settings:tab:display">显示器</button>
-        <button class="tab-btn" data-cmd="settings:tab:perf">游戏性能</button>
-        <button class="tab-btn" data-cmd="settings:tab:appearance">外观与系统</button>
-        <button class="tab-btn" data-cmd="settings:tab:perms">权限与安全</button>
-        <button class="tab-btn" data-cmd="settings:tab:logs">系统日志</button>
-      </div>
-    </header>
+      <nav class="settings-nav" aria-label="设置导航">
+        <button type="button" class="settings-nav-item active" data-cmd="settings:tab:wifi">
+          <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.2 6.2a8.8 8.8 0 0 1 11.6 0M4.8 9a5.2 5.2 0 0 1 6.4 0"/><circle cx="8" cy="12.2" r="1.2" fill="currentColor" stroke="none"/></svg></span>
+          <span>Wi-Fi 与网络</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:bt">
+          <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2v12l3.8-3.4L4.5 5.4M8 2l3.8 3.4-7.3 5.2"/></svg></span>
+          <span>蓝牙手柄</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:display">
+          <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="8.5" rx="1.6"/><path d="M5.5 13.5h5M8 11v2.5" stroke-linecap="round"/></svg></span>
+          <span>显示器</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perf">
+          <span class="settings-nav-ico ico-violet"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 11.5a5.5 5.5 0 1 1 10 0"/><path d="M8 8.5l2.6-2.4"/><circle cx="8" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
+          <span>游戏性能</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:appearance">
+          <span class="settings-nav-ico ico-pink"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><circle cx="6.2" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="9.8" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="9.8" r="1" fill="currentColor" stroke="none"/></svg></span>
+          <span>外观与输入法</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perms">
+          <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
+          <span>权限与安全</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:logs">
+          <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h4"/></svg></span>
+          <span>系统日志</span>
+        </button>
+      </nav>
+      <div class="settings-sidebar-foot">SpinelOS Gaming</div>
+    </aside>
+
+    <div class="settings-main">
+      <header class="settings-header">
+        <h2 id="settings-page-title">Wi-Fi 与网络</h2>
+      </header>
 
     <div id="tab-wifi" class="win-body">
       <div class="section-head">
@@ -369,13 +392,17 @@
       <section class="perf-strip glass">
         <div class="perf-head">
           <div>
-            <span class="card-tag">PERFORMANCE CONTROL</span>
             <h3>游戏性能与主机大屏预设</h3>
+            <p class="muted-hint">配置 MangoHud 监控、帧率上限、FSR 缩放与 GameMode，并一键写入全部 Steam 游戏启动项。</p>
           </div>
-          <div class="perf-launch-preview">
-            <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
+          <div class="footer-actions">
             <button class="btn small primary" id="btn-apply-steam" data-cmd="perf:apply-steam">写入全部 Steam 游戏</button>
           </div>
+        </div>
+
+        <div class="perf-launch-preview">
+          <span class="perf-label">生成参数</span>
+          <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
         </div>
 
         <div class="perf-controls">
@@ -411,9 +438,15 @@
 
           <div class="perf-group">
             <span class="perf-label">FSR 锐化 &amp; GameMode</span>
-            <div class="pill-group">
-              <button class="pill-btn" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr">FSR 锐化: 关</button>
-              <button class="pill-btn active" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode">GameMode: 开</button>
+            <div class="sp-switch-row-pair">
+              <label class="sp-switch-item">
+                <span>FSR 锐化</span>
+                <button type="button" class="sp-switch" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr" aria-label="FSR 锐化"><span class="sp-switch-thumb"></span></button>
+              </label>
+              <label class="sp-switch-item">
+                <span>GameMode</span>
+                <button type="button" class="sp-switch is-on" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode" aria-label="GameMode"><span class="sp-switch-thumb"></span></button>
+              </label>
             </div>
           </div>
         </div>
@@ -547,13 +580,13 @@
       </div>
       <pre id="sys-logs-box" class="log-box selectable" style="height: 410px;">正在读取系统日志...</pre>
     </div>
+    </div>
   </section>
 
   <!-- 6. Graphical Disk Installer Window (?mode=installer) -->
   <section id="app-installer" class="app-window hidden">
     <header class="win-toolbar">
       <div>
-        <span class="badge">SpinelOS Installer</span>
         <h2>安装 SpinelOS 到本地硬盘</h2>
       </div>
       <span id="inst-env-badge" class="status-chip">检测环境...</span>
@@ -672,7 +705,6 @@
   <section id="app-store" class="app-window hidden">
     <header class="win-toolbar">
       <div>
-        <span class="badge">SpinelOS App Store</span>
         <h2>应用商店</h2>
       </div>
       <div class="tab-bar" id="store-cat-tabs">

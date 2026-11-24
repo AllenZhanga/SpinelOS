@@ -153,7 +153,7 @@ void open_games_window(AppState *state) {
 void open_settings_window(AppState *state, const std::string &tab) {
     bool existed = (state->settings_win != nullptr);
     ensure_app_window(state, &state->settings_win, &state->settings_view,
-                      "SpinelOS 系统设置", "?mode=settings&tab=" + tab, 920, 640);
+                      "SpinelOS 系统设置", "?mode=settings&tab=" + tab, 960, 660);
     if (existed) {
         eval_js(state->settings_view, "window.__spinelOpenSettings && window.__spinelOpenSettings('" + tab + "');");
     }
@@ -493,7 +493,9 @@ int main(int argc, char **argv) {
     }
 
     sync_process_proxy_env();
-    ensure_fcitx5_defaults(get_active_theme().is_light);
+    ThemeSpec startup_theme = get_active_theme();
+    sync_labwc_window_theme(startup_theme.is_light);
+    ensure_fcitx5_defaults(startup_theme.is_light);
 
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);

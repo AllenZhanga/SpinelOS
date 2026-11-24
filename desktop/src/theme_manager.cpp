@@ -307,6 +307,35 @@ ThemeSpec get_active_theme() {
     return list.front();
 }
 
+void sync_labwc_window_theme(bool is_light) {
+    const std::string target_theme = is_light ? "SpinelLight" : "SpinelDark";
+    std::error_code ec;
+    fs::path user_dir = fs::path(home_dir()) / ".config/labwc";
+    fs::path user_rc = user_dir / "rc.xml";
+    fs::path src_rc = fs::exists(user_rc, ec) ? user_rc : fs::path("/etc/xdg/labwc/rc.xml");
+
+    std::ifstream ifs(src_rc);
+    if (!ifs.is_open()) return;
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+
+    auto open_pos = content.find("<name>");
+    auto close_pos = (open_pos != std::string::npos) ? content.find("</name>", open_pos) : std::string::npos;
+    if (open_pos == std::string::npos || close_pos == std::string::npos) return;
+
+    std::string current = content.substr(open_pos + 6, close_pos - (open_pos + 6));
+    if (current == target_theme && fs::exists(user_rc, ec)) return;
+
+    content.replace(open_pos + 6, close_pos - (open_pos + 6), target_theme);
+    fs::create_directories(user_dir, ec);
+    std::ofstream ofs(user_rc, std::ios::trunc);
+    if (ofs.is_open()) {
+        ofs << content;
+        ofs.close();
+        spawn_argv_detached({"pkill", "-HUP", "-x", "labwc"});
+    }
+}
+
 void set_active_theme(AppState *state, const std::string &theme_id) {
     auto list = list_available_themes();
     bool valid = false;
@@ -330,6 +359,7 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
     std::fprintf(stderr, "[Theme] 切换主题 request='%s' -> active='%s' (is_light=%s)\n",
                  theme_id.c_str(), active.id.c_str(), active.is_light ? "true" : "false");
     append_app_log("[Theme] 切换主题 -> " + active.id + (active.is_light ? " (浅色)" : " (深色)"));
+    sync_labwc_window_theme(active.is_light);
     sync_fcitx5_theme(active.is_light);
     push_theme_state(state);
     native_shell_sync_theme(state);

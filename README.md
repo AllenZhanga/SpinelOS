@@ -15,6 +15,8 @@
 │   ├── CMakeLists.txt
 │   ├── src/main.cpp             # Wayland Layer-Shell 宿主 & JS<->C++ sysbridge IPC
 │   └── ui/                      # 桌面前端 (index.html / styles.css / app.js)
+├── docs/
+│   └── UI_SPEC.md               # SpinelOS 统一 UI 设计规范（Design Tokens / 栅格 / 组件 / 主题）
 ├── archiso/                     # ArchISO 定制覆盖层
 │   ├── packages.custom.x86_64   # 显卡、Wayland、Steam、音频、字体等软件清单
 │   └── airootfs/                # 根文件系统覆盖（自动登录、NVIDIA KMS、桌面启动脚本）

@@ -54,4 +54,5 @@ ThemeSpec get_active_theme();
 std::string get_active_theme_id();
 void set_active_theme(AppState *state, const std::string &theme_id);
 void push_theme_state(AppState *state);
+void sync_labwc_window_theme(bool is_light);
 void export_custom_theme_template();

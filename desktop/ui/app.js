@@ -748,13 +748,13 @@
     });
     const fsrBtn = document.getElementById("btn-toggle-fsr");
     if (fsrBtn) {
-      fsrBtn.textContent = `FSR 锐化: ${perfState.fsr ? "开" : "关"}`;
-      fsrBtn.classList.toggle("active", Boolean(perfState.fsr));
+      fsrBtn.classList.toggle("is-on", Boolean(perfState.fsr));
+      fsrBtn.setAttribute("aria-checked", String(Boolean(perfState.fsr)));
     }
     const gmBtn = document.getElementById("btn-toggle-gamemode");
     if (gmBtn) {
-      gmBtn.textContent = `GameMode: ${perfState.gamemode ? "开" : "关"}`;
-      gmBtn.classList.toggle("active", Boolean(perfState.gamemode));
+      gmBtn.classList.toggle("is-on", Boolean(perfState.gamemode));
+      gmBtn.setAttribute("aria-checked", String(Boolean(perfState.gamemode)));
     }
     const ccGmCircle = document.getElementById("cc-gm-circle");
     const ccGmVal = document.getElementById("cc-gm-val");
@@ -927,13 +927,24 @@
   let activeLogSource = "apps";
 
   function switchSettingsTab(tab) {
-    const tabs = ["wifi", "bt", "display", "perf", "appearance", "perms", "logs"];
+    const titles = {
+      wifi: "Wi-Fi 与网络",
+      bt: "蓝牙手柄",
+      display: "显示器",
+      perf: "游戏性能",
+      appearance: "外观与输入法",
+      perms: "权限与安全",
+      logs: "系统日志"
+    };
+    const tabs = Object.keys(titles);
     const target = tabs.includes(tab) ? tab : "wifi";
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
       if (body) body.classList.toggle("hidden", t !== target);
     });
-    document.querySelectorAll("#app-settings .tab-btn").forEach((btn) => {
+    const titleEl = document.getElementById("settings-page-title");
+    if (titleEl) titleEl.textContent = titles[target] || "系统设置";
+    document.querySelectorAll("#app-settings [data-cmd^='settings:tab:']").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-cmd") === `settings:tab:${target}`);
     });
     if (target === "wifi") sendCommand("settings:wifi-list");
@@ -1007,19 +1018,27 @@
           head.append(titleWrap, resetBtn);
 
           const pills = document.createElement("div");
-          pills.className = "footer-actions";
-          pills.style.flexWrap = "wrap";
+          pills.className = "perms-toggle-grid";
           permDefs.forEach((pd) => {
             const on = Boolean(app[pd.key]);
-            const b = document.createElement("button");
-            b.type = "button";
-            b.className = "pill-btn" + (on ? " active" : "");
-            b.textContent = `${pd.label}: ${on ? "允许" : "禁止"}`;
-            b.addEventListener("click", (ev) => {
+            const row = document.createElement("div");
+            row.className = "sp-switch-row";
+            const lbl = document.createElement("span");
+            lbl.textContent = pd.label;
+            const sw = document.createElement("button");
+            sw.type = "button";
+            sw.className = "sp-switch" + (on ? " is-on" : "");
+            sw.setAttribute("aria-label", `${app.name || app.id} ${pd.label}`);
+            sw.setAttribute("aria-checked", String(on));
+            const thumb = document.createElement("span");
+            thumb.className = "sp-switch-thumb";
+            sw.appendChild(thumb);
+            sw.addEventListener("click", (ev) => {
               ev.stopPropagation();
               sendCommand(`perms:set\napp=${app.id}\nkey=${pd.key}\nval=${on ? "false" : "true"}`);
             });
-            pills.appendChild(b);
+            row.append(lbl, sw);
+            pills.appendChild(row);
           });
 
           card.append(head, pills);

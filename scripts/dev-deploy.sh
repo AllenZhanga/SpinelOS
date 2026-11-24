@@ -82,11 +82,12 @@ if [ "$MODE" = "full" ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/fcitx5/themes
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/foot/. /etc/xdg/foot/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
+  sudo cp -a /tmp/spinel-dev/SpinelLight/. /usr/share/themes/SpinelLight/
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
   sudo install -Dm755 /tmp/spinel-dev/spinel-install /usr/local/bin/spinel-install
@@ -177,6 +178,8 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/xdg-desktop-portal/" "${DEV_HOST}:/tmp/spinel-dev/portals/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelLight/" "${DEV_HOST}:/tmp/spinel-dev/SpinelLight/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/fcitx5/themes/" "${DEV_HOST}:/tmp/spinel-dev/fcitx5-themes/"
   rsync -avz -e "${SSH_CMD}" \
