@@ -48,7 +48,16 @@ ln -sf /usr/lib/systemd/system/bluetooth.service \
 ln -sf /usr/lib/systemd/system/bluetooth.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
 
+# Disable slow boot-blocking wait-online / mirror-ranking services on Live ISO
+ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/NetworkManager-wait-online.service"
+ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/systemd-networkd-wait-online.service"
+ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/reflector.service"
+ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/choose-mirror.service"
+
 echo "[4/5] Configuring bootloader kernel parameters, branding & profiledef..."
+if [ -f "${PROFILE_DIR}/efiboot/loader/loader.conf" ]; then
+  sed -i 's/^timeout .*/timeout 2/' "${PROFILE_DIR}/efiboot/loader/loader.conf"
+fi
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
   if [ -f "$cfg" ]; then
     sed -i 's/Arch Linux install medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
@@ -69,7 +78,7 @@ iso_label="SPINELOS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
 iso_publisher="SpinelOS <https://github.com/AllenZhanga/SpinelOS>"
 iso_application="SpinelOS Gaming Linux Live ISO"
 airootfs_image_type="squashfs"
-airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '10' '-b' '1M')
+airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '10' '-b' '256K')
 file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"
 file_permissions["/usr/local/bin/start-spinel-desktop"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-shell"]="0:0:0755"
