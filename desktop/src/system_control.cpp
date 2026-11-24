@@ -667,11 +667,24 @@ std::string collect_logs_bundle_text(const std::string &source) {
     }
 
     fs::path app_log = fs::path(spinel_state_dir()) / "apps.log";
-    std::string txt = read_tail_lines(app_log, 300);
+    std::string txt = read_tail_lines(app_log, 240);
     if (txt.empty()) {
         txt = "暂无应用启动日志。\n点击桌面或游戏中心中的 Steam、主机大屏、终端或应用商店软件后，输出与报错会实时记录在:\n" + app_log.string();
     }
-    return "=== " + app_log.string() + " ===\n" + txt;
+    std::ostringstream out;
+    out << "=== " << app_log.string() << " ===\n" << txt;
+
+    fs::path steam_console = fs::path(home_dir()) / ".local/share/Steam/logs/console-linux.txt";
+    std::string st = read_tail_lines(steam_console, 45);
+    if (!st.empty()) {
+        out << "\n\n=== Steam console-linux.txt (最近 45 行) ===\n" << st;
+    }
+    fs::path steam_boot = fs::path(home_dir()) / ".local/share/Steam/logs/bootstrap_log.txt";
+    std::string sb = read_tail_lines(steam_boot, 20);
+    if (!sb.empty()) {
+        out << "\n\n=== Steam bootstrap_log.txt (最近 20 行) ===\n" << sb;
+    }
+    return out.str();
 }
 
 struct NativeLogWindowCtx {

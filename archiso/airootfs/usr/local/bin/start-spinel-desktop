@@ -9,12 +9,15 @@ export QT_QPA_PLATFORM=wayland
 export SDL_VIDEODRIVER=wayland,x11
 export MOZ_ENABLE_WAYLAND=1
 
-# Ensure runtime dir exists
+# Ensure runtime dir & session D-Bus exist
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 fi
 mkdir -p "${XDG_RUNTIME_DIR}"
 chmod 700 "${XDG_RUNTIME_DIR}" 2>/dev/null || true
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+fi
 
 IS_VM=0
 if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then

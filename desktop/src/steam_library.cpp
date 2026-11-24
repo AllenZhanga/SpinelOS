@@ -330,6 +330,23 @@ void show_steam_alert(const std::string &title, const std::string &detail) {
     }, msg);
 }
 
+bool is_steam_bootstrapping(std::string &progress_line) {
+    progress_line.clear();
+    std::string pid_out;
+    int pid_rc = 1;
+    if (!run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pid_out, pid_rc) || pid_rc != 0) {
+        return false;
+    }
+    fs::path steamui = fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steamui.so";
+    std::error_code ec;
+    if (fs::exists(steamui, ec)) {
+        return false;  // Already bootstrapped, real Steam client is running
+    }
+    std::string raw = run_cmd_capture("tail -n 3 ~/.local/share/Steam/logs/bootstrap_log.txt 2>/dev/null | tr '\\r' '\\n' | grep -v '^$' | tail -n 1");
+    progress_line = raw.empty() ? "正在初始化 Steam 运行环境与下载客户端更新..." : raw;
+    return true;
+}
+
 }  // namespace
 
 void launch_steam_client(AppState *state) {
@@ -340,9 +357,18 @@ void launch_steam_client(AppState *state) {
                          "当前系统尚未安装 steam。请联网后在终端执行 sudo pacman -Sy steam 安装。");
         return;
     }
+    std::string prog;
+    if (is_steam_bootstrapping(prog)) {
+        append_app_log("[Steam] 后台正在首次更新下载: " + prog);
+        show_steam_alert("Steam 正在后台首次初始化与下载更新",
+                         "当前进度: " + prog + "\n\n首次运行需要下载约 497MB 官方客户端，完成后会自动打开 Steam 窗口（无需重复点击）。可在「系统设置 → 系统日志」查看实时进度。");
+        return;
+    }
     std::error_code ec;
-    if (!fs::exists(fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steam", ec)) {
-        append_app_log("[Steam] 检测到首次运行环境，正在初始化 Steam 运行时（需保持联网下载约 300MB）...");
+    if (!fs::exists(fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steamui.so", ec)) {
+        append_app_log("[Steam] 检测到首次运行环境，正在后台下载 Steam 官方运行时（约 497MB），请稍候...");
+        show_steam_alert("正在首次初始化 Steam",
+                         "首次启动 Steam 需要在后台联网下载约 497MB 客户端运行时（约 1~3 分钟），完成后会自动弹出登录界面。可在「系统设置 → 系统日志」查看实时下载进度。");
     }
     std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
     spawn_argv_logged({"steam"}, "Steam");
@@ -368,6 +394,13 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
         append_app_log("[GamepadUI] 启动失败: 未检测到 /usr/bin/steam");
         show_steam_alert("无法启动主机大屏模式",
                          "当前系统未检测到 Steam 客户端（可在终端执行 sudo pacman -Sy steam 安装，或在应用商店安装 Heroic / Lutris）。");
+        return;
+    }
+    std::string prog;
+    if (is_steam_bootstrapping(prog)) {
+        append_app_log("[GamepadUI] 后台正在首次更新 Steam: " + prog);
+        show_steam_alert("Steam 正在后台首次初始化与下载更新",
+                         "当前进度: " + prog + "\n\n请等待首次约 497MB 客户端更新完成后，再进入主机大屏（可在「系统设置 → 系统日志」查看进度）。");
         return;
     }
 
