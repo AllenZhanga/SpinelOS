@@ -244,8 +244,8 @@ void handle_command(AppState *state, const std::string &cmd) {
     } else if (cmd.rfind("dock:resize:", 0) == 0) {
         int w = std::clamp(std::atoi(cmd.substr(12).c_str()), 380, 1600);
         if (state->dock_window && state->dock_view) {
-            gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), w, 112);
-            gtk_window_set_default_size(state->dock_window, w, 112);
+            gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), w, 124);
+            gtk_window_set_default_size(state->dock_window, w, 124);
         }
     } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
         set_wallpaper_pref(state, cmd.substr(14));
@@ -321,7 +321,7 @@ GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-bar");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_TOP);
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
@@ -347,6 +347,7 @@ GtkWindow *create_desktop_layer(GtkApplication *app, AppState *state) {
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_exclusive_zone(win, -1);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
 
     state->desktop_view = create_configured_webview(state, true);
@@ -360,18 +361,18 @@ GtkWindow *create_dock_layer(GtkApplication *app, AppState *state) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelDock");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 580, 112);
+    gtk_window_set_default_size(win, 580, 124);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-dock");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_TOP);
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, 6);
     gtk_layer_set_exclusive_zone(win, 74);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
     state->dock_view = create_configured_webview(state, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 112);
+    gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 124);
     gtk_window_set_child(win, GTK_WIDGET(state->dock_view));
 
     webkit_web_view_load_uri(state->dock_view, resolve_ui_uri("?mode=dock").c_str());
