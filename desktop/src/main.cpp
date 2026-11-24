@@ -488,6 +488,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
 }
 
 int main(int argc, char **argv) {
+    ensure_display_env();
     const char *wlr = std::getenv("WLR_RENDERER");
     if (wlr && std::string(wlr) == "pixman") {
         setenv("GSK_RENDERER", "cairo", 0);

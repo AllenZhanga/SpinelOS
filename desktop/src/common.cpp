@@ -1,6 +1,7 @@
 #include "common.hpp"
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -50,6 +51,34 @@ std::string trim_copy(const std::string &s) {
 std::string home_dir() {
     const char *h = std::getenv("HOME");
     return (h && *h) ? std::string(h) : "/home/gamer";
+}
+
+void ensure_display_env() {
+    const char *disp = std::getenv("DISPLAY");
+    if (disp && *disp) return;
+
+    std::error_code ec;
+    int best = -1;
+    for (const auto &entry : fs::directory_iterator("/tmp/.X11-unix", ec)) {
+        std::string name = entry.path().filename().string();
+        if (name.size() < 2 || name[0] != 'X') continue;
+        bool digits = true;
+        for (size_t i = 1; i < name.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(name[i]))) {
+                digits = false;
+                break;
+            }
+        }
+        if (!digits) continue;
+        struct stat st{};
+        if (lstat(entry.path().c_str(), &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
+        int num = std::stoi(name.substr(1));
+        if (best < 0 || num < best) best = num;
+    }
+    if (best >= 0) {
+        std::string val = ":" + std::to_string(best);
+        setenv("DISPLAY", val.c_str(), 1);
+    }
 }
 
 std::string spinel_state_dir() {
@@ -193,6 +222,7 @@ void append_app_log(const std::string &line) {
 }
 
 void spawn_detached(const std::string &cmd) {
+    ensure_display_env();
     std::string wrapped = "nohup " + cmd + " >/dev/null 2>&1 &";
     int rc = std::system(wrapped.c_str());
     (void)rc;
@@ -201,6 +231,7 @@ void spawn_detached(const std::string &cmd) {
 void spawn_argv_detached(const std::vector<std::string> &args,
                          const std::vector<std::pair<std::string, std::string>> &env_overrides) {
     if (args.empty()) return;
+    ensure_display_env();
     pid_t pid = fork();
     if (pid != 0) {
         if (pid > 0) {
@@ -241,6 +272,7 @@ void spawn_argv_logged(const std::vector<std::string> &args,
                        const std::string &tag,
                        const std::vector<std::pair<std::string, std::string>> &env_overrides) {
     if (args.empty()) return;
+    ensure_display_env();
 
     std::ostringstream cmdline;
     for (size_t i = 0; i < args.size(); ++i) {

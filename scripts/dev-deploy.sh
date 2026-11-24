@@ -109,6 +109,20 @@ if [ -z "$WAYLAND_SOCK" ]; then
 fi
 export WAYLAND_DISPLAY="$(basename "$WAYLAND_SOCK")"
 
+if [ -z "${DISPLAY:-}" ]; then
+  SYS_DISP="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^DISPLAY=//p' | head -n1 || true)"
+  if [ -n "$SYS_DISP" ]; then
+    export DISPLAY="$SYS_DISP"
+  elif [ -S /tmp/.X11-unix/X0 ]; then
+    export DISPLAY=":0"
+  else
+    X11_SOCK="$(ls /tmp/.X11-unix/X* 2>/dev/null | head -n1 || true)"
+    if [ -n "$X11_SOCK" ]; then
+      export DISPLAY=":$(basename "$X11_SOCK" | sed 's/^X//')"
+    fi
+  fi
+fi
+
 if [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
 elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then
@@ -137,7 +151,7 @@ if [ "$MODE" = "full" ]; then
     nohup /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null &
   fi
   if command -v systemctl >/dev/null 2>&1; then
-    dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true
+    dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true
     systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true
   fi
 fi
