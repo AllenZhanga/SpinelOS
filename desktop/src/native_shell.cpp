@@ -1332,6 +1332,41 @@ void free_desktop_icon_ctx(gpointer data) {
     delete static_cast<DesktopIconDrawCtx *>(data);
 }
 
+void clear_desktop_shortcut_selection(NativeShellState *ns) {
+    if (!ns || !ns->desktop_flow) return;
+    for (GtkWidget *fc = gtk_widget_get_first_child(ns->desktop_flow); fc; fc = gtk_widget_get_next_sibling(fc)) {
+        GtkWidget *tile = GTK_IS_FLOW_BOX_CHILD(fc) ? gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(fc)) : fc;
+        if (tile) gtk_widget_remove_css_class(tile, "selected");
+    }
+}
+
+void on_desktop_shortcut_pressed(GtkGestureClick *gesture, int n_press, double, double, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    GtkWidget *tile = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    if (!ns || !tile) return;
+
+    if (ns->app_state && ns->cc_win && gtk_widget_get_visible(GTK_WIDGET(ns->cc_win))) {
+        native_shell_set_cc_visible(ns->app_state, false);
+    }
+
+    clear_desktop_shortcut_selection(ns);
+    gtk_widget_add_css_class(tile, "selected");
+
+    if (n_press == 2) {
+        const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(tile), "spinel-cmd"));
+        if (cmd) trigger_cmd(ns->app_state, cmd);
+    }
+}
+
+void on_desktop_bg_click(GtkGestureClick *, int, double, double, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns) return;
+    if (ns->app_state && ns->cc_win && gtk_widget_get_visible(GTK_WIDGET(ns->cc_win))) {
+        native_shell_set_cc_visible(ns->app_state, false);
+    }
+    clear_desktop_shortcut_selection(ns);
+}
+
 void rebuild_desktop_shortcuts(NativeShellState *ns) {
     if (!ns || !ns->desktop_flow) return;
 
@@ -1385,12 +1420,17 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
     }
 
     for (const auto &sc : items) {
-        GtkWidget *btn = make_cmd_button(ns->app_state, nullptr, "spinel-shortcut-btn", sc.cmd.c_str());
-        gtk_widget_set_size_request(btn, 84, 84);
+        GtkWidget *tile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+        gtk_widget_add_css_class(tile, "spinel-shortcut-btn");
+        gtk_widget_set_size_request(tile, 84, 84);
+        gtk_widget_set_halign(tile, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(tile, GTK_ALIGN_START);
+        g_object_set_data_full(G_OBJECT(tile), "spinel-cmd", g_strdup(sc.cmd.c_str()), g_free);
 
-        GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-        gtk_widget_set_halign(vbox, GTK_ALIGN_CENTER);
-        gtk_widget_set_valign(vbox, GTK_ALIGN_START);
+        GtkGesture *dbl = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(dbl), GDK_BUTTON_PRIMARY);
+        g_signal_connect(dbl, "pressed", G_CALLBACK(on_desktop_shortcut_pressed), ns);
+        gtk_widget_add_controller(tile, GTK_EVENT_CONTROLLER(dbl));
 
         GtkWidget *da = gtk_drawing_area_new();
         gtk_widget_set_size_request(da, 52, 52);
@@ -1406,10 +1446,9 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
         gtk_label_set_lines(GTK_LABEL(lbl), 2);
         gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
 
-        gtk_box_append(GTK_BOX(vbox), da);
-        gtk_box_append(GTK_BOX(vbox), lbl);
-        gtk_button_set_child(GTK_BUTTON(btn), vbox);
-        gtk_flow_box_append(GTK_FLOW_BOX(ns->desktop_flow), btn);
+        gtk_box_append(GTK_BOX(tile), da);
+        gtk_box_append(GTK_BOX(tile), lbl);
+        gtk_flow_box_append(GTK_FLOW_BOX(ns->desktop_flow), tile);
     }
 }
 
@@ -1498,6 +1537,11 @@ void build_native_desktop(GtkApplication *app, NativeShellState *ns) {
     gtk_overlay_add_overlay(GTK_OVERLAY(ns->desktop_overlay), ns->desktop_flow);
 
     build_desktop_popover(ns);
+    GtkGesture *bg_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bg_click), GDK_BUTTON_PRIMARY);
+    g_signal_connect(bg_click, "pressed", G_CALLBACK(on_desktop_bg_click), ns);
+    gtk_widget_add_controller(ns->desktop_bg_da, GTK_EVENT_CONTROLLER(bg_click));
+
     GtkGesture *rclick = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(rclick), GDK_BUTTON_SECONDARY);
     g_signal_connect(rclick, "pressed", G_CALLBACK(on_desktop_right_click), ns);
@@ -2709,6 +2753,10 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-shortcut-btn:hover {\n"
         "  background-color: " + std::string(sc_hover) + ";\n"
         "  border-color: " + t.bar_border + ";\n"
+        "}\n"
+        ".spinel-shortcut-btn.selected {\n"
+        "  background-color: " + std::string(sc_hover) + ";\n"
+        "  border-color: " + t.cc_accent + ";\n"
         "}\n"
         ".spinel-shortcut-label {\n"
         "  color: " + t.bar_fg + ";\n"
