@@ -51,6 +51,8 @@ ln -sf /usr/lib/systemd/system/bluetooth.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/bluetooth.service"
 ln -sf /usr/lib/systemd/system/bluetooth.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
+ln -sf /usr/lib/systemd/system/power-profiles-daemon.service \
+  "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/power-profiles-daemon.service"
 
 # Disable slow boot-blocking wait-online / mirror-ranking services on Live ISO
 ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/NetworkManager-wait-online.service"
@@ -93,6 +95,8 @@ file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"
 file_permissions["/usr/local/bin/start-spinel-desktop"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-shell"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-install"]="0:0:0755"
+file_permissions["/usr/local/bin/spinel-screenshot"]="0:0:0755"
+file_permissions["/usr/local/bin/spinel-lock"]="0:0:0755"
 EOF
 
 echo "[5/5] Building ISO via mkarchiso..."

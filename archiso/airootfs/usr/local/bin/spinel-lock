@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v swaylock >/dev/null 2>&1; then
+  exit 0
+fi
+
+# Prevent duplicate swaylock instances
+if pgrep -x swaylock >/dev/null 2>&1; then
+  exit 0
+fi
+
+THEME_ID=""
+if [[ -f "${HOME}/.config/spinelos/theme.conf" ]]; then
+  THEME_ID="$(head -n1 "${HOME}/.config/spinelos/theme.conf" | tr -d '[:space:]')"
+fi
+
+if [[ "${THEME_ID}" == "tahoe-light" ]]; then
+  exec swaylock -f \
+    --color e8f0fe \
+    --inside-color ffffffd8 \
+    --inside-ver-color e0f2fee8 \
+    --inside-wrong-color fee2e2e8 \
+    --ring-color 0284c7 \
+    --ring-ver-color 0ea5e9 \
+    --ring-wrong-color ef4444 \
+    --key-hl-color 2563eb \
+    --bs-hl-color f97316 \
+    --text-color 0f172a \
+    --text-ver-color 0369a1 \
+    --text-wrong-color b91c1c \
+    --indicator-radius 88 \
+    --indicator-thickness 7
+else
+  exec swaylock -f \
+    --color 070b14 \
+    --inside-color 0f172ae0 \
+    --inside-ver-color 0c2d48e8 \
+    --inside-wrong-color 3f111be8 \
+    --ring-color 38bdf8 \
+    --ring-ver-color 0ea5e9 \
+    --ring-wrong-color f43f5e \
+    --key-hl-color 34d399 \
+    --bs-hl-color fb923c \
+    --text-color f8fafc \
+    --text-ver-color e0f2fe \
+    --text-wrong-color ffe4e6 \
+    --indicator-radius 88 \
+    --indicator-thickness 7
+fi

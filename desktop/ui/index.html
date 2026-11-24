@@ -273,6 +273,10 @@
           <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="8.5" rx="1.6"/><path d="M5.5 13.5h5M8 11v2.5" stroke-linecap="round"/></svg></span>
           <span>显示器</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:audio">
+          <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.8l3.5-2.8v9.2L5.3 9.8H2.5z"/><path d="M11.3 5.4a3.6 3.6 0 0 1 0 5.2M13.2 3.8a6 6 0 0 1 0 8.4"/></svg></span>
+          <span>声音与电源</span>
+        </button>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:perf">
           <span class="settings-nav-ico ico-violet"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 11.5a5.5 5.5 0 1 1 10 0"/><path d="M8 8.5l2.6-2.4"/><circle cx="8" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
           <span>游戏性能</span>
@@ -389,6 +393,80 @@
       <div id="display-feedback" class="feedback-banner hidden"></div>
       <div id="display-output-list" class="disk-list">
         <div class="disk-empty">正在读取显示器信息...</div>
+      </div>
+    </div>
+
+    <div id="tab-audio" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>输出设备与主音量 (PipeWire)</h3>
+            <p class="muted-hint">在扬声器、HDMI 显示器音频或蓝牙耳机之间切换默认输出。</p>
+          </div>
+          <div class="footer-actions">
+            <span id="audio-out-pct" class="status-chip">75%</span>
+            <button class="btn small" data-cmd="settings:audio-get">刷新设备</button>
+          </div>
+        </div>
+        <div class="part-section" style="margin-bottom: 10px;">
+          <input type="range" id="audio-out-slider" min="0" max="100" value="75" style="width: 100%;" />
+        </div>
+        <div id="audio-sink-list" class="disk-list">
+          <div class="disk-empty">正在检测音频输出设备...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>麦克风输入设备</h3>
+            <p class="muted-hint">选择默认麦克风或快速开关静音（语音频道 / OBS 录屏生效）。</p>
+          </div>
+          <div class="footer-actions">
+            <span id="audio-mic-pct" class="status-chip">100%</span>
+            <button class="btn small" id="btn-mic-mute" data-cmd="settings:mic-mute">静音切换</button>
+          </div>
+        </div>
+        <div class="part-section" style="margin-bottom: 10px;">
+          <input type="range" id="audio-mic-slider" min="0" max="100" value="100" style="width: 100%;" />
+        </div>
+        <div id="audio-source-list" class="disk-list">
+          <div class="disk-empty">正在检测麦克风设备...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>电源模式、zram 与桌面工具</h3>
+            <p class="muted-hint" id="power-hw-summary">正在检测电源与内存压缩状态...</p>
+          </div>
+        </div>
+        <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>系统性能与功耗模式</strong>
+              <span class="muted-hint">调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）</span>
+            </div>
+            <div class="pill-group">
+              <button class="pill-btn" data-power-profile="power-saver" data-cmd="system:power-profile:power-saver">省电</button>
+              <button class="pill-btn active" data-power-profile="balanced" data-cmd="system:power-profile:balanced">平衡</button>
+              <button class="pill-btn" data-power-profile="performance" data-cmd="system:power-profile:performance">性能</button>
+            </div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>屏幕截图与锁屏快捷操作</strong>
+              <span class="muted-hint">支持 Print 全屏、Ctrl+Shift+4 框选截图、Super+L 锁屏</span>
+            </div>
+            <div class="footer-actions">
+              <button class="btn small" data-cmd="system:screenshot:area">区域截图</button>
+              <button class="btn small" data-cmd="system:screenshot:full">全屏截图</button>
+              <button class="btn small" data-cmd="system:lock">锁定屏幕</button>
+              <button class="btn small" data-cmd="system:suspend">睡眠</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -660,7 +738,7 @@
         <div id="inst-part-section" class="part-section hidden">
           <div class="form-grid">
             <label class="field">
-              <span>根分区 `/`（将格式化为 ext4，建议 ≥ 20 GB）</span>
+              <span>根分区 `/`（将格式化，最低 20 GiB，建议 ≥ 25 GB）</span>
               <select id="inst-root-part"></select>
             </label>
             <label class="field" id="inst-efi-wrap">
@@ -678,6 +756,13 @@
       <div class="inst-section">
         <h3>2. 系统与账号配置</h3>
         <div class="form-grid">
+          <label class="field">
+            <span>根文件系统格式</span>
+            <select id="inst-fs">
+              <option value="ext4" selected>ext4（默认 · 稳定兼容性最高）</option>
+              <option value="btrfs">Btrfs（透明 zstd 压缩 + Snapper 快照子卷）</option>
+            </select>
+          </label>
           <label class="field">
             <span>用户名（小写字母/数字）</span>
             <input type="text" id="inst-username" value="gamer" autocomplete="off" />
@@ -775,6 +860,15 @@
           </select>
           <input type="text" id="store-custom-pkg" placeholder="输入自定义包名或 ID..." />
           <button class="btn small primary" id="btn-store-custom" data-cmd="store:custom-install">下载安装</button>
+        </div>
+      </div>
+
+      <div class="store-top-bar glass" style="justify-content: space-between;">
+        <span class="muted-hint">系统更新与软件源维护（支持国内镜像测速、系统全面升级与密钥环修复）</span>
+        <div class="footer-actions">
+          <button type="button" class="btn small primary" id="btn-sys-update" data-store-sys="sys-update">一键更新系统</button>
+          <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>
+          <button type="button" class="btn small" id="btn-keyring-fix" data-store-sys="keyring-fix">修复密钥环</button>
         </div>
       </div>
 

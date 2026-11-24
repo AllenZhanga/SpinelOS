@@ -3,12 +3,17 @@
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 
+#include <fcntl.h>
+#include <linux/joystick.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -456,6 +461,19 @@ TelemetrySnapshot collect_telemetry() {
     snap.kernel = cached_kernel;
     snap.is_live = cached_live;
     snap.low_fx = cached_low_fx;
+
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator("/sys/class/power_supply", ec)) {
+        std::string nm = entry.path().filename().string();
+        if (nm.rfind("BAT", 0) != 0) continue;
+        std::string cap_s = trim_copy(read_first_line((entry.path() / "capacity").string(), ""));
+        if (!cap_s.empty()) {
+            snap.battery_pct = std::clamp(std::atoi(cap_s.c_str()), 0, 100);
+            std::string st = trim_copy(read_first_line((entry.path() / "status").string(), ""));
+            snap.battery_charging = (st == "Charging" || st == "Full");
+            break;
+        }
+    }
     return snap;
 }
 
@@ -468,14 +486,51 @@ MediaSnapshot collect_media_state() {
         snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
     }
 
-    std::string br_out = run_cmd_capture(
-        "for d in /sys/class/backlight/*; do "
-        "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
-        "cur=$(cat \"$d/brightness\"); max=$(cat \"$d/max_brightness\"); "
-        "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
-        "done 2>/dev/null");
-    if (!br_out.empty()) {
-        snap.brightness = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+    if (has_executable("brightnessctl")) {
+        std::string b_out;
+        int b_rc = 1;
+        if (run_argv_capture({"brightnessctl", "-m"}, b_out, b_rc) && b_rc == 0 && !b_out.empty()) {
+            // Machine format: device,class,current,pct%,max
+            auto p = b_out.find('%');
+            if (p != std::string::npos) {
+                auto comma = b_out.rfind(',', p);
+                if (comma != std::string::npos) {
+                    snap.brightness = std::clamp(std::atoi(b_out.substr(comma + 1, p - comma - 1).c_str()), 5, 100);
+                }
+            }
+        }
+    }
+    if (snap.brightness < 0) {
+        std::string br_out = run_cmd_capture(
+            "for d in /sys/class/backlight/*; do "
+            "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+            "cur=$(cat \"$d/brightness\"); max=$(cat \"$d/max_brightness\"); "
+            "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
+            "done 2>/dev/null");
+        if (!br_out.empty()) {
+            snap.brightness = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+        }
+    }
+
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator("/sys/class/power_supply", ec)) {
+        std::string nm = entry.path().filename().string();
+        if (nm.rfind("BAT", 0) != 0) continue;
+        std::string cap_s = trim_copy(read_first_line((entry.path() / "capacity").string(), ""));
+        if (!cap_s.empty()) {
+            snap.battery_pct = std::clamp(std::atoi(cap_s.c_str()), 0, 100);
+            std::string st = trim_copy(read_first_line((entry.path() / "status").string(), ""));
+            snap.battery_charging = (st == "Charging" || st == "Full");
+            break;
+        }
+    }
+
+    if (has_executable("powerprofilesctl")) {
+        std::string pp_out;
+        int pp_rc = 1;
+        if (run_argv_capture({"powerprofilesctl", "get"}, pp_out, pp_rc) && pp_rc == 0) {
+            snap.power_profile = trim_copy(pp_out);
+        }
     }
     return snap;
 }
@@ -1754,5 +1809,281 @@ void kill_process_by_pid(AppState *state, int pid, bool force) {
                 return G_SOURCE_REMOVE;
             }, state);
         }).detach();
+    }
+}
+
+void sync_notification_theme(bool is_light) {
+    fs::path mako_cfg = fs::path(home_dir()) / ".config/mako/config";
+    std::ostringstream oss;
+    oss << "# SpinelOS Wayland Notification Daemon (mako)\n"
+        << "font=Noto Sans CJK SC 11\n"
+        << "border-radius=12\n"
+        << "border-size=1\n"
+        << "padding=12,14\n"
+        << "margin=12,12,38,12\n"
+        << "width=340\n"
+        << "default-timeout=5000\n"
+        << "layer=overlay\n"
+        << "anchor=top-right\n";
+    if (is_light) {
+        oss << "background-color=#fffffff0\n"
+            << "text-color=#0f172a\n"
+            << "border-color=#0f172a24\n"
+            << "progress-color=over #0284c733\n";
+    } else {
+        oss << "background-color=#111827f0\n"
+            << "text-color=#f8fafc\n"
+            << "border-color=#ffffff2e\n"
+            << "progress-color=over #38bdf833\n";
+    }
+    if (write_text_file(mako_cfg.string(), oss.str()) && has_executable("makoctl")) {
+        spawn_argv_detached({"makoctl", "reload"});
+    }
+}
+
+namespace {
+
+struct AudioDeviceItem {
+    int id = 0;
+    std::string name;
+    bool is_default = false;
+};
+
+void parse_wpctl_audio(std::vector<AudioDeviceItem> &sinks, std::vector<AudioDeviceItem> &sources) {
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"wpctl", "status"}, out, rc) || rc != 0) return;
+
+    enum Sec { None, Sinks, Sources } sec = None;
+    bool in_audio = false;
+    for (const auto &raw : split_lines(out)) {
+        if (raw.find("Audio") != std::string::npos && raw.rfind("Audio", 0) == 0) {
+            in_audio = true;
+            sec = None;
+            continue;
+        }
+        if (raw.find("Video") != std::string::npos && raw.rfind("Video", 0) == 0) {
+            break;
+        }
+        if (!in_audio) continue;
+
+        if (raw.find("Sinks:") != std::string::npos) { sec = Sinks; continue; }
+        if (raw.find("Sources:") != std::string::npos) { sec = Sources; continue; }
+        if (raw.find("Filters:") != std::string::npos || raw.find("Streams:") != std::string::npos ||
+            raw.find("Devices:") != std::string::npos) {
+            sec = None;
+            continue;
+        }
+        if (sec == None) continue;
+
+        auto dot = raw.find('.');
+        if (dot == std::string::npos || dot == 0) continue;
+        size_t i = dot;
+        while (i > 0 && std::isdigit(static_cast<unsigned char>(raw[i - 1]))) --i;
+        if (i == dot) continue;
+
+        int id = std::atoi(raw.substr(i, dot - i).c_str());
+        if (id <= 0) continue;
+
+        bool is_def = (raw.substr(0, i).find('*') != std::string::npos);
+        std::string rest = raw.substr(dot + 1);
+        auto br = rest.rfind('[');
+        if (br != std::string::npos) rest = rest.substr(0, br);
+        rest = trim_copy(rest);
+        if (rest.empty()) continue;
+
+        if (sec == Sinks) {
+            sinks.push_back({id, rest, is_def});
+        } else if (sec == Sources) {
+            if (rest.find("Monitor of ") != std::string::npos) continue;
+            sources.push_back({id, rest, is_def});
+        }
+    }
+}
+
+void write_audio_items_json(std::ostringstream &js, const std::vector<AudioDeviceItem> &items) {
+    js << "[";
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) js << ",";
+        js << "{\"id\":" << items[i].id
+           << ",\"name\":\"" << json_escape(items[i].name) << "\""
+           << ",\"is_default\":" << (items[i].is_default ? "true" : "false") << "}";
+    }
+    js << "]";
+}
+
+std::atomic<bool> g_gamepad_stop{false};
+std::thread g_gamepad_thread;
+
+struct GamepadCmdIdle {
+    AppState *state;
+    std::string cmd;
+};
+
+void dispatch_gamepad_cmd(AppState *state, const std::string &cmd) {
+    if (!state || state->shutting_down.load()) return;
+    g_idle_add([](gpointer data) -> gboolean {
+        std::unique_ptr<GamepadCmdIdle> call(static_cast<GamepadCmdIdle *>(data));
+        if (!call->state->shutting_down.load()) {
+            handle_shell_command(call->state, call->cmd);
+        }
+        return G_SOURCE_REMOVE;
+    }, new GamepadCmdIdle{state, cmd});
+}
+
+}  // namespace
+
+void push_audio_power_state(AppState *state) {
+    if (!state || !state->settings_view) return;
+    MediaSnapshot media = collect_media_state();
+
+    std::vector<AudioDeviceItem> sinks, sources;
+    if (has_executable("wpctl")) {
+        parse_wpctl_audio(sinks, sources);
+    }
+
+    int mic_vol = 100;
+    bool mic_muted = false;
+    std::string mic_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null");
+    auto pos = mic_out.find("Volume:");
+    if (pos != std::string::npos) {
+        double v = std::atof(mic_out.c_str() + pos + 7);
+        mic_vol = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+    }
+    mic_muted = (mic_out.find("MUTED") != std::string::npos);
+
+    bool zram_active = !trim_copy(run_cmd_capture("swapon --noheadings --show=NAME 2>/dev/null")).empty();
+    bool ppd_available = !media.power_profile.empty();
+
+    std::ostringstream js;
+    js << "window.__spinelAudioPowerData && window.__spinelAudioPowerData({"
+       << "\"volume\":" << media.volume << ","
+       << "\"brightness\":" << media.brightness << ","
+       << "\"mic_volume\":" << mic_vol << ","
+       << "\"mic_muted\":" << (mic_muted ? "true" : "false") << ","
+       << "\"battery_pct\":" << media.battery_pct << ","
+       << "\"battery_charging\":" << (media.battery_charging ? "true" : "false") << ","
+       << "\"power_profile\":\"" << json_escape(media.power_profile) << "\","
+       << "\"ppd_available\":" << (ppd_available ? "true" : "false") << ","
+       << "\"zram_active\":" << (zram_active ? "true" : "false") << ","
+       << "\"sinks\":";
+    write_audio_items_json(js, sinks);
+    js << ",\"sources\":";
+    write_audio_items_json(js, sources);
+    js << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void set_audio_default_node(AppState *state, int id, bool is_sink) {
+    if (id <= 0 || !has_executable("wpctl")) return;
+    std::string out;
+    int rc = 1;
+    run_argv_capture({"wpctl", "set-default", std::to_string(id)}, out, rc);
+    append_app_log(std::string("[Audio] 切换默认") + (is_sink ? "输出设备" : "麦克风") + " ID=" + std::to_string(id));
+    push_audio_power_state(state);
+}
+
+void set_mic_volume(AppState *state, int pct) {
+    if (!has_executable("wpctl")) return;
+    int clamped = std::clamp(pct, 0, 100);
+    spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SOURCE@", std::to_string(clamped) + "%"});
+    (void)state;
+}
+
+void toggle_mic_mute(AppState *state) {
+    if (!has_executable("wpctl")) return;
+    std::string out;
+    int rc = 1;
+    run_argv_capture({"wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"}, out, rc);
+    push_audio_power_state(state);
+}
+
+void set_power_profile(AppState *state, const std::string &profile) {
+    if (profile != "performance" && profile != "balanced" && profile != "power-saver") return;
+    if (!has_executable("powerprofilesctl")) return;
+    std::string out;
+    int rc = 1;
+    bool ok = run_argv_capture({"powerprofilesctl", "set", profile}, out, rc) && rc == 0;
+    append_app_log("[Power] 切换性能电源模式 -> " + profile + (ok ? " (成功)" : " (失败: " + out + ")"));
+    push_audio_power_state(state);
+    native_shell_sync_telemetry(state);
+}
+
+void start_gamepad_hotkey_listener(AppState *state) {
+    if (!state || g_gamepad_thread.joinable()) return;
+    g_gamepad_stop.store(false);
+    g_gamepad_thread = std::thread([state]() {
+        int fd = -1;
+        bool btn_state[32]{};
+        auto last_trigger = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+
+        while (!g_gamepad_stop.load()) {
+            if (fd < 0) {
+                std::error_code ec;
+                for (int idx = 0; idx < 4; ++idx) {
+                    std::string dev = "/dev/input/js" + std::to_string(idx);
+                    if (!fs::exists(dev, ec)) continue;
+                    fd = ::open(dev.c_str(), O_RDONLY | O_NONBLOCK);
+                    if (fd >= 0) {
+                        std::fill(std::begin(btn_state), std::end(btn_state), false);
+                        break;
+                    }
+                }
+                if (fd < 0) {
+                    for (int s = 0; s < 12 && !g_gamepad_stop.load(); ++s) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    }
+                    continue;
+                }
+            }
+
+            struct pollfd pfd{fd, POLLIN, 0};
+            int pr = ::poll(&pfd, 1, 250);
+            if (pr < 0) {
+                ::close(fd);
+                fd = -1;
+                continue;
+            }
+            if (pr == 0) continue;
+            if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                ::close(fd);
+                fd = -1;
+                continue;
+            }
+
+            struct js_event ev{};
+            ssize_t n = 0;
+            while ((n = ::read(fd, &ev, sizeof(ev))) == sizeof(ev)) {
+                if ((ev.type & ~JS_EVENT_INIT) != JS_EVENT_BUTTON) continue;
+                if (ev.number >= 32) continue;
+                bool pressed = (ev.value != 0);
+                btn_state[ev.number] = pressed;
+                if (!pressed) continue;
+
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_trigger < std::chrono::milliseconds(1200)) continue;
+
+                // Standard Xbox/PlayStation/Generic Linux joystick Guide button (8 or 10) -> Game Center
+                if (ev.number == 8 || ev.number == 10) {
+                    last_trigger = now;
+                    dispatch_gamepad_cmd(state, "games:open");
+                } else if ((btn_state[6] && btn_state[7]) || (btn_state[8] && btn_state[9])) {
+                    last_trigger = now;
+                    dispatch_gamepad_cmd(state, "cc:toggle");
+                }
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                ::close(fd);
+                fd = -1;
+            }
+        }
+        if (fd >= 0) ::close(fd);
+    });
+}
+
+void stop_gamepad_hotkey_listener() {
+    g_gamepad_stop.store(true);
+    if (g_gamepad_thread.joinable()) {
+        g_gamepad_thread.join();
     }
 }

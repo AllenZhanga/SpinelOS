@@ -48,6 +48,18 @@ xdg-desktop-portal-wlr
 polkit
 polkit-gnome
 ptyxis
+mako
+libnotify
+swaylock
+swayidle
+grim
+slurp
+brightnessctl
+power-profiles-daemon
+zram-generator
+btrfs-progs
+snapper
+reflector
 
 # Desktop Apps (App Store + File Manager, Editor, Viewer; browsers via App Store)
 flatpak

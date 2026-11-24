@@ -353,6 +353,7 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
     sync_labwc_window_theme(active.is_light);
     sync_fcitx5_theme(active.is_light);
     sync_terminal_theme(active.is_light);
+    sync_notification_theme(active.is_light);
     push_theme_state(state);
     native_shell_sync_theme(state);
 }

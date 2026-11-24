@@ -20,6 +20,18 @@
     <keybind key="W-Return">
       <action name="Execute" command="ptyxis" />
     </keybind>
+    <keybind key="Print">
+      <action name="Execute" command="spinel-screenshot full" />
+    </keybind>
+    <keybind key="S-Print">
+      <action name="Execute" command="spinel-screenshot area" />
+    </keybind>
+    <keybind key="C-S-4">
+      <action name="Execute" command="spinel-screenshot area" />
+    </keybind>
+    <keybind key="W-l">
+      <action name="Execute" command="spinel-lock" />
+    </keybind>
     <keybind key="A-Tab">
       <action name="NextWindow" />
     </keybind>

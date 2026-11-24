@@ -75,21 +75,32 @@ sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, labwc/ptyxis config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak ptyxis spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
+    flatpak ptyxis mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+    zram-generator btrfs-progs snapper reflector \
+    spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
     polkit-gnome xdg-desktop-portal-gtk \
     fcitx5 fcitx5-chinese-addons fcitx5-pinyin-zhwiki fcitx5-rime rime-pinyin-simp fcitx5-gtk fcitx5-qt fcitx5-configtool
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
+  sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo cp -a /tmp/spinel-dev/SpinelLight/. /usr/share/themes/SpinelLight/
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
+  sudo install -Dm644 /tmp/spinel-dev/zram-generator.conf /etc/systemd/zram-generator.conf
+  sudo install -Dm644 /tmp/spinel-dev/90-spinel-backlight.rules /etc/udev/rules.d/90-spinel-backlight.rules
+  sudo udevadm control --reload-rules 2>/dev/null || true
+  sudo udevadm trigger --subsystem-match=backlight 2>/dev/null || true
+  sudo systemctl daemon-reload 2>/dev/null || true
+  sudo systemctl start systemd-zram-setup@zram0.service 2>/dev/null || true
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
   sudo install -Dm755 /tmp/spinel-dev/spinel-install /usr/local/bin/spinel-install
+  sudo install -Dm755 /tmp/spinel-dev/spinel-screenshot /usr/local/bin/spinel-screenshot
+  sudo install -Dm755 /tmp/spinel-dev/spinel-lock /usr/local/bin/spinel-lock
 fi
 
 UID_NUM="$(id -u)"
@@ -164,6 +175,11 @@ pkill -x spinel-shell 2>/dev/null || true
 sleep 0.3
 nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
 
+if command -v mako >/dev/null 2>&1; then
+  pkill -x mako 2>/dev/null || true
+  nohup mako >/tmp/spinel-mako.log 2>&1 </dev/null &
+fi
+
 if command -v fcitx5 >/dev/null 2>&1; then
   sleep 0.4
   nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &
@@ -194,8 +210,12 @@ if [[ "${MODE}" == "full" ]]; then
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/fcitx5/themes/" "${DEV_HOST}:/tmp/spinel-dev/fcitx5-themes/"
   rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/etc/systemd/zram-generator.conf" \
+    "${ROOT_DIR}/archiso/airootfs/etc/udev/rules.d/90-spinel-backlight.rules" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-screenshot" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-lock" \
     "${DEV_HOST}:/tmp/spinel-dev/"
 fi
 

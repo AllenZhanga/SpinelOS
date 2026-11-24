@@ -28,6 +28,7 @@ struct InstallConfig {
     std::string disk;
     std::string root_part;
     std::string efi_part;
+    std::string fs = "ext4";
     std::string username;
     std::string hostname;
     std::string timezone;
@@ -129,6 +130,7 @@ InstallConfig parse_install_payload(const std::string &payload) {
         else if (key == "disk") cfg.disk = val;
         else if (key == "root_part") cfg.root_part = val;
         else if (key == "efi_part") cfg.efi_part = val;
+        else if (key == "fs") cfg.fs = (val == "btrfs" ? "btrfs" : "ext4");
         else if (key == "username") cfg.username = val;
         else if (key == "hostname") cfg.hostname = val;
         else if (key == "timezone") cfg.timezone = val;
@@ -240,6 +242,7 @@ void start_disk_install(AppState *state, const std::string &payload) {
         std::vector<std::string> args = {
             "sudo", "-n", "/usr/local/bin/spinel-install",
             "--mode", cfg.mode,
+            "--fs", cfg.fs,
             "--username", cfg.username,
             "--hostname", cfg.hostname,
             "--timezone", cfg.timezone,

@@ -16,6 +16,16 @@ if [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]; then
   /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 &
 fi
 
+# Start Wayland notification daemon (mako)
+if command -v mako >/dev/null 2>&1; then
+  mako >/tmp/spinel-mako.log 2>&1 &
+fi
+
+# Start idle lock daemon when swayidle is enabled (default 15m lock unless disabled in power.conf)
+if command -v swayidle >/dev/null 2>&1 && ! grep -qx "idle_lock=false" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
+  swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 &
+fi
+
 # Start our custom C++20 + GTK4/WebKitGTK6 Wayland Desktop Shell (with persistent startup log)
 /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 &
 

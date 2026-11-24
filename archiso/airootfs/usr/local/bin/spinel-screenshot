@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="${1:-area}"
+OUT_DIR="${HOME}/Pictures/Screenshots"
+mkdir -p "${OUT_DIR}"
+OUT_FILE="${OUT_DIR}/SpinelOS_$(date +%Y-%m-%d_%H-%M-%S).png"
+
+notify_shot() {
+  local title="$1"
+  local body="$2"
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "SpinelOS 截图" -t 4000 "${title}" "${body}" 2>/dev/null || true
+  elif command -v gdbus >/dev/null 2>&1; then
+    gdbus call --session \
+      --dest org.freedesktop.Notifications \
+      --object-path /org/freedesktop/Notifications \
+      --method org.freedesktop.Notifications.Notify \
+      "SpinelOS 截图" 0 "camera-photo" "${title}" "${body}" '[]' '{}' 4000 >/dev/null 2>&1 || true
+  fi
+}
+
+if ! command -v grim >/dev/null 2>&1; then
+  notify_shot "截图组件未安装" "请先安装 grim 与 slurp。"
+  exit 1
+fi
+
+if [[ "${MODE}" == "area" ]] && command -v slurp >/dev/null 2>&1; then
+  GEOM="$(slurp 2>/dev/null || true)"
+  if [[ -z "${GEOM}" ]]; then
+    exit 0
+  fi
+  grim -g "${GEOM}" "${OUT_FILE}"
+else
+  grim "${OUT_FILE}"
+fi
+
+if command -v wl-copy >/dev/null 2>&1 && [[ -s "${OUT_FILE}" ]]; then
+  wl-copy --type image/png < "${OUT_FILE}" 2>/dev/null || true
+fi
+
+notify_shot "截图已保存并复制到剪贴板" "${OUT_FILE}"

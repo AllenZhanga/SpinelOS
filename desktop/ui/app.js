@@ -934,6 +934,7 @@
       wifi: "Wi-Fi 与网络",
       bt: "蓝牙手柄",
       display: "显示器",
+      audio: "声音与电源",
       perf: "游戏性能",
       appearance: "外观与输入法",
       perms: "权限与安全",
@@ -958,6 +959,7 @@
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
+    else if (target === "audio") sendCommand("settings:audio-get");
     else if (target === "perf") sendCommand("perf:get");
     else if (target === "appearance") {
       sendCommand("theme:refresh");
@@ -1170,6 +1172,82 @@
   }
 
   window.__spinelProcsFeedback = (ok, msg) => showFeedback("procs-feedback", msg || "", !ok);
+
+  function renderAudioDeviceList(elId, items, cmdPrefix, emptyText) {
+    const listEl = document.getElementById(elId);
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    if (!Array.isArray(items) || items.length === 0) {
+      listEl.innerHTML = `<div class="disk-empty">${emptyText}</div>`;
+      return;
+    }
+    items.forEach((dev) => {
+      const item = document.createElement("div");
+      item.className = "disk-item" + (dev.is_default ? " selected" : "");
+      const left = document.createElement("div");
+      left.className = "disk-left";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.checked = Boolean(dev.is_default);
+      const title = document.createElement("div");
+      title.className = "disk-title";
+      title.textContent = dev.name;
+      left.append(radio, title);
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = dev.is_default ? "当前默认" : `ID ${dev.id}`;
+      item.append(left, tag);
+      item.addEventListener("click", () => sendCommand(`${cmdPrefix}:${dev.id}`));
+      listEl.appendChild(item);
+    });
+  }
+
+  window.__spinelAudioPowerData = (data) => {
+    if (!data) return;
+    const outSlider = document.getElementById("audio-out-slider");
+    const outPct = document.getElementById("audio-out-pct");
+    if (outSlider && typeof data.volume === "number") outSlider.value = String(data.volume);
+    if (outPct && typeof data.volume === "number") outPct.textContent = `${data.volume}%`;
+
+    const micSlider = document.getElementById("audio-mic-slider");
+    const micPct = document.getElementById("audio-mic-pct");
+    const micMuteBtn = document.getElementById("btn-mic-mute");
+    if (micSlider && typeof data.mic_volume === "number") micSlider.value = String(data.mic_volume);
+    if (micPct && typeof data.mic_volume === "number") {
+      micPct.textContent = data.mic_muted ? `${data.mic_volume}% (已静音)` : `${data.mic_volume}%`;
+    }
+    if (micMuteBtn) micMuteBtn.textContent = data.mic_muted ? "取消静音" : "静音麦克风";
+
+    renderAudioDeviceList("audio-sink-list", data.sinks, "settings:audio-sink", "未检测到音频输出设备");
+    renderAudioDeviceList("audio-source-list", data.sources, "settings:audio-source", "未检测到麦克风输入设备");
+
+    document.querySelectorAll("#tab-audio [data-power-profile]").forEach((btn) => {
+      const p = btn.getAttribute("data-power-profile");
+      btn.classList.toggle("active", p === data.power_profile);
+      btn.disabled = !data.ppd_available;
+    });
+    const sumEl = document.getElementById("power-hw-summary");
+    if (sumEl) {
+      const batText = (typeof data.battery_pct === "number" && data.battery_pct >= 0)
+        ? `电池 ${data.battery_pct}%（${data.battery_charging ? "充电中" : "使用电池"}）`
+        : "台式机/外接电源";
+      const zramText = data.zram_active ? "zram 内存压缩已启用" : "zram 未启用";
+      sumEl.textContent = `${batText} · ${zramText}`;
+    }
+  };
+
+  document.getElementById("audio-out-slider")?.addEventListener("input", (ev) => {
+    const v = ev.target.value;
+    const pct = document.getElementById("audio-out-pct");
+    if (pct) pct.textContent = `${v}%`;
+    sendCommand(`system:audio-set:${v}`);
+  });
+  document.getElementById("audio-mic-slider")?.addEventListener("input", (ev) => {
+    const v = ev.target.value;
+    const pct = document.getElementById("audio-mic-pct");
+    if (pct) pct.textContent = `${v}%`;
+    sendCommand(`settings:mic-vol:${v}`);
+  });
 
   window.__spinelProcessList = (data) => {
     lastProcPayload = data;
@@ -1496,16 +1574,24 @@
     showFormError("");
   }
 
+  let installerSizes = new Map();
+
   function submitInstaller() {
     showFormError("");
     const rootPart = document.getElementById("inst-root-part")?.value || "";
     const efiPart = document.getElementById("inst-efi-part")?.value || "";
     const osProber = document.getElementById("inst-os-prober")?.checked ?? true;
+    const fsType = document.getElementById("inst-fs")?.value || "ext4";
+    const MIN_BYTES = 20 * 1024 * 1024 * 1024;
 
     if (installMode === "disk") {
       if (!selectedDisk) { showFormError("请先选择一个目标硬盘。"); return; }
+      const sz = installerSizes.get(selectedDisk) || 0;
+      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选硬盘容量不足 20 GiB（建议 ≥ 25 GB），无法安装 SpinelOS。"); return; }
     } else {
       if (!rootPart) { showFormError("请选择要格式化为根分区 (/) 的目标分区。"); return; }
+      const sz = installerSizes.get(rootPart) || 0;
+      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选根分区容量不足 20 GiB（建议 ≥ 25 GB），无法安装 SpinelOS。"); return; }
       if (isUefiMode && !efiPart) { showFormError("UEFI 模式下请选择一个已有的 FAT32 EFI 分区。"); return; }
       if (isUefiMode && rootPart === efiPart) { showFormError("根分区和 EFI 分区不能选择同一个分区。"); return; }
     }
@@ -1538,6 +1624,7 @@
     sendCommand([
       "installer:start",
       `mode=${installMode}`,
+      `fs=${fsType}`,
       `disk=${selectedDisk}`,
       `root_part=${rootPart}`,
       `efi_part=${efiPart}`,
@@ -1561,6 +1648,13 @@
     if (!listEl) return;
     const rawDevices = env.lsblk && Array.isArray(env.lsblk.blockdevices) ? env.lsblk.blockdevices : [];
     const disks = rawDevices.filter((d) => d.type === "disk" && !/^loop|^zram/.test(d.name || ""));
+    installerSizes = new Map();
+    disks.forEach((d) => {
+      installerSizes.set(`/dev/${d.name}`, Number(d.size) || 0);
+      if (Array.isArray(d.children)) {
+        d.children.forEach((p) => installerSizes.set(p.path || `/dev/${p.name}`, Number(p.size) || 0));
+      }
+    });
 
     const rootSel = document.getElementById("inst-root-part");
     const efiSel = document.getElementById("inst-efi-part");
@@ -1691,6 +1785,7 @@
     if (!grid) return;
     const customBtn = document.getElementById("btn-store-custom");
     if (customBtn) customBtn.disabled = storeState.busy;
+    document.querySelectorAll("[data-store-sys]").forEach((b) => { b.disabled = storeState.busy; });
 
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
     const list = (storeState.apps || []).filter((app) => {
@@ -1788,7 +1883,8 @@
     const logTitle = document.getElementById("store-log-title");
     if (logWrap) logWrap.classList.remove("hidden");
     if (logBox) logBox.textContent = "";
-    if (logTitle) logTitle.textContent = `${action === "install" ? "正在下载安装" : "正在卸载"}: ${op.name || op.pkg}`;
+    const verbMap = { install: "正在下载安装", remove: "正在卸载", "sys-update": "正在执行", "mirror-test": "正在执行", "keyring-fix": "正在执行" };
+    if (logTitle) logTitle.textContent = `${verbMap[action] || "正在执行"}: ${op.name || op.pkg}`;
     storeState.busy = true;
     storeState.active_id = op.id || op.pkg || "";
     storeState.active_action = action;
@@ -1810,8 +1906,8 @@
       const title = document.getElementById("store-pass-title");
       const confirmBtn = document.getElementById("btn-store-pass-confirm");
       const input = document.getElementById("store-pass-input");
-      if (title) title.textContent = `${action === "install" ? "安装" : "卸载"}系统软件 ${op.name || op.pkg} 需要管理员授权`;
-      if (confirmBtn) confirmBtn.textContent = action === "install" ? "确认安装" : "确认卸载";
+      if (title) title.textContent = `执行 ${op.name || op.pkg} 需要管理员授权`;
+      if (confirmBtn) confirmBtn.textContent = "确认并继续";
       if (input) input.value = "";
       box?.classList.remove("hidden");
       input?.focus();
@@ -1819,6 +1915,14 @@
     }
     executeStoreOp(action, op, "");
   }
+
+  document.querySelectorAll("[data-store-sys]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.getAttribute("data-store-sys");
+      const names = { "sys-update": "一键更新系统", "mirror-test": "测速优选国内镜像", "keyring-fix": "修复签名密钥环" };
+      requestStoreOp(action, { id: action, name: names[action] || action, backend: "pacman", pkg: action });
+    });
+  });
 
   document.getElementById("store-pass-box")?.addEventListener("click", (ev) => {
     if (ev.target.id === "store-pass-box") {

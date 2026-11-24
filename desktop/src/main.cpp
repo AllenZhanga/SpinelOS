@@ -242,6 +242,7 @@ void on_activate(GtkApplication *app, gpointer user_data) {
 
     init_native_shell(app, state);
     init_window_tracker(state);
+    start_gamepad_hotkey_listener(state);
 
     g_timeout_add_seconds(3, on_telemetry_tick, state);
 }
@@ -316,6 +317,12 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         start_store_action(state, "install", cmd);
     } else if (cmd.rfind("store:remove\n", 0) == 0) {
         start_store_action(state, "remove", cmd);
+    } else if (cmd.rfind("store:sys-update\n", 0) == 0) {
+        start_store_action(state, "sys-update", cmd);
+    } else if (cmd.rfind("store:mirror-test\n", 0) == 0) {
+        start_store_action(state, "mirror-test", cmd);
+    } else if (cmd.rfind("store:keyring-fix\n", 0) == 0) {
+        start_store_action(state, "keyring-fix", cmd);
     } else if (cmd.rfind("store:launch:", 0) == 0) {
         native_shell_set_cc_visible(state, false);
         launch_store_app(state, cmd.substr(13));
@@ -324,7 +331,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "perf" ||
+        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "audio" || tab == "perf" ||
             tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
             native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
@@ -340,14 +347,49 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
     } else if (cmd.rfind("system:brightness-set:", 0) == 0) {
-        int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 10, 100);
-        spawn_argv_detached({
-            "sh", "-c",
-            "for d in /sys/class/backlight/*; do "
-            "[ -w \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
-            "max=$(cat \"$d/max_brightness\"); "
-            "echo $(( max * " + std::to_string(pct) + " / 100 )) > \"$d/brightness\"; break; done"
-        });
+        int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 5, 100);
+        if (has_executable("brightnessctl")) {
+            spawn_argv_detached({"brightnessctl", "-q", "set", std::to_string(pct) + "%"});
+        } else {
+            spawn_argv_detached({
+                "sh", "-c",
+                "for d in /sys/class/backlight/*; do "
+                "[ -w \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+                "max=$(cat \"$d/max_brightness\"); "
+                "echo $(( max * " + std::to_string(pct) + " / 100 )) > \"$d/brightness\"; break; done"
+            });
+        }
+    } else if (cmd == "system:lock") {
+        native_shell_set_cc_visible(state, false);
+        spawn_argv_detached({has_executable("spinel-lock") ? "spinel-lock" : "swaylock"});
+    } else if (cmd == "system:suspend") {
+        native_shell_set_cc_visible(state, false);
+        spawn_argv_detached({"sh", "-c", "(spinel-lock || true); systemctl suspend"});
+    } else if (cmd.rfind("system:screenshot:", 0) == 0) {
+        std::string smode = cmd.substr(18) == "full" ? "full" : "area";
+        native_shell_set_cc_visible(state, false);
+        auto *shot_arg = new std::string(smode);
+        g_timeout_add(180, [](gpointer d) -> gboolean {
+            std::unique_ptr<std::string> m(static_cast<std::string *>(d));
+            if (has_executable("spinel-screenshot")) {
+                spawn_argv_detached({"spinel-screenshot", *m});
+            } else if (has_executable("grim")) {
+                spawn_argv_detached({"grim"});
+            }
+            return G_SOURCE_REMOVE;
+        }, shot_arg);
+    } else if (cmd.rfind("system:power-profile:", 0) == 0) {
+        set_power_profile(state, cmd.substr(21));
+    } else if (cmd == "settings:audio-get") {
+        push_audio_power_state(state);
+    } else if (cmd.rfind("settings:audio-sink:", 0) == 0) {
+        set_audio_default_node(state, std::atoi(cmd.substr(20).c_str()), true);
+    } else if (cmd.rfind("settings:audio-source:", 0) == 0) {
+        set_audio_default_node(state, std::atoi(cmd.substr(22).c_str()), false);
+    } else if (cmd.rfind("settings:mic-vol:", 0) == 0) {
+        set_mic_volume(state, std::atoi(cmd.substr(17).c_str()));
+    } else if (cmd == "settings:mic-mute") {
+        toggle_mic_mute(state);
     } else if (cmd.rfind("window:toggle:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(14).c_str(), nullptr, 10);
         if (wid > 0) toggle_or_activate_window(wid);
@@ -505,12 +547,14 @@ int main(int argc, char **argv) {
     sync_labwc_window_theme(startup_theme.is_light);
     ensure_fcitx5_defaults(startup_theme.is_light);
     ensure_terminal_defaults(startup_theme.is_light);
+    sync_notification_theme(startup_theme.is_light);
 
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &state);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     state.shutting_down.store(true);
+    stop_gamepad_hotkey_listener();
     shutdown_window_tracker();
     shutdown_native_shell(&state);
     if (state.install_thread.joinable()) {

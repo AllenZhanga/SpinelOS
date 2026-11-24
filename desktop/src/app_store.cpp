@@ -288,23 +288,26 @@ void start_store_action(AppState *state, const std::string &action, const std::s
         app_id = pkg;
     }
 
-    if (backend == "flatpak") {
-        if (!is_valid_flatpak_id(pkg)) {
-            emit_store_line(state, "[ERROR] 无效的 Flatpak 应用 ID: " + pkg);
-            emit_store_done(state, 1, app_id, action);
-            return;
-        }
-        if (!has_flatpak_cli()) {
-            emit_store_line(state, "[ERROR] 系统尚未安装 flatpak。请先通过系统更新 (--full) 或在商店安装 flatpak 包。");
-            emit_store_done(state, 1, app_id, action);
-            return;
-        }
-    } else {
-        backend = "pacman";
-        if (!is_valid_pacman_pkg(pkg)) {
-            emit_store_line(state, "[ERROR] 无效的 Pacman 软件包名: " + pkg);
-            emit_store_done(state, 1, app_id, action);
-            return;
+    bool is_sys_maint = (action == "sys-update" || action == "mirror-test" || action == "keyring-fix");
+    if (!is_sys_maint) {
+        if (backend == "flatpak") {
+            if (!is_valid_flatpak_id(pkg)) {
+                emit_store_line(state, "[ERROR] 无效的 Flatpak 应用 ID: " + pkg);
+                emit_store_done(state, 1, app_id, action);
+                return;
+            }
+            if (!has_flatpak_cli()) {
+                emit_store_line(state, "[ERROR] 系统尚未安装 flatpak。请先通过系统更新 (--full) 或在商店安装 flatpak 包。");
+                emit_store_done(state, 1, app_id, action);
+                return;
+            }
+        } else {
+            backend = "pacman";
+            if (!is_valid_pacman_pkg(pkg)) {
+                emit_store_line(state, "[ERROR] 无效的 Pacman 软件包名: " + pkg);
+                emit_store_done(state, 1, app_id, action);
+                return;
+            }
         }
     }
 
@@ -313,9 +316,68 @@ void start_store_action(AppState *state, const std::string &action, const std::s
     }
     state->store_busy.store(true);
 
-    state->store_thread = std::thread([state, action, app_id, backend, pkg, password]() {
+    state->store_thread = std::thread([state, action, app_id, backend, pkg, password, is_sys_maint]() {
         int rc = 1;
-        if (backend == "flatpak") {
+        if (is_sys_maint) {
+            bool nopass = check_sudo_nopasswd();
+            if (!nopass && password.empty()) {
+                emit_store_line(state, "[ERROR] 系统维护操作需要当前用户管理员密码。");
+                emit_store_done(state, 2, app_id, action);
+                return;
+            }
+            std::vector<std::string> base_sudo = nopass
+                ? std::vector<std::string>{"sudo", "-n"}
+                : std::vector<std::string>{"sudo", "-S", "-p", ""};
+            std::string pwd_in = nopass ? "" : password;
+
+            if (action == "sys-update") {
+                std::vector<std::string> cmd = base_sudo;
+                ProxyConfig pc = load_proxy_config();
+                if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
+                    std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
+                    std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
+                    cmd.insert(cmd.end(), {"env", "http_proxy=" + hv, "https_proxy=" + hv, "all_proxy=" + av, "no_proxy=" + pc.no_proxy});
+                }
+                cmd.insert(cmd.end(), {"pacman", "-Syu", "--noconfirm"});
+                emit_store_line(state, "==> 正在全面更新 Arch / SpinelOS 软件包...");
+                rc = run_streaming_command(state, cmd, pwd_in);
+                if (rc == 0 && has_flatpak_cli()) {
+                    emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");
+                    run_streaming_command(state, {"flatpak", "update", "-y", "--noninteractive"});
+                }
+            } else if (action == "mirror-test") {
+                if (!has_executable("reflector")) {
+                    emit_store_line(state, "[ERROR] 未检测到 reflector 工具，请先安装 reflector。");
+                    rc = 1;
+                } else {
+                    std::vector<std::string> cmd = base_sudo;
+                    cmd.insert(cmd.end(), {
+                        "reflector", "--country", "China", "--protocol", "https",
+                        "--latest", "8", "--sort", "rate", "--save", "/etc/pacman.d/mirrorlist"
+                    });
+                    emit_store_line(state, "==> 正在测速中国区 HTTPS 镜像站（约需 10~20 秒）...");
+                    rc = run_streaming_command(state, cmd, pwd_in);
+                    if (rc == 0) {
+                        std::vector<std::string> sync_cmd = nopass
+                            ? std::vector<std::string>{"sudo", "-n", "pacman", "-Syy", "--noconfirm"}
+                            : std::vector<std::string>{"sudo", "-S", "-p", "", "pacman", "-Syy", "--noconfirm"};
+                        emit_store_line(state, "==> 测速完成，正在刷新软件包索引...");
+                        rc = run_streaming_command(state, sync_cmd, pwd_in);
+                    }
+                }
+            } else if (action == "keyring-fix") {
+                std::vector<std::string> cmd1 = base_sudo;
+                cmd1.insert(cmd1.end(), {"pacman", "-Sy", "--noconfirm", "archlinux-keyring"});
+                emit_store_line(state, "==> 正在更新 archlinux-keyring ...");
+                rc = run_streaming_command(state, cmd1, pwd_in);
+                if (rc == 0) {
+                    std::vector<std::string> cmd2 = base_sudo;
+                    cmd2.insert(cmd2.end(), {"pacman-key", "--populate", "archlinux"});
+                    emit_store_line(state, "==> 正在重新校验并信任密钥环...");
+                    rc = run_streaming_command(state, cmd2, pwd_in);
+                }
+            }
+        } else if (backend == "flatpak") {
             if (action == "install") {
                 emit_store_line(state, "==> 确保 Flathub 用户仓库已配置...");
                 rc = run_streaming_command(state, {

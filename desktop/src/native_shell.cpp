@@ -54,6 +54,7 @@ struct NativeShellState {
     GtkWidget *bar_app_menus = nullptr;
     std::string bar_menu_key;
     GtkWidget *bar_mem_lbl = nullptr;
+    GtkWidget *bar_bat_lbl = nullptr;
     GtkWidget *bar_net_btn = nullptr;
     GtkWidget *bar_cc_btn = nullptr;
     GtkWidget *bar_clock_lbl = nullptr;
@@ -612,7 +613,7 @@ void draw_gem_glyph(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer) {
     cairo_restore(cr);
 }
 
-enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings };
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot };
 
 void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
@@ -710,6 +711,31 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             cairo_line_to(cr, 10.5, 13.0);
             cairo_move_to(cr, 8, 10.8);
             cairo_line_to(cr, 8, 13.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Lock:
+            cairo_rounded_rect(cr, 3.4, 7.2, 9.2, 6.4, 1.8);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 6.2, 2.7, M_PI, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 10.4, 0.9, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Screenshot:
+            cairo_move_to(cr, 2.5, 5.5);
+            cairo_line_to(cr, 2.5, 3.0);
+            cairo_line_to(cr, 5.2, 3.0);
+            cairo_move_to(cr, 10.8, 3.0);
+            cairo_line_to(cr, 13.5, 3.0);
+            cairo_line_to(cr, 13.5, 5.5);
+            cairo_move_to(cr, 13.5, 10.5);
+            cairo_line_to(cr, 13.5, 13.0);
+            cairo_line_to(cr, 10.8, 13.0);
+            cairo_move_to(cr, 5.2, 13.0);
+            cairo_line_to(cr, 2.5, 13.0);
+            cairo_line_to(cr, 2.5, 10.5);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 8.0, 2.3, 0, 2 * M_PI);
             cairo_stroke(cr);
             break;
     }
@@ -910,6 +936,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"Wi-Fi 与网络代理", "settings:open:wifi"},
             {"蓝牙与手柄", "settings:open:bt"},
             {"显示器分辨率", "settings:open:display"},
+            {"声音设备与电源", "settings:open:audio"},
             {"游戏性能优化", "settings:open:perf"},
             {"进程与资源监控", "settings:open:procs"},
             {"外观主题与输入法", "settings:open:appearance"},
@@ -1013,13 +1040,17 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
         {"关于 SpinelOS", "settings:open:appearance"},
         {"系统设置...", "settings:open:display"},
+        {"声音与电源...", "settings:open:audio"},
         {nullptr, ""},
+        {"区域截图 (Print/Ctrl+Shift+4)", "system:screenshot:area"},
         {"游戏与启动中心", "games:open"},
         {"应用商店", "store:open"},
         {"进程与资源监控", "settings:open:procs"},
         {"权限与安全...", "settings:open:perms"},
         {"查看系统日志", "settings:open:logs"},
         {nullptr, ""},
+        {"锁定屏幕", "system:lock"},
+        {"睡眠", "system:suspend"},
         {"重新启动...", "power:reboot"},
         {"关机...", "power:shutdown"}
     }));
@@ -1064,9 +1095,16 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_menu_button_set_child(GTK_MENU_BUTTON(power_btn), power_da);
 
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(power_btn), make_topbar_popover_menu(state, {
+        {"锁定屏幕", "system:lock"},
+        {"睡眠", "system:suspend"},
+        {nullptr, ""},
         {"重新启动...", "power:reboot"},
         {"关机...", "power:shutdown"}
     }));
+
+    ns->bar_bat_lbl = gtk_label_new("");
+    gtk_widget_add_css_class(ns->bar_bat_lbl, "spinel-bar-mem");
+    gtk_widget_set_visible(ns->bar_bat_lbl, FALSE);
 
     ns->bar_clock_lbl = gtk_label_new("--:--");
     gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
@@ -1076,6 +1114,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(right), search_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
     gtk_box_append(GTK_BOX(right), power_btn);
+    gtk_box_append(GTK_BOX(right), ns->bar_bat_lbl);
     gtk_box_append(GTK_BOX(right), ns->bar_clock_lbl);
 
     gtk_box_append(GTK_BOX(root), left);
@@ -1878,7 +1917,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelControlCenter");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 356, 444);
+    gtk_window_set_default_size(win, 384, 448);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-controlcenter");
@@ -1981,34 +2020,30 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(mid_row), ns->cc_fsr_btn);
     gtk_box_append(GTK_BOX(mid_row), ap_btn);
 
-    // Util Row: Settings + Reboot + Power
-    GtkWidget *util_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    GtkWidget *set_pill = make_cmd_button(state, "系统设置", "spinel-cc-pill", "settings:open:display");
+    // Util Row: Settings + Screenshot + Lock + Reboot + Power
+    auto make_orb = [&](BarGlyph glyph, const char *tip, const char *cmd, const char *extra_cls = nullptr) -> GtkWidget * {
+        GtkWidget *orb = make_cmd_button(state, nullptr, "spinel-cc-orb", cmd);
+        if (extra_cls) gtk_widget_add_css_class(orb, extra_cls);
+        gtk_widget_set_size_request(orb, 44, 48);
+        gtk_widget_set_tooltip_text(orb, tip);
+        GtkWidget *da = gtk_drawing_area_new();
+        gtk_widget_set_size_request(da, 17, 17);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_glyph_cb,
+                                       reinterpret_cast<gpointer>(static_cast<intptr_t>(glyph)), nullptr);
+        gtk_button_set_child(GTK_BUTTON(orb), da);
+        return orb;
+    };
+
+    GtkWidget *util_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *set_pill = make_cmd_button(state, "声音与设置", "spinel-cc-pill", "settings:open:audio");
     gtk_widget_set_hexpand(set_pill, TRUE);
-    gtk_widget_set_size_request(set_pill, -1, 52);
-
-    GtkWidget *rb_orb = make_cmd_button(state, nullptr, "spinel-cc-orb", "power:reboot");
-    gtk_widget_set_size_request(rb_orb, 52, 52);
-    gtk_widget_set_tooltip_text(rb_orb, "重启系统");
-    GtkWidget *rb_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(rb_da, 18, 18);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(rb_da), draw_glyph_cb,
-                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Reboot)), nullptr);
-    gtk_button_set_child(GTK_BUTTON(rb_orb), rb_da);
-
-    GtkWidget *pw_orb = make_cmd_button(state, nullptr, "spinel-cc-orb", "power:shutdown");
-    gtk_widget_add_css_class(pw_orb, "danger-orb");
-    gtk_widget_set_size_request(pw_orb, 52, 52);
-    gtk_widget_set_tooltip_text(pw_orb, "关机");
-    GtkWidget *pw_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(pw_da, 18, 18);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(pw_da), draw_glyph_cb,
-                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Power)), nullptr);
-    gtk_button_set_child(GTK_BUTTON(pw_orb), pw_da);
+    gtk_widget_set_size_request(set_pill, -1, 48);
 
     gtk_box_append(GTK_BOX(util_row), set_pill);
-    gtk_box_append(GTK_BOX(util_row), rb_orb);
-    gtk_box_append(GTK_BOX(util_row), pw_orb);
+    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Screenshot, "区域截图", "system:screenshot:area"));
+    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Lock, "锁定屏幕", "system:lock"));
+    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Reboot, "重启系统", "power:reboot"));
+    gtk_box_append(GTK_BOX(util_row), make_orb(BarGlyph::Power, "关机", "power:shutdown", "danger-orb"));
 
     // Sliders
     GtkWidget *br_card = make_cc_slider_card(ns, "显示器", 15.0, 85.0, false, &ns->cc_bright_pct, &ns->cc_bright_scale);
@@ -2228,6 +2263,16 @@ void native_shell_sync_telemetry(AppState *state) {
             ? (std::to_string(ns->telemetry.mem_used_mb) + "M")
             : ns->telemetry.mem;
         gtk_label_set_text(GTK_LABEL(ns->bar_mem_lbl), m.c_str());
+    }
+    if (ns->bar_bat_lbl) {
+        if (ns->telemetry.battery_pct >= 0) {
+            std::string b = (ns->telemetry.battery_charging ? "充电 " : "电量 ") +
+                            std::to_string(ns->telemetry.battery_pct) + "%";
+            gtk_label_set_text(GTK_LABEL(ns->bar_bat_lbl), b.c_str());
+            gtk_widget_set_visible(ns->bar_bat_lbl, TRUE);
+        } else {
+            gtk_widget_set_visible(ns->bar_bat_lbl, FALSE);
+        }
     }
     if (ns->bar_net_btn) {
         std::string tip = "网络: " + ns->telemetry.net;

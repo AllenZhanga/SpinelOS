@@ -5,6 +5,7 @@ MODE="disk"
 DISK=""
 ROOT_PART=""
 EFI_PART=""
+FS_TYPE="ext4"
 USERNAME="gamer"
 HOSTNAME="spinelos"
 TIMEZONE="Asia/Shanghai"
@@ -17,6 +18,7 @@ while [[ $# -gt 0 ]]; do
     --disk) DISK="${2:-}"; shift 2 ;;
     --root-part) ROOT_PART="${2:-}"; shift 2 ;;
     --efi-part) EFI_PART="${2:-}"; shift 2 ;;
+    --fs) FS_TYPE="${2:-ext4}"; shift 2 ;;
     --username) USERNAME="${2:-}"; shift 2 ;;
     --hostname) HOSTNAME="${2:-}"; shift 2 ;;
     --timezone) TIMEZONE="${2:-}"; shift 2 ;;
@@ -25,6 +27,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$FS_TYPE" != "ext4" && "$FS_TYPE" != "btrfs" ]]; then
+  echo "[ERROR] Invalid filesystem type: '$FS_TYPE' (expected ext4 or btrfs)" >&2
+  exit 1
+fi
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "[ERROR] spinel-install must run as root." >&2
@@ -107,6 +114,42 @@ part_path() {
   fi
 }
 
+mount_formatted_root() {
+  local dev="$1"
+  if [[ "$FS_TYPE" == "btrfs" ]]; then
+    if ! command -v mkfs.btrfs >/dev/null 2>&1; then
+      echo "[ERROR] mkfs.btrfs not found. Please install btrfs-progs or choose ext4." >&2
+      exit 1
+    fi
+    mkfs.btrfs -f -L SPINEL_ROOT "$dev"
+    mount "$dev" /mnt
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@snapshots
+    btrfs subvolume create /mnt/@var_log
+    umount /mnt
+    mount -o compress=zstd:3,noatime,subvol=@ "$dev" /mnt
+    mkdir -p /mnt/{home,.snapshots,var/log}
+    mount -o compress=zstd:3,noatime,subvol=@home "$dev" /mnt/home
+    mount -o compress=zstd:3,noatime,subvol=@snapshots "$dev" /mnt/.snapshots
+    mount -o compress=zstd:3,noatime,subvol=@var_log "$dev" /mnt/var/log
+  else
+    mkfs.ext4 -F -L SPINEL_ROOT "$dev"
+    mount "$dev" /mnt
+  fi
+}
+
+check_min_bytes() {
+  local dev="$1"
+  local min_bytes=21474836480 # 20 GiB
+  local sz
+  sz="$(lsblk -bdno SIZE "$dev" 2>/dev/null | head -n1 || echo 0)"
+  if [[ "${sz:-0}" -lt "$min_bytes" ]]; then
+    echo "[ERROR] 目标存储空间不足 20 GiB（当前 $((sz / 1073741824)) GiB），无法完整安装 SpinelOS。" >&2
+    exit 1
+  fi
+}
+
 umount -R /mnt 2>/dev/null || true
 
 if [[ "$MODE" == "disk" ]]; then
@@ -114,9 +157,10 @@ if [[ "$MODE" == "disk" ]]; then
     echo "[ERROR] Refusing to overwrite the active Live ISO boot device ($DISK)." >&2
     exit 1
   fi
+  check_min_bytes "$DISK"
 
-  echo "==> Mode: Full Disk Wipe -> $DISK (UEFI=$IS_UEFI)"
-  progress 8 "正在清理旧分区并创建分区表..."
+  echo "==> Mode: Full Disk Wipe -> $DISK (UEFI=$IS_UEFI, FS=$FS_TYPE)"
+  progress 8 "正在清理旧分区并创建分区表 (${FS_TYPE})..."
   for part in $(lsblk -ln -o PATH "$DISK" 2>/dev/null | tail -n +2); do
     swapoff "$part" 2>/dev/null || true
     umount -f "$part" 2>/dev/null || true
@@ -128,12 +172,12 @@ if [[ "$MODE" == "disk" ]]; then
     parted -s "$DISK" mklabel gpt \
       mkpart ESP fat32 1MiB 513MiB \
       set 1 esp on \
-      mkpart SPINEL_ROOT ext4 513MiB 100%
+      mkpart SPINEL_ROOT "$FS_TYPE" 513MiB 100%
   else
     parted -s "$DISK" mklabel gpt \
       mkpart BIOSBOOT 1MiB 3MiB \
       set 1 bios_grub on \
-      mkpart SPINEL_ROOT ext4 3MiB 100%
+      mkpart SPINEL_ROOT "$FS_TYPE" 3MiB 100%
   fi
 
   partprobe "$DISK" || true
@@ -143,16 +187,14 @@ if [[ "$MODE" == "disk" ]]; then
   PART_2="$(part_path "$DISK" 2)"
 
   if [[ "$IS_UEFI" == "true" ]]; then
-    echo "==> Formatting EFI ($PART_1) and Root ($PART_2)..."
+    echo "==> Formatting EFI ($PART_1) and Root ($PART_2, $FS_TYPE)..."
     mkfs.fat -F32 -n SPINEL_EFI "$PART_1"
-    mkfs.ext4 -F -L SPINEL_ROOT "$PART_2"
-    mount "$PART_2" /mnt
+    mount_formatted_root "$PART_2"
     mkdir -p /mnt/boot/efi
     mount "$PART_1" /mnt/boot/efi
   else
-    echo "==> Formatting Root ($PART_2) for Legacy BIOS boot..."
-    mkfs.ext4 -F -L SPINEL_ROOT "$PART_2"
-    mount "$PART_2" /mnt
+    echo "==> Formatting Root ($PART_2, $FS_TYPE) for Legacy BIOS boot..."
+    mount_formatted_root "$PART_2"
   fi
   TARGET_LABEL="$DISK"
 else
@@ -164,6 +206,7 @@ else
     echo "[ERROR] Refusing to install onto active boot/root device ($ROOT_PART)." >&2
     exit 1
   fi
+  check_min_bytes "$ROOT_PART"
 
   if [[ "$IS_UEFI" == "true" ]]; then
     if [[ -z "$EFI_PART" || ! -b "$EFI_PART" ]]; then
@@ -181,12 +224,11 @@ else
     fi
   fi
 
-  echo "==> Mode: Custom Partition -> Root=$ROOT_PART EFI=${EFI_PART:-none} (UEFI=$IS_UEFI, os-prober=$OS_PROBER)"
-  progress 8 "正在格式化目标根分区 ${ROOT_PART}（保留其他分区数据）..."
+  echo "==> Mode: Custom Partition -> Root=$ROOT_PART ($FS_TYPE) EFI=${EFI_PART:-none} (UEFI=$IS_UEFI, os-prober=$OS_PROBER)"
+  progress 8 "正在格式化目标根分区 ${ROOT_PART} (${FS_TYPE})..."
   swapoff "$ROOT_PART" 2>/dev/null || true
   umount -f "$ROOT_PART" 2>/dev/null || true
-  mkfs.ext4 -F -L SPINEL_ROOT "$ROOT_PART"
-  mount "$ROOT_PART" /mnt
+  mount_formatted_root "$ROOT_PART"
 
   if [[ "$IS_UEFI" == "true" ]]; then
     echo "==> Mounting existing EFI partition $EFI_PART without formatting..."
@@ -208,6 +250,8 @@ if [[ -f "$SFS_PATH" ]]; then
   # Carry over any hot-updated desktop shell / launcher / UI from Live session overlay
   [[ -x /usr/local/bin/spinel-shell ]] && cp -f /usr/local/bin/spinel-shell /mnt/usr/local/bin/spinel-shell
   [[ -x /usr/local/bin/start-spinel-desktop ]] && cp -f /usr/local/bin/start-spinel-desktop /mnt/usr/local/bin/start-spinel-desktop
+  [[ -x /usr/local/bin/spinel-screenshot ]] && cp -f /usr/local/bin/spinel-screenshot /mnt/usr/local/bin/spinel-screenshot
+  [[ -x /usr/local/bin/spinel-lock ]] && cp -f /usr/local/bin/spinel-lock /mnt/usr/local/bin/spinel-lock
   if [[ -d /usr/share/spinel-shell/ui ]]; then
     mkdir -p /mnt/usr/share/spinel-shell/ui
     cp -a /usr/share/spinel-shell/ui/. /mnt/usr/share/spinel-shell/ui/
@@ -323,7 +367,10 @@ else
   arch-chroot /mnt bash -c "pacman-key --init && pacman-key --populate archlinux" || true
 fi
 
-progress 82 "正在重建标准硬盘 initramfs..."
+progress 82 "正在重建标准硬盘 initramfs 与快照配置..."
+if [[ "$FS_TYPE" == "btrfs" ]] && [[ -x /mnt/usr/bin/snapper ]]; then
+  arch-chroot /mnt bash -c 'umount /.snapshots 2>/dev/null || true; rm -rf /.snapshots; snapper --no-dbus -c root create-config / 2>/dev/null || true; btrfs subvolume delete /.snapshots 2>/dev/null || rm -rf /.snapshots; mkdir -p /.snapshots; mount -a 2>/dev/null || true'
+fi
 arch-chroot /mnt mkinitcpio -P
 
 progress 92 "正在安装 GRUB 引导程序并写入 SpinelOS 引导项..."

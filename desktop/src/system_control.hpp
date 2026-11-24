@@ -18,6 +18,8 @@ struct TelemetrySnapshot {
     std::string net;
     std::string kernel;
     int mem_used_mb = 0;
+    int battery_pct = -1;
+    bool battery_charging = false;
     bool is_live = false;
     bool low_fx = true;
 };
@@ -25,6 +27,9 @@ struct TelemetrySnapshot {
 struct MediaSnapshot {
     int volume = 75;
     int brightness = -1;
+    int battery_pct = -1;
+    bool battery_charging = false;
+    std::string power_profile;
 };
 
 struct ProxyConfig {
@@ -81,3 +86,12 @@ void reload_desktop_portals(AppState *state);
 
 void push_process_list(AppState *state);
 void kill_process_by_pid(AppState *state, int pid, bool force);
+
+void sync_notification_theme(bool is_light);
+void push_audio_power_state(AppState *state);
+void set_audio_default_node(AppState *state, int id, bool is_sink);
+void set_mic_volume(AppState *state, int pct);
+void toggle_mic_mute(AppState *state);
+void set_power_profile(AppState *state, const std::string &profile);
+void start_gamepad_hotkey_listener(AppState *state);
+void stop_gamepad_hotkey_listener();
