@@ -1243,3 +1243,291 @@ void install_rime_ice_dict(AppState *state) {
         }, state);
     }).detach();
 }
+
+namespace {
+
+bool valid_app_id(const std::string &s) {
+    if (s.empty() || s.size() > 160) return false;
+    for (unsigned char c : s) {
+        if (!(std::isalnum(c) || c == '.' || c == '_' || c == '-')) return false;
+    }
+    return true;
+}
+
+std::vector<std::string> split_semi(const std::string &v) {
+    std::vector<std::string> out;
+    std::stringstream ss(v);
+    std::string item;
+    while (std::getline(ss, item, ';')) {
+        item = trim_copy(item);
+        if (!item.empty()) out.push_back(item);
+    }
+    return out;
+}
+
+bool list_has_token(const std::vector<std::string> &tokens, const std::string &tok) {
+    bool has = false;
+    for (const auto &t : tokens) {
+        if (t == tok) has = true;
+        else if (t == ("!" + tok)) has = false;
+    }
+    return has;
+}
+
+struct FlatpakPermEntry {
+    std::string id;
+    std::string name;
+    bool home = false;
+    bool host = false;
+    bool network = false;
+    bool devices = false;
+    bool dri = false;
+    bool audio = false;
+};
+
+FlatpakPermEntry inspect_flatpak_app_perms(const std::string &id, const std::string &name) {
+    FlatpakPermEntry e;
+    e.id = id;
+    e.name = name;
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"flatpak", "info", "--show-permissions", id}, out, rc) || rc != 0) {
+        return e;
+    }
+    std::istringstream iss(out);
+    std::string line;
+    std::string section;
+    std::vector<std::string> fs_toks, sh_toks, dev_toks, sock_toks;
+    while (std::getline(iss, line)) {
+        line = trim_copy(line);
+        if (line.empty()) continue;
+        if (line.front() == '[' && line.back() == ']') {
+            section = line;
+            continue;
+        }
+        if (section != "[Context]") continue;
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        auto toks = split_semi(v);
+        if (k == "filesystems") fs_toks.insert(fs_toks.end(), toks.begin(), toks.end());
+        else if (k == "shared") sh_toks.insert(sh_toks.end(), toks.begin(), toks.end());
+        else if (k == "devices") dev_toks.insert(dev_toks.end(), toks.begin(), toks.end());
+        else if (k == "sockets") sock_toks.insert(sock_toks.end(), toks.begin(), toks.end());
+    }
+    e.host = list_has_token(fs_toks, "host");
+    e.home = e.host || list_has_token(fs_toks, "home");
+    e.network = list_has_token(sh_toks, "network");
+    e.devices = list_has_token(dev_toks, "all");
+    e.dri = e.devices || list_has_token(dev_toks, "dri");
+    e.audio = list_has_token(sock_toks, "pulseaudio") || list_has_token(sock_toks, "pipewire");
+    return e;
+}
+
+}  // namespace
+
+void push_perms_state(AppState *state) {
+    if (!state || !state->settings_view) return;
+    std::string out;
+    int rc = 1;
+    bool polkit_installed = fs::exists("/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1");
+    bool polkit_running = run_argv_capture({"pgrep", "-f", "polkit-gnome-authentication-agent-1"}, out, rc) && rc == 0;
+    bool portal_running = run_argv_capture({"pgrep", "-x", "xdg-desktop-portal"}, out, rc) && rc == 0;
+    bool portal_gtk = run_argv_capture({"pgrep", "-x", "xdg-desktop-portal-gtk"}, out, rc) && rc == 0;
+    bool portal_wlr = run_argv_capture({"pgrep", "-x", "xdg-desktop-portal-wlr"}, out, rc) && rc == 0;
+    std::error_code ec;
+    bool portal_conf = fs::exists("/etc/xdg/xdg-desktop-portal/spinelos-portals.conf", ec) ||
+                       fs::exists("/etc/xdg/xdg-desktop-portal/portals.conf", ec);
+
+    std::vector<FlatpakPermEntry> apps;
+    if (has_executable("flatpak")) {
+        std::string list_out;
+        int list_rc = 1;
+        if (run_argv_capture({"flatpak", "list", "--app", "--columns=application,name"}, list_out, list_rc) && list_rc == 0) {
+            std::istringstream iss(list_out);
+            std::string line;
+            while (std::getline(iss, line)) {
+                line = trim_copy(line);
+                if (line.empty()) continue;
+                auto tab = line.find('\t');
+                std::string id = trim_copy(tab == std::string::npos ? line : line.substr(0, tab));
+                std::string name = trim_copy(tab == std::string::npos ? line : line.substr(tab + 1));
+                if (!valid_app_id(id)) continue;
+                apps.push_back(inspect_flatpak_app_perms(id, name.empty() ? id : name));
+            }
+        }
+    }
+
+    struct PortalEntry {
+        std::string table;
+        std::string id;
+        std::string app;
+        std::string perms;
+    };
+    std::vector<PortalEntry> portal_entries;
+    if (has_executable("flatpak")) {
+        std::string p_out;
+        int p_rc = 1;
+        if (run_argv_capture({"flatpak", "permission-show"}, p_out, p_rc) && p_rc == 0) {
+            std::istringstream iss(p_out);
+            std::string line;
+            while (std::getline(iss, line)) {
+                line = trim_copy(line);
+                if (line.empty() || line.rfind("Table", 0) == 0) continue;
+                std::istringstream ls(line);
+                std::string tbl, pid, papp, rest;
+                if (!(ls >> tbl >> pid >> papp)) continue;
+                std::getline(ls, rest);
+                rest = trim_copy(rest);
+                if (valid_app_id(papp) || papp == "all") {
+                    portal_entries.push_back({tbl, pid, papp, rest});
+                }
+            }
+        }
+    }
+
+    std::ostringstream js;
+    js << "window.__spinelPermsData && window.__spinelPermsData({"
+       << "\"polkit_installed\":" << (polkit_installed ? "true" : "false") << ","
+       << "\"polkit_running\":" << (polkit_running ? "true" : "false") << ","
+       << "\"portal_running\":" << (portal_running ? "true" : "false") << ","
+       << "\"portal_gtk\":" << (portal_gtk ? "true" : "false") << ","
+       << "\"portal_wlr\":" << (portal_wlr ? "true" : "false") << ","
+       << "\"portal_conf\":" << (portal_conf ? "true" : "false") << ","
+       << "\"apps\":[";
+    for (size_t i = 0; i < apps.size(); ++i) {
+        if (i > 0) js << ",";
+        js << "{"
+           << "\"id\":\"" << json_escape(apps[i].id) << "\","
+           << "\"name\":\"" << json_escape(apps[i].name) << "\","
+           << "\"home\":" << (apps[i].home ? "true" : "false") << ","
+           << "\"host\":" << (apps[i].host ? "true" : "false") << ","
+           << "\"network\":" << (apps[i].network ? "true" : "false") << ","
+           << "\"devices\":" << (apps[i].devices ? "true" : "false") << ","
+           << "\"dri\":" << (apps[i].dri ? "true" : "false") << ","
+           << "\"audio\":" << (apps[i].audio ? "true" : "false")
+           << "}";
+    }
+    js << "],\"portal_entries\":[";
+    for (size_t i = 0; i < portal_entries.size(); ++i) {
+        if (i > 0) js << ",";
+        js << "{"
+           << "\"table\":\"" << json_escape(portal_entries[i].table) << "\","
+           << "\"id\":\"" << json_escape(portal_entries[i].id) << "\","
+           << "\"app\":\"" << json_escape(portal_entries[i].app) << "\","
+           << "\"perms\":\"" << json_escape(portal_entries[i].perms) << "\""
+           << "}";
+    }
+    js << "]});";
+    eval_js(state->settings_view, js.str());
+}
+
+void apply_flatpak_perm(AppState *state, const std::string &payload) {
+    if (!has_executable("flatpak")) return;
+    std::string app_id, key, val;
+    std::istringstream iss(payload);
+    std::string line;
+    while (std::getline(iss, line)) {
+        line = trim_copy(line);
+        if (line.rfind("app=", 0) == 0) app_id = line.substr(4);
+        else if (line.rfind("key=", 0) == 0) key = line.substr(4);
+        else if (line.rfind("val=", 0) == 0) val = line.substr(4);
+    }
+    if (!valid_app_id(app_id)) return;
+    bool enable = (val == "true" || val == "1");
+    std::string flag;
+    if (key == "home") flag = enable ? "--filesystem=home" : "--nofilesystem=home";
+    else if (key == "host") flag = enable ? "--filesystem=host" : "--nofilesystem=host";
+    else if (key == "network") flag = enable ? "--share=network" : "--unshare=network";
+    else if (key == "devices") flag = enable ? "--device=all" : "--nodevice=all";
+    else if (key == "dri") flag = enable ? "--device=dri" : "--nodevice=dri";
+    else if (key == "audio") flag = enable ? "--socket=pulseaudio" : "--nosocket=pulseaudio";
+    else return;
+
+    std::string out;
+    int rc = 1;
+    run_argv_capture({"flatpak", "override", "--user", flag, app_id}, out, rc);
+    append_app_log("[Perms] flatpak override " + flag + " " + app_id + (rc == 0 ? " (OK)" : " (ERR)"));
+    if (state && state->settings_view) {
+        std::string msg = rc == 0 ? ("已更新 " + app_id + " 权限 (" + flag + ")，重启该应用生效。") : ("权限修改失败: " + out);
+        eval_js(state->settings_view,
+                "window.__spinelPermsFeedback && window.__spinelPermsFeedback(" +
+                    std::string(rc == 0 ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    }
+    push_perms_state(state);
+}
+
+void reset_flatpak_app_perms(AppState *state, const std::string &app_id) {
+    if (!valid_app_id(app_id) || !has_executable("flatpak")) return;
+    std::string out;
+    int rc = 1;
+    run_argv_capture({"flatpak", "override", "--user", "--reset", app_id}, out, rc);
+    append_app_log("[Perms] 恢复应用默认权限: " + app_id);
+    if (state && state->settings_view) {
+        std::string msg = rc == 0 ? ("已将 " + app_id + " 权限恢复为应用默认。") : ("重置失败: " + out);
+        eval_js(state->settings_view,
+                "window.__spinelPermsFeedback && window.__spinelPermsFeedback(" +
+                    std::string(rc == 0 ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    }
+    push_perms_state(state);
+}
+
+void reset_portal_perm(AppState *state, const std::string &payload) {
+    if (!has_executable("flatpak")) return;
+    std::string table, pid, app_id;
+    std::istringstream iss(payload);
+    std::string line;
+    while (std::getline(iss, line)) {
+        line = trim_copy(line);
+        if (line.rfind("table=", 0) == 0) table = line.substr(6);
+        else if (line.rfind("id=", 0) == 0) pid = line.substr(3);
+        else if (line.rfind("app=", 0) == 0) app_id = line.substr(4);
+    }
+    if (table.empty() || pid.empty() || app_id.empty()) return;
+    std::string out;
+    int rc = 1;
+    run_argv_capture({"flatpak", "permission-remove", table, pid, app_id}, out, rc);
+    append_app_log("[Perms] 撤销动态授权记录: " + table + " / " + pid + " / " + app_id);
+    push_perms_state(state);
+}
+
+void restart_polkit_agent(AppState *state) {
+    const char *agent = "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1";
+    if (!fs::exists(agent)) {
+        if (state && state->settings_view) {
+            eval_js(state->settings_view,
+                    "window.__spinelPermsFeedback && window.__spinelPermsFeedback(false, \"尚未安装 polkit-gnome，请先运行 ./scripts/dev-deploy.sh --full 安装权限代理组件。\");");
+        }
+        return;
+    }
+    spawn_argv_detached({"sh", "-c", "pkill -f polkit-gnome-authentication-agent-1 2>/dev/null || true; sleep 0.1; nohup /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null &"});
+    append_app_log("[Perms] 已启动 Polkit 管理员授权弹窗代理");
+    if (state) {
+        std::thread([state]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            post_js_to_main(state, "window.__spinelPermsFeedback && window.__spinelPermsFeedback(true, \"Polkit 管理员授权弹窗代理已就绪。\");", false);
+            g_idle_add([](gpointer d) -> gboolean {
+                auto *st = static_cast<AppState *>(d);
+                if (!st->shutting_down.load()) push_perms_state(st);
+                return G_SOURCE_REMOVE;
+            }, state);
+        }).detach();
+    }
+}
+
+void reload_desktop_portals(AppState *state) {
+    spawn_argv_detached({"sh", "-c", "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true; systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true"});
+    append_app_log("[Perms] 已重载 xdg-desktop-portal 权限弹窗网关");
+    if (state) {
+        std::thread([state]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            post_js_to_main(state, "window.__spinelPermsFeedback && window.__spinelPermsFeedback(true, \"已重载 Desktop Portals（文件/录屏/设备授权弹窗服务）。\");", false);
+            g_idle_add([](gpointer d) -> gboolean {
+                auto *st = static_cast<AppState *>(d);
+                if (!st->shutting_down.load()) push_perms_state(st);
+                return G_SOURCE_REMOVE;
+            }, state);
+        }).detach();
+    }
+}

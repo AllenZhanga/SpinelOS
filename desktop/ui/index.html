@@ -270,6 +270,7 @@
         <button class="tab-btn" data-cmd="settings:tab:display">显示器</button>
         <button class="tab-btn" data-cmd="settings:tab:perf">游戏性能</button>
         <button class="tab-btn" data-cmd="settings:tab:appearance">外观与系统</button>
+        <button class="tab-btn" data-cmd="settings:tab:perms">权限与安全</button>
         <button class="tab-btn" data-cmd="settings:tab:logs">系统日志</button>
       </div>
     </header>
@@ -470,6 +471,61 @@
             <button class="btn small" data-cmd="power:reboot">重启系统</button>
             <button class="btn small danger" data-cmd="power:shutdown">关机</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-perms" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>实时权限弹窗引擎（Polkit + Desktop Portals）</h3>
+            <p class="muted-hint">外部应用请求管理员提权或摄像头/录屏/文件沙箱授权时，由此双引擎负责弹出系统确认框。</p>
+          </div>
+          <div class="footer-actions">
+            <button class="btn small" data-cmd="settings:perms-get">刷新状态</button>
+          </div>
+        </div>
+        <div class="status-list" id="perms-infra-list">
+          <div class="status-row">
+            <div>
+              <strong>管理员密码授权弹窗 (Polkit Agent)</strong>
+              <div class="muted-hint" id="perms-polkit-desc">检测中...</div>
+            </div>
+            <button class="btn small" data-cmd="settings:perms-polkit">启动/重启授权代理</button>
+          </div>
+          <div class="status-row">
+            <div>
+              <strong>应用沙箱权限网关 (xdg-desktop-portal)</strong>
+              <div class="muted-hint" id="perms-portal-desc">检测中...</div>
+            </div>
+            <button class="btn small" data-cmd="settings:perms-portal">重载 Portal 网关</button>
+          </div>
+        </div>
+        <div id="perms-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>外部应用沙箱权限管理 (Flatpak)</h3>
+            <p class="muted-hint">可随时查看并开关已安装 Flatpak 软件的文件目录、网络、手柄外设、GPU 与音频权限（修改后重启对应软件生效）。</p>
+          </div>
+        </div>
+        <div id="perms-app-list" class="disk-list">
+          <div class="disk-empty">正在扫描已安装的外部应用...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>动态弹窗授权记录 (Portal Permissions)</h3>
+            <p class="muted-hint">由应用在运行时触发“是否允许录屏/访问位置/后台运行”后的授权记录，可撤销让软件下次重新询问。</p>
+          </div>
+        </div>
+        <div id="perms-portal-list" class="disk-list">
+          <div class="disk-empty">暂无动态弹窗授权记录</div>
         </div>
       </div>
     </div>

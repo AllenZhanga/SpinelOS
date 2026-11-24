@@ -324,7 +324,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "perf" || tab == "appearance" || tab == "logs") {
+        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "perf" || tab == "appearance" || tab == "perms" || tab == "logs") {
             native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
         }
@@ -463,6 +463,18 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         restart_fcitx5_daemon(state);
     } else if (cmd == "ime:config") {
         spawn_argv_logged({"fcitx5-configtool"}, "IME-Config");
+    } else if (cmd == "settings:perms-get") {
+        push_perms_state(state);
+    } else if (cmd == "settings:perms-polkit") {
+        restart_polkit_agent(state);
+    } else if (cmd == "settings:perms-portal") {
+        reload_desktop_portals(state);
+    } else if (cmd.rfind("perms:set\n", 0) == 0) {
+        apply_flatpak_perm(state, cmd);
+    } else if (cmd.rfind("perms:reset:", 0) == 0) {
+        reset_flatpak_app_perms(state, cmd.substr(12));
+    } else if (cmd.rfind("perms:portal-reset\n", 0) == 0) {
+        reset_portal_perm(state, cmd);
     } else if (cmd.rfind("installer:start\n", 0) == 0) {
         start_disk_install(state, cmd);
     }

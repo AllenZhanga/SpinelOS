@@ -43,8 +43,10 @@ gtk4
 gtk4-layer-shell
 webkitgtk-6.0
 xdg-desktop-portal
+xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
 polkit
+polkit-gnome
 foot
 
 # Desktop Apps (App Store + File Manager, Editor, Viewer; browsers via App Store)

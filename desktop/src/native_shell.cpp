@@ -912,6 +912,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"显示器分辨率", "settings:open:display"},
             {"游戏性能优化", "settings:open:perf"},
             {"外观主题与输入法", "settings:open:appearance"},
+            {"应用权限与安全", "settings:open:perms"},
             {"系统日志与排障", "settings:open:logs"}
         });
         add_topbar_menu(ns, "窗口", {
@@ -1014,6 +1015,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         {nullptr, ""},
         {"游戏与启动中心", "games:open"},
         {"应用商店", "store:open"},
+        {"权限与安全...", "settings:open:perms"},
         {"查看系统日志", "settings:open:logs"},
         {nullptr, ""},
         {"重新启动...", "power:reboot"},

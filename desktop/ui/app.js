@@ -927,7 +927,7 @@
   let activeLogSource = "apps";
 
   function switchSettingsTab(tab) {
-    const tabs = ["wifi", "bt", "display", "perf", "appearance", "logs"];
+    const tabs = ["wifi", "bt", "display", "perf", "appearance", "perms", "logs"];
     const target = tabs.includes(tab) ? tab : "wifi";
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
@@ -944,8 +944,122 @@
       sendCommand("theme:refresh");
       sendCommand("ime:status");
     }
+    else if (target === "perms") sendCommand("settings:perms-get");
     else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
   }
+
+  window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);
+
+  window.__spinelPermsData = (data) => {
+    if (!data) return;
+    const polkitDesc = document.getElementById("perms-polkit-desc");
+    if (polkitDesc) {
+      if (!data.polkit_installed) polkitDesc.textContent = "未安装 polkit-gnome（需运行 ./scripts/dev-deploy.sh --full 安装）";
+      else polkitDesc.textContent = data.polkit_running ? "运行中 · 支持图形管理员提权密码弹窗" : "已安装但未运行 · 点击右侧启动";
+    }
+    const portalDesc = document.getElementById("perms-portal-desc");
+    if (portalDesc) {
+      const parts = [
+        `核心网关: ${data.portal_running ? "运行中" : "未运行"}`,
+        `GTK弹窗: ${data.portal_gtk ? "就绪" : "待激活"}`,
+        `录屏截图(wlr): ${data.portal_wlr ? "就绪" : "按需激活"}`,
+        `桌面路由配置: ${data.portal_conf ? "已配置" : "缺失(需 --full)"}`
+      ];
+      portalDesc.textContent = parts.join(" · ");
+    }
+
+    const appList = document.getElementById("perms-app-list");
+    if (appList) {
+      appList.innerHTML = "";
+      const apps = Array.isArray(data.apps) ? data.apps : [];
+      if (apps.length === 0) {
+        appList.innerHTML = '<div class="disk-empty">当前尚未安装 Flatpak 沙箱应用（从「应用商店」安装浏览器/Heroic/Discord/OBS 后将在此显示全部权限开关）。</div>';
+      } else {
+        const permDefs = [
+          { key: "home", label: "主目录文件" },
+          { key: "host", label: "全部磁盘" },
+          { key: "network", label: "网络访问" },
+          { key: "devices", label: "手柄/全部设备" },
+          { key: "dri", label: "GPU 3D加速" },
+          { key: "audio", label: "声音与麦克风" }
+        ];
+        apps.forEach((app) => {
+          const card = document.createElement("div");
+          card.className = "part-section";
+          card.style.marginBottom = "10px";
+
+          const head = document.createElement("div");
+          head.className = "section-head";
+          head.style.marginBottom = "8px";
+          const titleWrap = document.createElement("div");
+          const strong = document.createElement("strong");
+          strong.textContent = app.name || app.id;
+          const small = document.createElement("div");
+          small.className = "muted-hint";
+          small.textContent = app.id;
+          titleWrap.append(strong, small);
+
+          const resetBtn = document.createElement("button");
+          resetBtn.type = "button";
+          resetBtn.className = "btn small ghost";
+          resetBtn.textContent = "恢复默认";
+          resetBtn.setAttribute("data-cmd", `perms:reset:${app.id}`);
+          head.append(titleWrap, resetBtn);
+
+          const pills = document.createElement("div");
+          pills.className = "footer-actions";
+          pills.style.flexWrap = "wrap";
+          permDefs.forEach((pd) => {
+            const on = Boolean(app[pd.key]);
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "pill-btn" + (on ? " active" : "");
+            b.textContent = `${pd.label}: ${on ? "允许" : "禁止"}`;
+            b.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              sendCommand(`perms:set\napp=${app.id}\nkey=${pd.key}\nval=${on ? "false" : "true"}`);
+            });
+            pills.appendChild(b);
+          });
+
+          card.append(head, pills);
+          appList.appendChild(card);
+        });
+      }
+    }
+
+    const portalList = document.getElementById("perms-portal-list");
+    if (portalList) {
+      portalList.innerHTML = "";
+      const entries = Array.isArray(data.portal_entries) ? data.portal_entries : [];
+      if (entries.length === 0) {
+        portalList.innerHTML = '<div class="disk-empty">暂无动态弹窗授权记录（当应用通过 Portal 弹出授权确认框并选择允许/拒绝后会记录于此）。</div>';
+      } else {
+        entries.forEach((pe) => {
+          const row = document.createElement("div");
+          row.className = "status-row";
+          const info = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = `${pe.app} · ${pe.table}/${pe.id}`;
+          const sub = document.createElement("div");
+          sub.className = "muted-hint";
+          sub.textContent = `当前授权: ${pe.perms || "已记录"}`;
+          info.append(title, sub);
+
+          const rev = document.createElement("button");
+          rev.type = "button";
+          rev.className = "btn small danger";
+          rev.textContent = "撤销重询";
+          rev.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            sendCommand(`perms:portal-reset\ntable=${pe.table}\nid=${pe.id}\napp=${pe.app}`);
+          });
+          row.append(info, rev);
+          portalList.appendChild(row);
+        });
+      }
+    }
+  };
 
   window.__spinelImeState = (data) => {
     if (!data) return;

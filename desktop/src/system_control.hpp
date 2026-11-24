@@ -69,3 +69,10 @@ void push_ime_state(AppState *state);
 void set_ime_engine(AppState *state, const std::string &engine);
 void install_rime_ice_dict(AppState *state);
 void restart_fcitx5_daemon(AppState *state);
+
+void push_perms_state(AppState *state);
+void apply_flatpak_perm(AppState *state, const std::string &payload);
+void reset_flatpak_app_perms(AppState *state, const std::string &app_id);
+void reset_portal_perm(AppState *state, const std::string &payload);
+void restart_polkit_agent(AppState *state);
+void reload_desktop_portals(AppState *state);

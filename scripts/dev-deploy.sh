@@ -76,14 +76,16 @@ if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, labwc/foot config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
     flatpak spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
+    polkit-gnome xdg-desktop-portal-gtk \
     fcitx5 fcitx5-chinese-addons fcitx5-pinyin-zhwiki fcitx5-rime rime-pinyin-simp fcitx5-gtk fcitx5-qt fcitx5-configtool
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /usr/share/themes/SpinelDark /usr/share/fcitx5/themes
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/fcitx5/themes
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/foot/. /etc/xdg/foot/
+  sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
@@ -128,6 +130,15 @@ if [ "$MODE" = "full" ]; then
     pkill -x spice-vdagent 2>/dev/null || true
     nohup spice-vdagent >/dev/null 2>&1 </dev/null &
   fi
+  if [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]; then
+    pkill -f polkit-gnome-authentication-agent-1 2>/dev/null || true
+    sleep 0.1
+    nohup /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null &
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true
+    systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true
+  fi
 fi
 
 if command -v fcitx5 >/dev/null 2>&1; then
@@ -162,6 +173,8 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/foot/" "${DEV_HOST}:/tmp/spinel-dev/foot/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/etc/xdg/xdg-desktop-portal/" "${DEV_HOST}:/tmp/spinel-dev/portals/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
   rsync -avz -e "${SSH_CMD}" \
