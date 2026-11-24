@@ -91,6 +91,7 @@ bluez-utils
 # Fonts (Chinese + Emoji/Icons)
 noto-fonts
 noto-fonts-cjk
+noto-fonts-emoji
 ttf-dejavu
 
 # Input Method (Fcitx5 Wayland + Chinese Pinyin & optional Rime-Ice)

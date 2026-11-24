@@ -1203,7 +1203,19 @@ void ensure_fcitx5_defaults(bool is_light) {
     write_fcitx5_classicui(is_light, !fs::exists(fdir / "conf/classicui.conf", ec));
     fs::path pyconf = fdir / "conf/pinyin.conf";
     if (!fs::exists(pyconf, ec)) {
-        write_text_file(pyconf.string(), "PageSize=7\nCloudPinyinEnabled=False\n");
+        write_text_file(pyconf.string(), "PageSize=7\nCloudPinyinEnabled=False\nExtBEnabled=False\n");
+    } else {
+        std::ifstream pifs(pyconf);
+        if (pifs.is_open()) {
+            std::string raw((std::istreambuf_iterator<char>(pifs)), std::istreambuf_iterator<char>());
+            pifs.close();
+            bool has_extb = (raw.rfind("ExtBEnabled=", 0) == 0 || raw.find("\nExtBEnabled=") != std::string::npos);
+            if (!has_extb) {
+                if (!raw.empty() && raw.back() != '\n') raw += '\n';
+                raw += "ExtBEnabled=False\n";
+                write_text_file(pyconf.string(), raw);
+            }
+        }
     }
     write_rime_default_custom(has_ice);
 }

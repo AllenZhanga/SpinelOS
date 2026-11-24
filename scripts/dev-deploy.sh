@@ -78,8 +78,9 @@ if [ "$MODE" = "full" ]; then
     flatpak ptyxis mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
     spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
-    polkit-gnome xdg-desktop-portal-gtk \
+    polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-chinese-addons fcitx5-rime fcitx5-gtk fcitx5-qt fcitx5-configtool
+  fc-cache -f >/dev/null 2>&1 || true
   for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp; do
     if pacman -Qq "$legacy_ime" >/dev/null 2>&1; then
       echo "==> Removing legacy IME dictionary package $legacy_ime..."
