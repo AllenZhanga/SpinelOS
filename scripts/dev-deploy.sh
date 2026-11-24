@@ -100,6 +100,11 @@ if [ "$MODE" = "full" ]; then
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
   sudo install -Dm644 /tmp/spinel-dev/zram-generator.conf /etc/systemd/zram-generator.conf
   sudo install -Dm644 /tmp/spinel-dev/90-spinel-backlight.rules /etc/udev/rules.d/90-spinel-backlight.rules
+  sudo install -Dm644 /tmp/spinel-dev/75-spinel-fonts.conf /etc/fonts/conf.d/75-spinel-fonts.conf
+  if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
+    sudo ln -sf /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf /etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf
+  fi
+  sudo fc-cache -f >/dev/null 2>&1 || true
   sudo udevadm control --reload-rules 2>/dev/null || true
   sudo udevadm trigger --subsystem-match=backlight 2>/dev/null || true
   sudo systemctl daemon-reload 2>/dev/null || true
@@ -219,6 +224,7 @@ if [[ "${MODE}" == "full" ]]; then
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/systemd/zram-generator.conf" \
     "${ROOT_DIR}/archiso/airootfs/etc/udev/rules.d/90-spinel-backlight.rules" \
+    "${ROOT_DIR}/archiso/airootfs/etc/fonts/conf.d/75-spinel-fonts.conf" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-screenshot" \

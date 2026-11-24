@@ -16,7 +16,7 @@
   --r-md: 10px;
   --r-sm: 8px;
   --r-pill: 999px;
-  --font: "Noto Sans CJK SC", "Inter", system-ui, sans-serif;
+  --font: "Noto Sans CJK SC", "Inter", system-ui, "Noto Color Emoji", sans-serif;
 }
 
 * {

@@ -36,6 +36,11 @@ sort -u "${PROFILE_DIR}/packages.x86_64" -o "${PROFILE_DIR}/packages.x86_64"
 cp -a "${WORKSPACE}/archiso/airootfs/." "${PROFILE_DIR}/airootfs/"
 # Ensure custom os-release replaces releng symlink cleanly
 cp -f "${WORKSPACE}/archiso/airootfs/etc/os-release" "${PROFILE_DIR}/airootfs/etc/os-release"
+if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
+  mkdir -p "${PROFILE_DIR}/airootfs/etc/fonts/conf.d"
+  ln -sf /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf \
+    "${PROFILE_DIR}/airootfs/etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf"
+fi
 
 # Install compiled desktop shell binary and HTML/CSS/JS UI assets
 install -Dm755 "${BUILD_DIR}/spinel-shell" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-shell"
