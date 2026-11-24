@@ -9,7 +9,7 @@ if [[ -f "${ROOT_DIR}/.env.local" ]]; then
   source "${ROOT_DIR}/.env.local"
 fi
 
-DEV_HOST="${SPINEL_DEV_HOST:-}"
+DEV_HOST="${SPINEL_DEV_HOST:-gamer@192.168.0.121}"
 DEV_PORT="${SPINEL_DEV_PORT:-22}"
 MODE="app"  # app | ui | full
 
