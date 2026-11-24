@@ -1933,8 +1933,16 @@ void native_shell_sync_theme(AppState *state) {
     apply_native_css(ns);
     if (ns->desktop_bg_da) gtk_widget_queue_draw(ns->desktop_bg_da);
     if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
-    if (ns->bar_win) queue_draw_tree(GTK_WIDGET(ns->bar_win));
-    if (ns->cc_win) queue_draw_tree(GTK_WIDGET(ns->cc_win));
+    if (ns->desktop_win) gtk_widget_queue_draw(GTK_WIDGET(ns->desktop_win));
+    if (ns->dock_win) gtk_widget_queue_draw(GTK_WIDGET(ns->dock_win));
+    if (ns->bar_win) {
+        queue_draw_tree(GTK_WIDGET(ns->bar_win));
+        gtk_widget_queue_draw(GTK_WIDGET(ns->bar_win));
+    }
+    if (ns->cc_win) {
+        queue_draw_tree(GTK_WIDGET(ns->cc_win));
+        gtk_widget_queue_draw(GTK_WIDGET(ns->cc_win));
+    }
 }
 
 void native_shell_sync_wallpaper(AppState *state) {

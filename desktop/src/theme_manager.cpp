@@ -344,6 +344,13 @@ void push_theme_state(AppState *state) {
     eval_js(state->store_view, script);
     eval_js(state->settings_view, script);
     eval_js(state->installer_view, script);
+    auto queue_view = [](WebKitWebView *v) {
+        if (v) gtk_widget_queue_draw(GTK_WIDGET(v));
+    };
+    queue_view(state->games_view);
+    queue_view(state->store_view);
+    queue_view(state->settings_view);
+    queue_view(state->installer_view);
 }
 
 void export_custom_theme_template() {

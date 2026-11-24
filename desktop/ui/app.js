@@ -329,6 +329,18 @@
   }
 
   let activeThemeId = "crystal-aurora";
+  let availableThemes = [];
+
+  function forceSoftwareRepaint() {
+    if (!activeRootEl) return;
+    // WebKitGTK software/non-composited mode may defer :root CSS var repaints until next layout/compositor pass
+    document.documentElement.dataset.theme = activeThemeId;
+    activeRootEl.style.opacity = "0.999";
+    void activeRootEl.offsetHeight;
+    window.requestAnimationFrame(() => {
+      if (activeRootEl) activeRootEl.style.opacity = "";
+    });
+  }
 
   function applyUiTheme(t) {
     if (!t) return;
@@ -346,17 +358,23 @@
     setVar("--muted", t.ui_muted);
     setVar("--accent", t.ui_accent);
     setVar("--accent-2", t.ui_accent2);
+    if (activeRootEl && t.ui_win_bg) {
+      activeRootEl.style.background = t.ui_win_bg;
+    }
     document.body.classList.toggle("theme-light", Boolean(t.is_light));
+    forceSoftwareRepaint();
   }
 
   window.__spinelThemeData = (data) => {
     if (!data) return;
+    if (Array.isArray(data.themes)) availableThemes = data.themes;
     if (data.active) applyUiTheme(data.active);
     const grid = document.getElementById("theme-grid");
-    if (!grid || !Array.isArray(data.themes)) return;
+    if (!grid || !Array.isArray(availableThemes)) return;
     grid.innerHTML = "";
-    data.themes.forEach((t) => {
+    availableThemes.forEach((t) => {
       const btn = document.createElement("button");
+      btn.type = "button";
       btn.className = "wp-card" + (t.id === activeThemeId ? " active" : "");
       btn.setAttribute("data-cmd", `theme:set:${t.id}`);
 
@@ -1505,6 +1523,13 @@
         const btn = document.getElementById("btn-copy-launch");
         if (btn) { btn.textContent = "已复制!"; setTimeout(() => { btn.textContent = "复制 Steam 启动参数"; }, 1500); }
       }).catch(() => {});
+    } else if (cmd.startsWith("theme:set:")) {
+      const tid = cmd.slice(10);
+      const chosen = availableThemes.find((t) => t.id === tid);
+      if (chosen) {
+        window.__spinelThemeData({ active: chosen, themes: availableThemes });
+      }
+      sendCommand(cmd);
     } else {
       sendCommand(cmd);
     }
