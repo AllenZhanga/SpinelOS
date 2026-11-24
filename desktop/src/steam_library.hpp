@@ -18,5 +18,6 @@ struct SteamGameInfo {
 void ensure_steam_play_preconfig();
 std::vector<SteamGameInfo> list_steam_games();
 void push_steam_library(AppState *state);
+void launch_steam_client(AppState *state);
 void launch_steam_game(const std::string &appid, const PerfConfig &perf);
-void launch_steam_gamepadui(const PerfConfig &perf);
+void launch_steam_gamepadui(AppState *state, const PerfConfig &perf);

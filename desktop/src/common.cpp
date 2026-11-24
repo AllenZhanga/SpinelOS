@@ -121,6 +121,23 @@ bool run_argv_capture(const std::vector<std::string> &args, std::string &out, in
     return true;
 }
 
+bool has_executable(const std::string &cmd) {
+    if (cmd.empty()) return false;
+    if (cmd.find('/') != std::string::npos) {
+        return access(cmd.c_str(), X_OK) == 0;
+    }
+    const char *path_env = std::getenv("PATH");
+    if (!path_env) return false;
+    std::stringstream ss(path_env);
+    std::string dir;
+    while (std::getline(ss, dir, ':')) {
+        if (dir.empty()) continue;
+        fs::path cand = fs::path(dir) / cmd;
+        if (access(cand.c_str(), X_OK) == 0) return true;
+    }
+    return false;
+}
+
 void spawn_detached(const std::string &cmd) {
     std::string wrapped = "nohup " + cmd + " >/dev/null 2>&1 &";
     int rc = std::system(wrapped.c_str());

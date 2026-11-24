@@ -152,18 +152,24 @@ void open_settings_window(AppState *state, const std::string &tab) {
 }
 
 void open_installer_window(AppState *state) {
+    bool existed = (state->installer_win != nullptr);
     ensure_app_window(state, &state->installer_win, &state->installer_view,
                       "安装 SpinelOS 到硬盘", "?mode=installer", 860, 660);
-    push_theme_state(state);
-    push_installer_env(state);
+    if (existed) {
+        push_theme_state(state);
+        push_installer_env(state);
+    }
 }
 
 void open_store_window(AppState *state) {
+    bool existed = (state->store_win != nullptr);
     ensure_app_window(state, &state->store_win, &state->store_view,
                       "SpinelOS 应用商店", "?mode=store", 1020, 680);
-    push_theme_state(state);
-    push_desktop_apps(state);
-    push_store_catalog(state);
+    if (existed) {
+        push_theme_state(state);
+        push_desktop_apps(state);
+        push_store_catalog(state);
+    }
 }
 
 void push_all_telemetry(AppState *state) {
@@ -212,11 +218,11 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     if (cmd == "launch:steam") {
         native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
-        spawn_argv_detached({"steam"});
+        launch_steam_client(state);
     } else if (cmd == "launch:steam-gamepadui") {
         native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
-        launch_steam_gamepadui(load_perf_config());
+        launch_steam_gamepadui(state, load_perf_config());
     } else if (cmd.rfind("steam:launch:", 0) == 0) {
         native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
@@ -268,6 +274,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         native_shell_set_cc_visible(state, false);
         open_store_window(state);
     } else if (cmd == "store:refresh") {
+        push_desktop_apps(state);
         push_store_catalog(state);
     } else if (cmd.rfind("store:install\n", 0) == 0) {
         start_store_action(state, "install", cmd);

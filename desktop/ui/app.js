@@ -761,6 +761,7 @@
     renderDesktopShortcuts();
     renderDock();
     renderLaunchpadApps();
+    if (mode === "store") renderStoreApps();
   };
 
   /* ---------------- 5. Settings Window ---------------- */
@@ -1691,6 +1692,8 @@
 
   syncAllCustomSelects();
   if (mode === "settings") switchSettingsTab(initialTab);
+  if (mode === "store") sendCommand("store:refresh");
+  if (mode === "installer") sendCommand("installer:scan-disks");
   if (mode === "desktop") renderDesktopShortcuts();
   if (mode === "dock") renderDock();
 

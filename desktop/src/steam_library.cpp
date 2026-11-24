@@ -2,13 +2,21 @@
 #include "common.hpp"
 #include "native_shell.hpp"
 
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -301,6 +309,40 @@ void push_steam_library(AppState *state) {
     native_shell_sync_desktop(state);
 }
 
+namespace {
+
+struct AlertPrompt {
+    std::string title;
+    std::string detail;
+};
+
+void show_steam_alert(const std::string &title, const std::string &detail) {
+    auto *msg = new AlertPrompt{title, detail};
+    g_idle_add([](gpointer data) -> gboolean {
+        std::unique_ptr<AlertPrompt> prompt(static_cast<AlertPrompt *>(data));
+        GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", prompt->title.c_str());
+        gtk_alert_dialog_set_detail(dlg, prompt->detail.c_str());
+        const char *buttons[] = {"知道了", nullptr};
+        gtk_alert_dialog_set_buttons(dlg, buttons);
+        gtk_alert_dialog_choose(dlg, nullptr, nullptr, nullptr, nullptr);
+        g_object_unref(dlg);
+        return G_SOURCE_REMOVE;
+    }, msg);
+}
+
+}  // namespace
+
+void launch_steam_client(AppState *state) {
+    (void)state;
+    if (!has_executable("steam")) {
+        show_steam_alert("未检测到 Steam 客户端",
+                         "当前系统尚未安装 steam。请联网后在终端执行 sudo pacman -Sy steam 安装。");
+        return;
+    }
+    std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
+    spawn_argv_detached({"steam"});
+}
+
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     if (!is_digits(appid)) return;
 
@@ -315,44 +357,100 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     spawn_argv_detached({"steam", "steam://rungameid/" + appid}, envs);
 }
 
-void launch_steam_gamepadui(const PerfConfig &perf) {
+void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
+    (void)state;
+    if (!has_executable("steam")) {
+        show_steam_alert("无法启动主机大屏模式",
+                         "当前系统未检测到 Steam 客户端（可在终端执行 sudo pacman -Sy steam 安装，或在应用商店安装 Heroic / Lutris）。");
+        return;
+    }
+
     std::vector<std::pair<std::string, std::string>> envs;
     if (perf.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }
 
-    std::vector<std::string> args;
-    if (perf.gamemode) {
-        args.push_back("gamemoderun");
+    std::vector<std::string> direct_args = {"steam", "-gamepadui"};
+    TelemetrySnapshot tel = collect_telemetry();
+    if (tel.low_fx || !has_executable("gamescope")) {
+        std::fprintf(stderr,
+                     "[spinel-shell] Launching Steam GamepadUI directly (low_fx=%d, gamescope=%d)\n",
+                     tel.low_fx ? 1 : 0, has_executable("gamescope") ? 1 : 0);
+        spawn_argv_detached(direct_args, envs);
+        return;
     }
-    args.push_back("gamescope");
-    args.push_back("-f");
+
+    std::vector<std::string> gs_args;
+    if (perf.gamemode && has_executable("gamemoderun")) {
+        gs_args.push_back("gamemoderun");
+    }
+    gs_args.push_back("gamescope");
+    gs_args.push_back("-f");
 
     if (perf.render_res == "720p") {
-        args.push_back("-w"); args.push_back("1280");
-        args.push_back("-h"); args.push_back("720");
+        gs_args.push_back("-w"); gs_args.push_back("1280");
+        gs_args.push_back("-h"); gs_args.push_back("720");
     } else if (perf.render_res == "900p") {
-        args.push_back("-w"); args.push_back("1600");
-        args.push_back("-h"); args.push_back("900");
+        gs_args.push_back("-w"); gs_args.push_back("1600");
+        gs_args.push_back("-h"); gs_args.push_back("900");
     } else if (perf.render_res == "1080p") {
-        args.push_back("-w"); args.push_back("1920");
-        args.push_back("-h"); args.push_back("1080");
+        gs_args.push_back("-w"); gs_args.push_back("1920");
+        gs_args.push_back("-h"); gs_args.push_back("1080");
     }
 
     if (perf.fps_limit > 0) {
-        args.push_back("-r");
-        args.push_back(std::to_string(perf.fps_limit));
+        gs_args.push_back("-r");
+        gs_args.push_back(std::to_string(perf.fps_limit));
     }
     if (perf.fsr) {
-        args.push_back("-F");
-        args.push_back("fsr");
+        gs_args.push_back("-F");
+        gs_args.push_back("fsr");
     }
-    if (perf.mangohud != "off") {
-        args.push_back("--mangoapp");
+    if (perf.mangohud != "off" && has_executable("mangoapp")) {
+        gs_args.push_back("--mangoapp");
     }
-    args.push_back("--");
-    args.push_back("steam");
-    args.push_back("-gamepadui");
+    gs_args.push_back("--");
+    gs_args.push_back("steam");
+    gs_args.push_back("-gamepadui");
 
-    spawn_argv_detached(args, envs);
+    std::fprintf(stderr, "[spinel-shell] Launching Gamescope + Steam GamepadUI\n");
+    std::thread([gs_args, direct_args, envs]() {
+        pid_t pid = fork();
+        if (pid == 0) {
+            setsid();
+            for (const auto &kv : envs) {
+                setenv(kv.first.c_str(), kv.second.c_str(), 1);
+            }
+            int devnull = open("/dev/null", O_RDWR);
+            if (devnull >= 0) {
+                dup2(devnull, STDIN_FILENO);
+                if (devnull > 2) close(devnull);
+            }
+            std::vector<char *> argv;
+            argv.reserve(gs_args.size() + 1);
+            for (const auto &a : gs_args) argv.push_back(const_cast<char *>(a.c_str()));
+            argv.push_back(nullptr);
+            execvp(gs_args[0].c_str(), argv.data());
+            _exit(127);
+        }
+        if (pid < 0) return;
+
+        // If gamescope aborts immediately (e.g., Vulkan WSI unsupported), fall back to steam -gamepadui
+        int status = 0;
+        for (int i = 0; i < 20; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            pid_t r = waitpid(pid, &status, WNOHANG);
+            if (r == pid) {
+                int code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+                if (code != 0) {
+                    std::fprintf(stderr,
+                                 "[spinel-shell] gamescope exited early (code=%d), falling back to steam -gamepadui\n",
+                                 code);
+                    spawn_argv_detached(direct_args, envs);
+                }
+                return;
+            }
+        }
+        waitpid(pid, &status, 0);
+    }).detach();
 }
