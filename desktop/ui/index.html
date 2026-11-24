@@ -261,6 +261,7 @@
         <h2>系统设置</h2>
       </div>
       <nav class="settings-nav" aria-label="设置导航">
+        <div class="settings-nav-group">网络与连接</div>
         <button type="button" class="settings-nav-item active" data-cmd="settings:tab:wifi">
           <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.2 6.2a8.8 8.8 0 0 1 11.6 0M4.8 9a5.2 5.2 0 0 1 6.4 0"/><circle cx="8" cy="12.2" r="1.2" fill="currentColor" stroke="none"/></svg></span>
           <span>Wi-Fi 与网络</span>
@@ -269,6 +270,8 @@
           <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2v12l3.8-3.4L4.5 5.4M8 2l3.8 3.4-7.3 5.2"/></svg></span>
           <span>蓝牙手柄</span>
         </button>
+
+        <div class="settings-nav-group">硬件与外设</div>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:display">
           <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="8.5" rx="1.6"/><path d="M5.5 13.5h5M8 11v2.5" stroke-linecap="round"/></svg></span>
           <span>显示器</span>
@@ -277,14 +280,22 @@
           <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.8l3.5-2.8v9.2L5.3 9.8H2.5z"/><path d="M11.3 5.4a3.6 3.6 0 0 1 0 5.2M13.2 3.8a6 6 0 0 1 0 8.4"/></svg></span>
           <span>声音与电源</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perf">
-          <span class="settings-nav-ico ico-violet"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 11.5a5.5 5.5 0 1 1 10 0"/><path d="M8 8.5l2.6-2.4"/><circle cx="8" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
-          <span>游戏性能</span>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:shortcuts">
+          <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="3.5" width="12.4" height="9" rx="1.8"/><path d="M4.2 6.5h1.2M7.4 6.5h1.2M10.6 6.5h1.2M4.8 9.8h6.4"/></svg></span>
+          <span>键盘与快捷键</span>
         </button>
+
+        <div class="settings-nav-group">个性化与游戏</div>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:appearance">
           <span class="settings-nav-ico ico-pink"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><circle cx="6.2" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="9.8" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="9.8" r="1" fill="currentColor" stroke="none"/></svg></span>
           <span>外观与输入法</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perf">
+          <span class="settings-nav-ico ico-violet"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 11.5a5.5 5.5 0 1 1 10 0"/><path d="M8 8.5l2.6-2.4"/><circle cx="8" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
+          <span>游戏性能</span>
+        </button>
+
+        <div class="settings-nav-group">安全与维护</div>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:perms">
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
@@ -457,14 +468,91 @@
           <div class="perf-row">
             <div class="perf-row-info">
               <strong>屏幕截图与锁屏快捷操作</strong>
-              <span class="muted-hint">支持 Print 全屏、Ctrl+Shift+4 框选截图、Super+L 锁屏</span>
+              <span class="muted-hint">触发截图或锁屏（可在「键盘与快捷键」中修改组合键）</span>
             </div>
             <div class="footer-actions">
               <button class="btn small" data-cmd="system:screenshot:area">区域截图</button>
               <button class="btn small" data-cmd="system:screenshot:full">全屏截图</button>
               <button class="btn small" data-cmd="system:lock">锁定屏幕</button>
-              <button class="btn small" data-cmd="system:suspend">睡眠</button>
+              <button class="btn small" data-cmd="settings:tab:shortcuts">改快捷键...</button>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-shortcuts" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>全局桌面快捷键 (labwc)</h3>
+            <p class="muted-hint">点击「录制快捷键」后直接按下你想用的组合键（如 Ctrl+Shift+A），保存后立即生效。</p>
+          </div>
+          <div class="footer-actions">
+            <button type="button" class="btn small" data-cmd="settings:shortcuts-reset">恢复默认</button>
+          </div>
+        </div>
+        <div id="shortcuts-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+        <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>区域框选截图</strong>
+              <span class="muted-hint">保存 PNG 到 ~/Pictures/Screenshots 并自动复制到剪贴板（同时保留 Shift+Print）</span>
+            </div>
+            <div class="footer-actions">
+              <span class="kbd-cap" id="kbd-val-screenshot_area">Ctrl + Shift + 4</span>
+              <button type="button" class="btn small primary" data-record-key="screenshot_area">录制快捷键</button>
+              <button type="button" class="btn small" data-cmd="system:screenshot:area">立即截图</button>
+            </div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>全屏截图</strong>
+              <span class="muted-hint">立即截取当前全屏画面并复制进剪贴板</span>
+            </div>
+            <div class="footer-actions">
+              <span class="kbd-cap" id="kbd-val-screenshot_full">Print</span>
+              <button type="button" class="btn small primary" data-record-key="screenshot_full">录制快捷键</button>
+              <button type="button" class="btn small" data-cmd="system:screenshot:full">截全屏</button>
+            </div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>锁定屏幕</strong>
+              <span class="muted-hint">立即启动安全锁屏（需输入登录密码解锁）</span>
+            </div>
+            <div class="footer-actions">
+              <span class="kbd-cap" id="kbd-val-lock_screen">Super + L</span>
+              <button type="button" class="btn small primary" data-record-key="lock_screen">录制快捷键</button>
+            </div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>打开终端 (Ptyxis)</strong>
+              <span class="muted-hint">在任意界面快速打开多标签终端窗口</span>
+            </div>
+            <div class="footer-actions">
+              <span class="kbd-cap" id="kbd-val-open_terminal">Super + Enter</span>
+              <button type="button" class="btn small primary" data-record-key="open_terminal">录制快捷键</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <h3>内置窗口与终端常用快捷键</h3>
+        <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info"><strong>切换窗口 / 关闭窗口</strong><span class="muted-hint">桌面全局窗口切换与关闭快捷键</span></div>
+            <div class="footer-actions"><span class="kbd-cap">Alt + Tab</span><span class="kbd-cap">Alt + F4</span></div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info"><strong>终端新建标签页 / 复制粘贴</strong><span class="muted-hint">Ptyxis 多标签终端内按键</span></div>
+            <div class="footer-actions"><span class="kbd-cap">Ctrl + T</span><span class="kbd-cap">Ctrl + Shift + C / V</span></div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-row-info"><strong>中英文输入法切换</strong><span class="muted-hint">Fcitx5 Wayland & XWayland 全局有效</span></div>
+            <div class="footer-actions"><span class="kbd-cap">Ctrl + Space</span><span class="kbd-cap">Shift</span></div>
           </div>
         </div>
       </div>

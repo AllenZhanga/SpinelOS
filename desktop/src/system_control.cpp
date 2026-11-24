@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "native_shell.hpp"
 #include "steam_library.hpp"
+#include "theme_manager.hpp"
 
 #include <fcntl.h>
 #include <linux/joystick.h>
@@ -2328,5 +2329,172 @@ void stop_clipboard_watcher() {
         ::kill(g_clip_watcher_pid, SIGTERM);
         ::waitpid(g_clip_watcher_pid, nullptr, 0);
         g_clip_watcher_pid = -1;
+    }
+}
+
+namespace {
+
+bool is_valid_labwc_key(const std::string &k) {
+    if (k.empty() || k.size() > 40) return false;
+    for (char ch : k) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && c != '-' && c != '_') return false;
+    }
+    return true;
+}
+
+fs::path shortcuts_conf_path() {
+    return fs::path(home_dir()) / ".config/spinelos/shortcuts.conf";
+}
+
+}  // namespace
+
+ShortcutConfig load_shortcuts_config() {
+    ShortcutConfig sc;
+    std::ifstream ifs(shortcuts_conf_path());
+    if (!ifs.is_open()) return sc;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = trim_copy(line);
+        if (line.empty() || line[0] == '#') continue;
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (!is_valid_labwc_key(v)) continue;
+        if (k == "screenshot_area") sc.screenshot_area = v;
+        else if (k == "screenshot_full") sc.screenshot_full = v;
+        else if (k == "lock_screen") sc.lock_screen = v;
+        else if (k == "open_terminal") sc.open_terminal = v;
+    }
+    return sc;
+}
+
+bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
+    const std::string theme_name = is_light ? "SpinelLight" : "SpinelDark";
+    std::ostringstream xml;
+    xml << "<?xml version=\"1.0\"?>\n"
+        << "<labwc_config>\n"
+        << "  <core>\n"
+        << "    <gap>0</gap>\n"
+        << "    <adaptiveSync>yes</adaptiveSync>\n"
+        << "    <reuseOutputMode>yes</reuseOutputMode>\n"
+        << "  </core>\n\n"
+        << "  <theme>\n"
+        << "    <name>" << theme_name << "</name>\n"
+        << "    <cornerRadius>12</cornerRadius>\n"
+        << "    <dropShadows>yes</dropShadows>\n"
+        << "    <titlebar>\n"
+        << "      <layout>close,iconify,max:</layout>\n"
+        << "    </titlebar>\n"
+        << "  </theme>\n\n"
+        << "  <keyboard>\n"
+        << "    <default />\n"
+        << "    <keybind key=\"" << sc.open_terminal << "\">\n"
+        << "      <action name=\"Execute\" command=\"ptyxis\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"" << sc.screenshot_full << "\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-screenshot full\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"" << sc.screenshot_area << "\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-screenshot area\" />\n"
+        << "    </keybind>\n";
+    if (sc.screenshot_area != "S-Print" && sc.screenshot_full != "S-Print") {
+        xml << "    <keybind key=\"S-Print\">\n"
+            << "      <action name=\"Execute\" command=\"spinel-screenshot area\" />\n"
+            << "    </keybind>\n";
+    }
+    xml << "    <keybind key=\"" << sc.lock_screen << "\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-lock\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"A-Tab\">\n"
+        << "      <action name=\"NextWindow\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"A-F4\">\n"
+        << "      <action name=\"Close\" />\n"
+        << "    </keybind>\n"
+        << "  </keyboard>\n\n"
+        << "  <mouse>\n"
+        << "    <default />\n"
+        << "  </mouse>\n"
+        << "</labwc_config>\n";
+
+    std::string desired = xml.str();
+    fs::path user_rc = fs::path(home_dir()) / ".config/labwc/rc.xml";
+    std::error_code ec;
+    if (fs::exists(user_rc, ec)) {
+        std::ifstream cur_ifs(user_rc);
+        if (cur_ifs.is_open()) {
+            std::string existing((std::istreambuf_iterator<char>(cur_ifs)), std::istreambuf_iterator<char>());
+            if (existing == desired) return true;
+        }
+    }
+    if (write_text_file(user_rc.string(), desired)) {
+        spawn_argv_detached({"pkill", "-HUP", "-x", "labwc"});
+        return true;
+    }
+    return false;
+}
+
+void push_shortcuts_config(AppState *state) {
+    if (!state || !state->settings_view) return;
+    ShortcutConfig sc = load_shortcuts_config();
+    std::ostringstream js;
+    js << "window.__spinelShortcutsData && window.__spinelShortcutsData({"
+       << "\"screenshot_area\":\"" << json_escape(sc.screenshot_area) << "\","
+       << "\"screenshot_full\":\"" << json_escape(sc.screenshot_full) << "\","
+       << "\"lock_screen\":\"" << json_escape(sc.lock_screen) << "\","
+       << "\"open_terminal\":\"" << json_escape(sc.open_terminal) << "\""
+       << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void update_shortcuts_config(AppState *state, const std::string &payload) {
+    ShortcutConfig sc = load_shortcuts_config();
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (!is_valid_labwc_key(v)) continue;
+        if (k == "screenshot_area") sc.screenshot_area = v;
+        else if (k == "screenshot_full") sc.screenshot_full = v;
+        else if (k == "lock_screen") sc.lock_screen = v;
+        else if (k == "open_terminal") sc.open_terminal = v;
+    }
+
+    std::ostringstream oss;
+    oss << "screenshot_area=" << sc.screenshot_area << "\n"
+        << "screenshot_full=" << sc.screenshot_full << "\n"
+        << "lock_screen=" << sc.lock_screen << "\n"
+        << "open_terminal=" << sc.open_terminal << "\n";
+    bool ok = write_text_file(shortcuts_conf_path().string(), oss.str()) &&
+              write_labwc_rc(get_active_theme().is_light, sc);
+
+    append_app_log(std::string("[Shortcuts] 更新全局快捷键 (区域截图=") + sc.screenshot_area +
+                   ", 全屏截图=" + sc.screenshot_full + ", 锁屏=" + sc.lock_screen + ", 终端=" + sc.open_terminal + ")");
+    push_shortcuts_config(state);
+    if (state && state->settings_view) {
+        eval_js(state->settings_view,
+                std::string("window.__spinelShortcutsFeedback && window.__spinelShortcutsFeedback(") +
+                    (ok ? "true" : "false") + ",\"" +
+                    (ok ? "快捷键已保存并实时重载到桌面合成器 (labwc)！" : "保存快捷键配置失败。") + "\");");
+    }
+}
+
+void reset_shortcuts_config(AppState *state) {
+    ShortcutConfig def;
+    std::ostringstream oss;
+    oss << "screenshot_area=" << def.screenshot_area << "\n"
+        << "screenshot_full=" << def.screenshot_full << "\n"
+        << "lock_screen=" << def.lock_screen << "\n"
+        << "open_terminal=" << def.open_terminal << "\n";
+    write_text_file(shortcuts_conf_path().string(), oss.str());
+    write_labwc_rc(get_active_theme().is_light, def);
+    append_app_log("[Shortcuts] 已恢复默认系统快捷键");
+    push_shortcuts_config(state);
+    if (state && state->settings_view) {
+        eval_js(state->settings_view,
+                "window.__spinelShortcutsFeedback && window.__spinelShortcutsFeedback(true, \"已恢复默认快捷键并立即生效！\");");
     }
 }

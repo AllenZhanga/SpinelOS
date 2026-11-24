@@ -332,8 +332,8 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "audio" || tab == "perf" ||
-            tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
+        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "audio" || tab == "shortcuts" ||
+            tab == "perf" || tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
             native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
         }
@@ -391,6 +391,12 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         set_mic_volume(state, std::atoi(cmd.substr(17).c_str()));
     } else if (cmd == "settings:mic-mute") {
         toggle_mic_mute(state);
+    } else if (cmd == "settings:shortcuts-get") {
+        push_shortcuts_config(state);
+    } else if (cmd.rfind("settings:shortcuts-set\n", 0) == 0) {
+        update_shortcuts_config(state, cmd);
+    } else if (cmd == "settings:shortcuts-reset") {
+        reset_shortcuts_config(state);
     } else if (cmd.rfind("window:toggle:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(14).c_str(), nullptr, 10);
         if (wid > 0) toggle_or_activate_window(wid);

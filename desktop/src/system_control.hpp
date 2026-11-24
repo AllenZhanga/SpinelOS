@@ -85,6 +85,19 @@ void reset_portal_perm(AppState *state, const std::string &payload);
 void restart_polkit_agent(AppState *state);
 void reload_desktop_portals(AppState *state);
 
+struct ShortcutConfig {
+    std::string screenshot_area = "C-S-4";
+    std::string screenshot_full = "Print";
+    std::string lock_screen = "W-l";
+    std::string open_terminal = "W-Return";
+};
+
+ShortcutConfig load_shortcuts_config();
+bool write_labwc_rc(bool is_light, const ShortcutConfig &sc);
+void push_shortcuts_config(AppState *state);
+void update_shortcuts_config(AppState *state, const std::string &payload);
+void reset_shortcuts_config(AppState *state);
+
 void push_process_list(AppState *state);
 void kill_process_by_pid(AppState *state, int pid, bool force);
 

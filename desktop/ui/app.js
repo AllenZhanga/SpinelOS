@@ -935,6 +935,7 @@
       bt: "蓝牙手柄",
       display: "显示器",
       audio: "声音与电源",
+      shortcuts: "键盘与快捷键",
       perf: "游戏性能",
       appearance: "外观与输入法",
       perms: "权限与安全",
@@ -960,6 +961,7 @@
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
     else if (target === "audio") sendCommand("settings:audio-get");
+    else if (target === "shortcuts") sendCommand("settings:shortcuts-get");
     else if (target === "perf") sendCommand("perf:get");
     else if (target === "appearance") {
       sendCommand("theme:refresh");
@@ -1248,6 +1250,108 @@
     if (pct) pct.textContent = `${v}%`;
     sendCommand(`settings:mic-vol:${v}`);
   });
+
+  let recordingShortcutField = null;
+
+  function formatLabwcKey(raw) {
+    if (!raw) return "--";
+    return String(raw)
+      .split("-")
+      .map((part) => {
+        if (part === "C") return "Ctrl";
+        if (part === "S") return "Shift";
+        if (part === "A") return "Alt";
+        if (part === "W") return "Super";
+        if (part === "Return") return "Enter";
+        if (part === "space") return "Space";
+        if (part.length === 1) return part.toUpperCase();
+        return part;
+      })
+      .join(" + ");
+  }
+
+  function eventToLabwcKey(ev) {
+    const modKeys = new Set(["Control", "Shift", "Alt", "Meta", "Super", "OS"]);
+    if (modKeys.has(ev.key)) return null;
+    let keyName = "";
+    const c = ev.code || "";
+    if (/^Key[A-Z]$/.test(c)) keyName = c.slice(3).toLowerCase();
+    else if (/^Digit[0-9]$/.test(c)) keyName = c.slice(5);
+    else if (/^F([1-9]|1[0-2])$/.test(c)) keyName = c;
+    else if (c === "Enter" || c === "NumpadEnter") keyName = "Return";
+    else if (c === "Space") keyName = "space";
+    else if (c === "Tab") keyName = "Tab";
+    else if (c === "Backspace") keyName = "BackSpace";
+    else if (c === "Delete") keyName = "Delete";
+    else if (c === "PrintScreen" || ev.key === "Print") keyName = "Print";
+    else if (c === "Minus") keyName = "minus";
+    else if (c === "Equal") keyName = "equal";
+    else if (c === "Slash") keyName = "slash";
+    else if (/^[a-zA-Z0-9]$/.test(ev.key)) keyName = ev.key.toLowerCase();
+    if (!keyName) return null;
+
+    const mods = [];
+    if (ev.ctrlKey) mods.push("C");
+    if (ev.altKey) mods.push("A");
+    if (ev.shiftKey) mods.push("S");
+    if (ev.metaKey) mods.push("W");
+    const allowBare = (keyName === "Print" || /^F([1-9]|1[0-2])$/.test(keyName));
+    if (mods.length === 0 && !allowBare) return null;
+    return mods.length > 0 ? `${mods.join("-")}-${keyName}` : keyName;
+  }
+
+  function resetRecordButtons() {
+    recordingShortcutField = null;
+    document.querySelectorAll("[data-record-key]").forEach((btn) => {
+      btn.textContent = "录制快捷键";
+      btn.classList.add("primary");
+    });
+  }
+
+  window.__spinelShortcutsFeedback = (ok, msg) => showFeedback("shortcuts-feedback", msg || "", !ok);
+
+  window.__spinelShortcutsData = (data) => {
+    if (!data) return;
+    ["screenshot_area", "screenshot_full", "lock_screen", "open_terminal"].forEach((k) => {
+      const el = document.getElementById(`kbd-val-${k}`);
+      if (el && data[k]) el.textContent = formatLabwcKey(data[k]);
+    });
+  };
+
+  document.querySelectorAll("[data-record-key]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const field = btn.getAttribute("data-record-key");
+      if (recordingShortcutField === field) {
+        resetRecordButtons();
+        return;
+      }
+      resetRecordButtons();
+      recordingShortcutField = field;
+      btn.textContent = "按下组合键 (Esc取消)";
+      btn.classList.remove("primary");
+    });
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (!recordingShortcutField) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.key === "Escape") {
+      resetRecordButtons();
+      return;
+    }
+    const labwcKey = eventToLabwcKey(ev);
+    if (!labwcKey) {
+      if (!["Control", "Shift", "Alt", "Meta"].includes(ev.key)) {
+        showFeedback("shortcuts-feedback", "请至少搭配 Ctrl / Alt / Super 等修饰键（或使用 Print / F1~F12）。", true);
+      }
+      return;
+    }
+    const targetField = recordingShortcutField;
+    resetRecordButtons();
+    sendCommand(`settings:shortcuts-set\n${targetField}=${labwcKey}`);
+  }, true);
 
   window.__spinelProcessList = (data) => {
     lastProcPayload = data;
