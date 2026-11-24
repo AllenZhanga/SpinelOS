@@ -1,0 +1,1976 @@
+#include "native_shell.hpp"
+#include "common.hpp"
+#include "desktop_apps.hpp"
+#include "steam_library.hpp"
+#include "system_control.hpp"
+#include "window_tracker.hpp"
+
+#include <cairo.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gtk/gtk.h>
+#include <gtk4-layer-shell.h>
+#include <pango/pangocairo.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace {
+
+struct DockItem {
+    std::string label;
+    std::string cmd;
+    std::string icon_path;
+    std::string fallback_kind;
+    uint64_t win_id = 0;
+    bool running = false;
+    bool activated = false;
+    bool minimized = false;
+    bool closable = false;
+    double anim_size = 48.0;
+    double anim_lift = 0.0;
+};
+
+struct CcSliderCtx {
+    AppState *state = nullptr;
+    bool is_volume = true;
+};
+
+}  // namespace
+
+struct NativeShellState {
+    AppState *app_state = nullptr;
+
+    // Top Bar
+    GtkWindow *bar_win = nullptr;
+    GtkWidget *bar_active_lbl = nullptr;
+    GtkWidget *bar_mem_lbl = nullptr;
+    GtkWidget *bar_net_btn = nullptr;
+    GtkWidget *bar_cc_btn = nullptr;
+    GtkWidget *bar_clock_lbl = nullptr;
+    guint clock_timer_id = 0;
+
+    // Desktop
+    GtkWindow *desktop_win = nullptr;
+    GtkWidget *desktop_overlay = nullptr;
+    GtkWidget *desktop_bg_da = nullptr;
+    GtkWidget *desktop_flow = nullptr;
+    GtkWidget *desktop_popover = nullptr;
+    std::string wallpaper = "crystal-blue";
+
+    // Dock
+    GtkWindow *dock_win = nullptr;
+    GtkWidget *dock_da = nullptr;
+    std::vector<DockItem> pinned_items;
+    std::vector<DockItem> extra_items;
+    int hover_index = -1;  // 0..pinned-1, or pinned..pinned+extra-1
+    guint dock_anim_timer = 0;
+    int dock_width = 580;
+
+    // Control Center
+    GtkWindow *cc_win = nullptr;
+    GtkWidget *cc_net_val = nullptr;
+    GtkWidget *cc_gpu_badge = nullptr;
+    GtkWidget *cc_mem_val = nullptr;
+    GtkWidget *cc_gm_circle = nullptr;
+    GtkWidget *cc_gm_val = nullptr;
+    GtkWidget *cc_mh_circle = nullptr;
+    GtkWidget *cc_mh_val = nullptr;
+    GtkWidget *cc_fsr_btn = nullptr;
+    GtkWidget *cc_bright_pct = nullptr;
+    GtkWidget *cc_bright_scale = nullptr;
+    GtkWidget *cc_vol_pct = nullptr;
+    GtkWidget *cc_vol_scale = nullptr;
+    bool cc_updating_sliders = false;
+
+    // Cached states
+    TelemetrySnapshot telemetry;
+    std::vector<DesktopAppInfo> desktop_apps;
+    std::map<std::string, cairo_surface_t *> surface_cache;
+    std::vector<CcSliderCtx *> slider_ctxs;
+};
+
+namespace {
+
+void cairo_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r) {
+    double rad = std::min({r, w * 0.5, h * 0.5});
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - rad, y + rad, rad, -M_PI_2, 0.0);
+    cairo_arc(cr, x + w - rad, y + h - rad, rad, 0.0, M_PI_2);
+    cairo_arc(cr, x + rad, y + h - rad, rad, M_PI_2, M_PI);
+    cairo_arc(cr, x + rad, y + rad, rad, M_PI, 1.5 * M_PI);
+    cairo_close_path(cr);
+}
+
+std::string to_lower_copy(std::string s) {
+    for (char &ch : s) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return s;
+}
+
+bool contains_ci(const std::string &hay, const std::string &needle) {
+    return to_lower_copy(hay).find(to_lower_copy(needle)) != std::string::npos;
+}
+
+std::string match_app_kind(const std::string &s) {
+    std::string l = to_lower_copy(s);
+    if (l.find("steam") != std::string::npos) return "steam";
+    if (l.find("gamescope") != std::string::npos) return "gamepad";
+    if (l.find("chromium") != std::string::npos || l.find("chrome") != std::string::npos ||
+        l.find("firefox") != std::string::npos) return "browser";
+    if (l.find("thunar") != std::string::npos || l.find("files") != std::string::npos) return "files";
+    if (l.find("foot") != std::string::npos || l.find("terminal") != std::string::npos) return "terminal";
+    if (l.find("应用商店") != std::string::npos || l.find("app-store") != std::string::npos) return "store";
+    if (l.find("游戏与启动中心") != std::string::npos || l.find("app-games") != std::string::npos) return "games";
+    if (l.find("系统设置") != std::string::npos || l.find("settings") != std::string::npos) return "settings";
+    if (l.find("安装") != std::string::npos || l.find("installer") != std::string::npos) return "installer";
+    return "app";
+}
+
+std::string find_app_icon_path(const std::vector<DesktopAppInfo> &apps,
+                               const std::vector<std::string> &keys) {
+    for (const auto &k : keys) {
+        std::string lk = to_lower_copy(k);
+        if (lk.empty()) continue;
+        for (const auto &a : apps) {
+            if (!a.icon_path.empty() && to_lower_copy(a.id) == lk) return a.icon_path;
+        }
+    }
+    for (const auto &k : keys) {
+        std::string lk = to_lower_copy(k);
+        if (lk.empty()) continue;
+        for (const auto &a : apps) {
+            if (a.icon_path.empty()) continue;
+            std::string hay = to_lower_copy(a.id + " " + a.icon_name + " " + a.name);
+            if (hay.find(lk) != std::string::npos) return a.icon_path;
+        }
+    }
+    return "";
+}
+
+cairo_surface_t *pixbuf_to_cairo_surface(GdkPixbuf *pb) {
+    if (!pb) return nullptr;
+    int pw = gdk_pixbuf_get_width(pb);
+    int ph = gdk_pixbuf_get_height(pb);
+    int n_ch = gdk_pixbuf_get_n_channels(pb);
+    int rowstride = gdk_pixbuf_get_rowstride(pb);
+    const guchar *src = gdk_pixbuf_read_pixels(pb);
+
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return nullptr;
+    }
+    unsigned char *dst = cairo_image_surface_get_data(surf);
+    int dst_stride = cairo_image_surface_get_stride(surf);
+
+    for (int y = 0; y < ph; ++y) {
+        const guchar *srow = src + y * rowstride;
+        uint32_t *drow = reinterpret_cast<uint32_t *>(dst + y * dst_stride);
+        for (int x = 0; x < pw; ++x) {
+            uint32_t r = srow[x * n_ch + 0];
+            uint32_t g = srow[x * n_ch + 1];
+            uint32_t b = srow[x * n_ch + 2];
+            uint32_t a = (n_ch >= 4) ? srow[x * n_ch + 3] : 255u;
+            uint32_t pr = (r * a + 127u) / 255u;
+            uint32_t pg = (g * a + 127u) / 255u;
+            uint32_t pb_v = (b * a + 127u) / 255u;
+            drow[x] = (a << 24) | (pr << 16) | (pg << 8) | pb_v;
+        }
+    }
+    cairo_surface_mark_dirty(surf);
+    return surf;
+}
+
+cairo_surface_t *get_cached_surface(NativeShellState *ns, const std::string &path, int target_px) {
+    if (!ns || path.empty() || target_px <= 0) return nullptr;
+    std::string key = path + "@" + std::to_string(target_px);
+    auto it = ns->surface_cache.find(key);
+    if (it != ns->surface_cache.end()) return it->second;
+
+    GdkPixbuf *pb = nullptr;
+    if (contains_ci(path, ".svg")) {
+        pb = gdk_pixbuf_new_from_file_at_scale(path.c_str(), target_px, target_px, TRUE, nullptr);
+    } else {
+        GdkPixbuf *raw = gdk_pixbuf_new_from_file(path.c_str(), nullptr);
+        if (raw) {
+            int rw = gdk_pixbuf_get_width(raw);
+            int rh = gdk_pixbuf_get_height(raw);
+            if (rw == target_px && rh == target_px) {
+                pb = raw;
+            } else {
+                double aspect = (rh > 0) ? static_cast<double>(rw) / rh : 1.0;
+                int dw = aspect >= 1.0 ? target_px : std::max(1, static_cast<int>(std::round(target_px * aspect)));
+                int dh = aspect >= 1.0 ? std::max(1, static_cast<int>(std::round(target_px / aspect))) : target_px;
+                pb = gdk_pixbuf_scale_simple(raw, dw, dh, GDK_INTERP_HYPER);
+                g_object_unref(raw);
+            }
+        }
+    }
+    cairo_surface_t *surf = pixbuf_to_cairo_surface(pb);
+    if (pb) g_object_unref(pb);
+    ns->surface_cache[key] = surf;
+    return surf;
+}
+
+void set_rgb_hex(cairo_pattern_t *pat, double offset, uint32_t hex, double alpha = 1.0) {
+    double r = ((hex >> 16) & 0xFF) / 255.0;
+    double g = ((hex >> 8) & 0xFF) / 255.0;
+    double b = (hex & 0xFF) / 255.0;
+    cairo_pattern_add_color_stop_rgba(pat, offset, r, g, b, alpha);
+}
+
+void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std::string &kind) {
+    double rad = sz * 0.235;
+    cairo_save(cr);
+
+    // Subtle soft drop shadow below squircle
+    cairo_rounded_rect(cr, x, y + sz * 0.04, sz, sz, rad);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.34);
+    cairo_fill(cr);
+
+    // Gradient body
+    cairo_pattern_t *bg = cairo_pattern_create_linear(x, y, x + sz, y + sz);
+    if (kind == "store") {
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x0EA5E9);
+        set_rgb_hex(bg, 1.0, 0x1D4ED8);
+    } else if (kind == "gamepad") {
+        set_rgb_hex(bg, 0.0, 0xF43F5E);
+        set_rgb_hex(bg, 0.55, 0xA855F7);
+        set_rgb_hex(bg, 1.0, 0x6366F1);
+    } else if (kind == "settings") {
+        set_rgb_hex(bg, 0.0, 0xE5E7EB);
+        set_rgb_hex(bg, 1.0, 0x9CA3AF);
+    } else if (kind == "installer") {
+        set_rgb_hex(bg, 0.0, 0x34D399);
+        set_rgb_hex(bg, 1.0, 0x059669);
+    } else {
+        // "games" / "app"
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x6366F1);
+        set_rgb_hex(bg, 1.0, 0x4338CA);
+    }
+    cairo_rounded_rect(cr, x, y, sz, sz, rad);
+    cairo_set_source(cr, bg);
+    cairo_fill_preserve(cr);
+    cairo_pattern_destroy(bg);
+
+    // Top sheen
+    cairo_pattern_t *sheen = cairo_pattern_create_linear(x, y, x, y + sz);
+    cairo_pattern_add_color_stop_rgba(sheen, 0.0, 1.0, 1.0, 1.0, 0.25);
+    cairo_pattern_add_color_stop_rgba(sheen, 0.45, 1.0, 1.0, 1.0, 0.02);
+    cairo_pattern_add_color_stop_rgba(sheen, 1.0, 0.0, 0.0, 0.0, 0.12);
+    cairo_set_source(cr, sheen);
+    cairo_fill(cr);
+    cairo_pattern_destroy(sheen);
+
+    // Crisp rim highlight
+    cairo_rounded_rect(cr, x + 0.6, y + 0.6, sz - 1.2, sz - 1.2, rad - 0.5);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.34);
+    cairo_set_line_width(cr, 1.1);
+    cairo_stroke(cr);
+
+    // Vector foreground artwork scaled to 64x64 logical units
+    double s = sz / 64.0;
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, s, s);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    if (kind == "store") {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
+        cairo_set_line_width(cr, 5.0);
+        cairo_move_to(cr, 32, 16);
+        cairo_line_to(cr, 20, 44);
+        cairo_move_to(cr, 32, 16);
+        cairo_line_to(cr, 44, 44);
+        cairo_stroke(cr);
+        cairo_set_line_width(cr, 4.5);
+        cairo_move_to(cr, 17, 37.5);
+        cairo_line_to(cr, 47, 37.5);
+        cairo_stroke(cr);
+    } else if (kind == "gamepad") {
+        cairo_rounded_rect(cr, 13, 17, 38, 30, 9);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.22);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.5);
+        cairo_stroke(cr);
+
+        cairo_set_line_width(cr, 3.0);
+        cairo_move_to(cr, 24, 27);
+        cairo_line_to(cr, 24, 37);
+        cairo_move_to(cr, 19, 32);
+        cairo_line_to(cr, 29, 32);
+        cairo_stroke(cr);
+
+        cairo_arc(cr, 41.5, 29.5, 2.3, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.99, 0.88, 0.28, 1.0);
+        cairo_arc(cr, 45, 34.5, 2.3, 0, 2 * M_PI);
+        cairo_fill(cr);
+    } else if (kind == "settings") {
+        // Metallic gear teeth
+        cairo_save(cr);
+        cairo_translate(cr, 32, 32);
+        cairo_set_source_rgba(cr, 0.28, 0.34, 0.43, 1.0);
+        for (int i = 0; i < 8; ++i) {
+            cairo_save(cr);
+            cairo_rotate(cr, i * (M_PI / 4.0));
+            cairo_rounded_rect(cr, -3.5, -22.5, 7, 10, 2.2);
+            cairo_fill(cr);
+            cairo_restore(cr);
+        }
+        cairo_arc(cr, 0, 0, 17.5, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.34, 0.41, 0.51, 1.0);
+        cairo_fill(cr);
+        cairo_arc(cr, 0, 0, 12.5, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.82, 0.85, 0.90, 1.0);
+        cairo_fill(cr);
+        cairo_arc(cr, 0, 0, 6.2, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.20, 0.25, 0.33, 1.0);
+        cairo_fill(cr);
+        cairo_restore(cr);
+    } else if (kind == "installer") {
+        cairo_rounded_rect(cr, 15, 16, 34, 32, 8);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.4);
+        cairo_stroke(cr);
+
+        cairo_set_line_width(cr, 3.0);
+        cairo_move_to(cr, 32, 22);
+        cairo_line_to(cr, 32, 37);
+        cairo_move_to(cr, 26, 31.5);
+        cairo_line_to(cr, 32, 37.5);
+        cairo_line_to(cr, 38, 31.5);
+        cairo_move_to(cr, 22, 42.5);
+        cairo_line_to(cr, 42, 42.5);
+        cairo_stroke(cr);
+    } else if (kind == "steam" || kind == "games") {
+        // Sleek Gamepad silhouette
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+        cairo_move_to(cr, 21, 23);
+        cairo_line_to(cr, 43, 23);
+        cairo_curve_to(cr, 48, 23, 51, 26.5, 52, 31);
+        cairo_line_to(cr, 53.5, 39);
+        cairo_curve_to(cr, 54, 43, 49.5, 45.5, 46, 42.5);
+        cairo_line_to(cr, 42, 38.5);
+        cairo_line_to(cr, 22, 38.5);
+        cairo_line_to(cr, 18, 42.5);
+        cairo_curve_to(cr, 14.5, 45.5, 10, 43, 10.5, 39);
+        cairo_line_to(cr, 12, 31);
+        cairo_curve_to(cr, 13, 26.5, 16, 23, 21, 23);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+
+        cairo_set_source_rgba(cr, 0.31, 0.27, 0.90, 1.0);
+        cairo_set_line_width(cr, 2.8);
+        cairo_move_to(cr, 21.5, 28);
+        cairo_line_to(cr, 21.5, 34);
+        cairo_move_to(cr, 18.5, 31);
+        cairo_line_to(cr, 24.5, 31);
+        cairo_stroke(cr);
+
+        cairo_arc(cr, 42.5, 28.5, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 46.5, 32.0, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 38.5, 32.0, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 42.5, 35.5, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+    } else {
+        cairo_rounded_rect(cr, 17, 17, 30, 30, 8);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.22);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.92);
+        cairo_set_line_width(cr, 2.5);
+        cairo_stroke(cr);
+        cairo_arc(cr, 32, 32, 5.5, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+    cairo_restore(cr);
+}
+
+void draw_app_icon(NativeShellState *ns,
+                   cairo_t *cr,
+                   double x,
+                   double y,
+                   double sz,
+                   const std::string &icon_path,
+                   const std::string &fallback_kind) {
+    int req = std::max(24, static_cast<int>(std::round(sz)));
+    cairo_surface_t *surf = get_cached_surface(ns, icon_path, req);
+    if (surf) {
+        int pw = cairo_image_surface_get_width(surf);
+        int ph = cairo_image_surface_get_height(surf);
+        double dx = x + (sz - pw) * 0.5;
+        double dy = y + (sz - ph) * 0.5;
+        cairo_save(cr);
+        cairo_set_source_surface(cr, surf, dx, dy);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        return;
+    }
+    draw_system_squircle(cr, x, y, sz, fallback_kind);
+}
+
+void draw_pango_text(cairo_t *cr,
+                     const std::string &text,
+                     double x,
+                     double y,
+                     double font_px,
+                     bool bold,
+                     double r,
+                     double g,
+                     double b,
+                     double a,
+                     int *out_w = nullptr,
+                     int *out_h = nullptr,
+                     bool measure_only = false) {
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoFontDescription *desc = pango_font_description_new();
+    pango_font_description_set_family(desc, "Noto Sans CJK SC, Inter, Sans");
+    pango_font_description_set_absolute_size(desc, font_px * PANGO_SCALE);
+    pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_MEDIUM);
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, text.c_str(), -1);
+    pango_font_description_free(desc);
+
+    int tw = 0, th = 0;
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    if (out_w) *out_w = tw;
+    if (out_h) *out_h = th;
+
+    if (!measure_only) {
+        cairo_save(cr);
+        cairo_move_to(cr, x, y);
+        cairo_set_source_rgba(cr, r, g, b, a);
+        pango_cairo_show_layout(cr, layout);
+        cairo_restore(cr);
+    }
+    g_object_unref(layout);
+}
+
+void trigger_cmd(AppState *state, const std::string &cmd) {
+    if (state && !cmd.empty()) {
+        handle_shell_command(state, cmd);
+    }
+}
+
+void on_cmd_button_clicked(GtkButton *btn, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "spinel-cmd"));
+    if (cmd) trigger_cmd(state, cmd);
+}
+
+void on_popover_cmd_clicked(GtkButton *btn, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (ns->desktop_popover) gtk_popover_popdown(GTK_POPOVER(ns->desktop_popover));
+    const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "spinel-cmd"));
+    if (cmd) trigger_cmd(ns->app_state, cmd);
+}
+
+GtkWidget *make_cmd_button(AppState *state, const char *label, const char *css_class, const char *cmd) {
+    GtkWidget *btn = label ? gtk_button_new_with_label(label) : gtk_button_new();
+    if (css_class && *css_class) gtk_widget_add_css_class(btn, css_class);
+    if (cmd) {
+        g_object_set_data_full(G_OBJECT(btn), "spinel-cmd", g_strdup(cmd), g_free);
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_cmd_button_clicked), state);
+    }
+    return btn;
+}
+
+/* ==================== Native Monochrome Vector Glyphs (Bar & CC) ==================== */
+
+void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer) {
+    double s = std::min(w, h) / 18.0;
+    cairo_save(cr);
+    cairo_translate(cr, (w - 18.0 * s) * 0.5, (h - 18.0 * s) * 0.5);
+    cairo_scale(cr, s, s);
+    cairo_move_to(cr, 9, 1.8);
+    cairo_line_to(cr, 15.5, 6.5);
+    cairo_line_to(cr, 9, 16.2);
+    cairo_line_to(cr, 2.5, 6.5);
+    cairo_close_path(cr);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.94);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgba(cr, 0.08, 0.12, 0.22, 0.35);
+    cairo_set_line_width(cr, 0.9);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings };
+
+void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind) {
+    double s = std::min(w, h) / 16.0;
+    cairo_save(cr);
+    cairo_translate(cr, (w - 16.0 * s) * 0.5, (h - 16.0 * s) * 0.5);
+    cairo_scale(cr, s, s);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.94);
+    cairo_set_line_width(cr, 1.45);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    switch (kind) {
+        case BarGlyph::Wifi:
+            cairo_arc(cr, 8, 12.6, 1.1, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_arc(cr, 8, 12.6, 3.6, -2.35, -0.79);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 12.6, 6.4, -2.32, -0.82);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 12.6, 9.2, -2.28, -0.86);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Search:
+            cairo_arc(cr, 7, 7, 4.3, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 10.4, 10.4);
+            cairo_line_to(cr, 13.5, 13.5);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::ControlCenter:
+            cairo_set_line_width(cr, 1.25);
+            cairo_rounded_rect(cr, 2.2, 3.0, 11.6, 4.2, 2.1);
+            cairo_stroke(cr);
+            cairo_arc(cr, 11.5, 5.1, 1.4, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_rounded_rect(cr, 2.2, 8.8, 11.6, 4.2, 2.1);
+            cairo_stroke(cr);
+            cairo_arc(cr, 4.5, 10.9, 1.4, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Reboot:
+            cairo_arc(cr, 8, 8, 4.8, -0.75, 1.8 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 12.6, 2.8);
+            cairo_line_to(cr, 12.6, 5.5);
+            cairo_line_to(cr, 9.9, 5.5);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Power:
+            cairo_move_to(cr, 8, 2.4);
+            cairo_line_to(cr, 8, 7.2);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 8.6, 4.8, -1.0, M_PI + 1.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Bluetooth:
+            cairo_move_to(cr, 5, 4.8);
+            cairo_line_to(cr, 11.2, 10.5);
+            cairo_line_to(cr, 8, 13.5);
+            cairo_line_to(cr, 8, 2.5);
+            cairo_line_to(cr, 11.2, 5.5);
+            cairo_line_to(cr, 5, 11.2);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Gamepad:
+            cairo_rounded_rect(cr, 2.2, 5.0, 11.6, 6.6, 3.0);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 4.8, 8.3);
+            cairo_line_to(cr, 6.8, 8.3);
+            cairo_move_to(cr, 5.8, 7.3);
+            cairo_line_to(cr, 5.8, 9.3);
+            cairo_stroke(cr);
+            cairo_arc(cr, 10.6, 7.6, 0.85, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_arc(cr, 10.6, 9.4, 0.85, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Hud:
+            cairo_arc(cr, 8, 10.5, 5.2, M_PI, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 8, 10.5);
+            cairo_line_to(cr, 11.0, 7.2);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Appearance:
+            cairo_arc(cr, 8, 8, 5.0, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 8, 5.0, M_PI_2, 1.5 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Settings:
+            cairo_rounded_rect(cr, 2.2, 3.2, 11.6, 7.6, 1.5);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 5.5, 13.0);
+            cairo_line_to(cr, 10.5, 13.0);
+            cairo_move_to(cr, 8, 10.8);
+            cairo_line_to(cr, 8, 13.0);
+            cairo_stroke(cr);
+            break;
+    }
+    cairo_restore(cr);
+}
+
+void draw_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer data) {
+    BarGlyph kind = static_cast<BarGlyph>(reinterpret_cast<intptr_t>(data));
+    draw_monochrome_glyph(cr, w, h, kind);
+}
+
+GtkWidget *make_glyph_icon_btn(AppState *state, BarGlyph kind, const char *tooltip, const char *cmd, const char *extra_cls = nullptr) {
+    GtkWidget *btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", cmd);
+    if (extra_cls) gtk_widget_add_css_class(btn, extra_cls);
+    gtk_widget_set_tooltip_text(btn, tooltip);
+    GtkWidget *da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(kind)), nullptr);
+    gtk_button_set_child(GTK_BUTTON(btn), da);
+    return btn;
+}
+
+/* ==================== 1. Native Top Bar ==================== */
+
+gboolean on_clock_tick(gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns || !ns->bar_clock_lbl) return G_SOURCE_REMOVE;
+    std::time_t now = std::time(nullptr);
+    std::tm tm_now{};
+    localtime_r(&now, &tm_now);
+    static const char *kDays[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%d月%d日 %s %02d:%02d",
+                  tm_now.tm_mon + 1, tm_now.tm_mday,
+                  kDays[tm_now.tm_wday % 7], tm_now.tm_hour, tm_now.tm_min);
+    gtk_label_set_text(GTK_LABEL(ns->bar_clock_lbl), buf);
+    return G_SOURCE_CONTINUE;
+}
+
+void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
+    AppState *state = ns->app_state;
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelTopBar");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, -1, 28);
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-bar");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_auto_exclusive_zone_enable(win);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(root, "spinel-topbar");
+    gtk_widget_set_size_request(root, -1, 28);
+
+    GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_widget_set_hexpand(left, TRUE);
+    gtk_widget_set_halign(left, GTK_ALIGN_START);
+    gtk_widget_set_valign(left, GTK_ALIGN_CENTER);
+
+    GtkWidget *brand_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "games:open");
+    gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 游戏与应用中心");
+    GtkWidget *gem_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(gem_da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, nullptr, nullptr);
+    gtk_button_set_child(GTK_BUTTON(brand_btn), gem_da);
+
+    ns->bar_active_lbl = gtk_label_new("访达");
+    gtk_widget_add_css_class(ns->bar_active_lbl, "spinel-bar-active");
+    gtk_label_set_ellipsize(GTK_LABEL(ns->bar_active_lbl), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 28);
+
+    gtk_box_append(GTK_BOX(left), brand_btn);
+    gtk_box_append(GTK_BOX(left), ns->bar_active_lbl);
+    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "游戏库", "spinel-bar-btn", "games:open"));
+    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "应用商店", "spinel-bar-btn", "store:open"));
+    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "Steam", "spinel-bar-btn", "launch:steam"));
+    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "主机大屏", "spinel-bar-btn", "launch:steam-gamepadui"));
+    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "外观", "spinel-bar-btn", "settings:open:appearance"));
+
+    GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
+    gtk_widget_set_halign(right, GTK_ALIGN_END);
+    gtk_widget_set_valign(right, GTK_ALIGN_CENTER);
+
+    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "games:open");
+    ns->bar_mem_lbl = gtk_label_new("--");
+    gtk_widget_add_css_class(ns->bar_mem_lbl, "spinel-bar-mem");
+    gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
+    gtk_widget_set_tooltip_text(mem_btn, "内存占用");
+
+    ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
+    GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "游戏与启动中心", "games:open");
+    ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
+    GtkWidget *reboot_btn = make_glyph_icon_btn(state, BarGlyph::Reboot, "重启系统", "power:reboot");
+    GtkWidget *power_btn = make_glyph_icon_btn(state, BarGlyph::Power, "关机", "power:shutdown", "danger-hover");
+
+    ns->bar_clock_lbl = gtk_label_new("--:--");
+    gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
+
+    gtk_box_append(GTK_BOX(right), mem_btn);
+    gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
+    gtk_box_append(GTK_BOX(right), search_btn);
+    gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
+    gtk_box_append(GTK_BOX(right), reboot_btn);
+    gtk_box_append(GTK_BOX(right), power_btn);
+    gtk_box_append(GTK_BOX(right), ns->bar_clock_lbl);
+
+    gtk_box_append(GTK_BOX(root), left);
+    gtk_box_append(GTK_BOX(root), right);
+    gtk_window_set_child(win, root);
+
+    ns->bar_win = win;
+    on_clock_tick(ns);
+    ns->clock_timer_id = g_timeout_add_seconds(5, on_clock_tick, ns);
+    gtk_window_present(win);
+}
+
+/* ==================== 2. Native Desktop Wallpaper + Shortcuts + Context Menu ==================== */
+
+void draw_desktop_wallpaper(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    const std::string &wp = ns->wallpaper;
+
+    uint32_t c0 = 0x070B14, c1 = 0x0D1A33, c2 = 0x091020;
+    uint32_t g1 = 0x38BDF8, g2 = 0x6366F1;
+    if (wp == "obsidian-purple") {
+        c0 = 0x090612; c1 = 0x1C1030; c2 = 0x0A0914;
+        g1 = 0xA855F7; g2 = 0xEC4899;
+    } else if (wp == "emerald-aurora") {
+        c0 = 0x05110E; c1 = 0x0B2421; c2 = 0x071219;
+        g1 = 0x10B981; g2 = 0x0EA5E9;
+    } else if (wp == "amber-dusk") {
+        c0 = 0x120B08; c1 = 0x261611; c2 = 0x0D0A14;
+        g1 = 0xF59E0B; g2 = 0xF43F5E;
+    }
+
+    cairo_pattern_t *base = cairo_pattern_create_linear(0, 0, w, h);
+    set_rgb_hex(base, 0.0, c0);
+    set_rgb_hex(base, 0.52, c1);
+    set_rgb_hex(base, 1.0, c2);
+    cairo_rectangle(cr, 0, 0, w, h);
+    cairo_set_source(cr, base);
+    cairo_fill(cr);
+    cairo_pattern_destroy(base);
+
+    double r1 = std::max(w, h) * 0.48;
+    cairo_pattern_t *rad1 = cairo_pattern_create_radial(w * 0.22, h * 0.22, 0, w * 0.22, h * 0.22, r1);
+    set_rgb_hex(rad1, 0.0, g1, 0.26);
+    set_rgb_hex(rad1, 1.0, g1, 0.0);
+    cairo_rectangle(cr, 0, 0, w, h);
+    cairo_set_source(cr, rad1);
+    cairo_fill(cr);
+    cairo_pattern_destroy(rad1);
+
+    double r2 = std::max(w, h) * 0.50;
+    cairo_pattern_t *rad2 = cairo_pattern_create_radial(w * 0.80, h * 0.78, 0, w * 0.80, h * 0.78, r2);
+    set_rgb_hex(rad2, 0.0, g2, 0.24);
+    set_rgb_hex(rad2, 1.0, g2, 0.0);
+    cairo_rectangle(cr, 0, 0, w, h);
+    cairo_set_source(cr, rad2);
+    cairo_fill(cr);
+    cairo_pattern_destroy(rad2);
+}
+
+struct DesktopIconDrawCtx {
+    NativeShellState *ns = nullptr;
+    std::string path;
+    std::string kind;
+};
+
+void draw_desktop_shortcut_icon(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ctx = static_cast<DesktopIconDrawCtx *>(user_data);
+    double sz = std::min(w, h);
+    draw_app_icon(ctx->ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz, ctx->path, ctx->kind);
+}
+
+void free_desktop_icon_ctx(gpointer data) {
+    delete static_cast<DesktopIconDrawCtx *>(data);
+}
+
+void rebuild_desktop_shortcuts(NativeShellState *ns) {
+    if (!ns || !ns->desktop_flow) return;
+
+    while (GtkWidget *child = gtk_widget_get_first_child(ns->desktop_flow)) {
+        gtk_flow_box_remove(GTK_FLOW_BOX(ns->desktop_flow), child);
+    }
+
+    struct ShortcutDef {
+        std::string label;
+        std::string cmd;
+        std::string kind;
+        std::string icon_path;
+    };
+
+    std::vector<ShortcutDef> items = {
+        {"游戏中心", "games:open", "games", ""},
+        {"应用商店", "store:open", "store", ""},
+        {"Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"})},
+        {"主机大屏", "launch:steam-gamepadui", "gamepad", ""},
+        {"文件管理", "launch:files", "files", find_app_icon_path(ns->desktop_apps, {"thunar", "org.xfce.thunar"})},
+        {"终端", "launch:terminal", "terminal", find_app_icon_path(ns->desktop_apps, {"foot"})},
+        {"系统设置", "settings:open:display", "settings", ""}
+    };
+    if (ns->telemetry.is_live) {
+        items.push_back({"安装 SpinelOS", "installer:open", "installer", ""});
+    }
+
+    static const char *kFeaturedStoreIds[] = {
+        "com.google.chrome", "chromium", "firefox", "com.heroicgameslauncher.hgl",
+        "lutris", "discord", "com.obsproject.studio"
+    };
+    for (const auto &app : ns->desktop_apps) {
+        std::string lid = to_lower_copy(app.id);
+        for (const char *fid : kFeaturedStoreIds) {
+            if (lid == fid) {
+                items.push_back({app.name, "app:launch:" + app.id, match_app_kind(app.id), app.icon_path});
+                break;
+            }
+        }
+    }
+
+    auto steam_games = list_steam_games();
+    int added_games = 0;
+    for (const auto &g : steam_games) {
+        if (added_games >= 6) break;
+        items.push_back({
+            g.name, "steam:launch:" + g.appid, "steam",
+            !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"})
+        });
+        ++added_games;
+    }
+
+    for (const auto &sc : items) {
+        GtkWidget *btn = make_cmd_button(ns->app_state, nullptr, "spinel-shortcut-btn", sc.cmd.c_str());
+        gtk_widget_set_size_request(btn, 84, 84);
+
+        GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+        gtk_widget_set_halign(vbox, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(vbox, GTK_ALIGN_START);
+
+        GtkWidget *da = gtk_drawing_area_new();
+        gtk_widget_set_size_request(da, 52, 52);
+        gtk_widget_set_halign(da, GTK_ALIGN_CENTER);
+        auto *ctx = new DesktopIconDrawCtx{ns, sc.icon_path, sc.kind};
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_desktop_shortcut_icon, ctx, free_desktop_icon_ctx);
+
+        GtkWidget *lbl = gtk_label_new(sc.label.c_str());
+        gtk_widget_add_css_class(lbl, "spinel-shortcut-label");
+        gtk_label_set_max_width_chars(GTK_LABEL(lbl), 10);
+        gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_END);
+        gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_CENTER);
+        gtk_label_set_lines(GTK_LABEL(lbl), 2);
+        gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
+
+        gtk_box_append(GTK_BOX(vbox), da);
+        gtk_box_append(GTK_BOX(vbox), lbl);
+        gtk_button_set_child(GTK_BUTTON(btn), vbox);
+        gtk_flow_box_append(GTK_FLOW_BOX(ns->desktop_flow), btn);
+    }
+}
+
+void on_desktop_right_click(GtkGestureClick *gesture, int, double x, double y, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    guint btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    if (btn != GDK_BUTTON_SECONDARY || !ns->desktop_popover) return;
+    GdkRectangle rect{static_cast<int>(x), static_cast<int>(y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(ns->desktop_popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(ns->desktop_popover));
+}
+
+void build_desktop_popover(NativeShellState *ns) {
+    GtkWidget *pop = gtk_popover_new();
+    gtk_widget_set_parent(pop, ns->desktop_overlay);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    struct MenuItem { const char *label; const char *cmd; };
+    const MenuItem entries[] = {
+        {"新建文件夹", "desktop:new-folder"},
+        {"在文件管理器中打开桌面", "desktop:open-folder"},
+        {"打开终端 (Foot)", "launch:terminal"},
+        {nullptr, nullptr},
+        {"打开应用商店", "store:open"},
+        {"打开游戏中心", "games:open"},
+        {nullptr, nullptr},
+        {"更换壁纸与外观...", "settings:open:appearance"},
+        {"显示与缩放设置...", "settings:open:display"},
+        {"刷新桌面", "telemetry:refresh"}
+    };
+
+    for (const auto &m : entries) {
+        if (!m.label) {
+            gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+            continue;
+        }
+        GtkWidget *b = gtk_button_new_with_label(m.label);
+        gtk_widget_add_css_class(b, "spinel-ctx-item");
+        GtkWidget *child = gtk_button_get_child(GTK_BUTTON(b));
+        if (GTK_IS_LABEL(child)) gtk_widget_set_halign(child, GTK_ALIGN_START);
+        g_object_set_data_full(G_OBJECT(b), "spinel-cmd", g_strdup(m.cmd), g_free);
+        g_signal_connect(b, "clicked", G_CALLBACK(on_popover_cmd_clicked), ns);
+        gtk_box_append(GTK_BOX(box), b);
+    }
+
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    ns->desktop_popover = pop;
+}
+
+void build_native_desktop(GtkApplication *app, NativeShellState *ns) {
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelDesktop");
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-desktop");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_BOTTOM);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_exclusive_zone(win, -1);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
+
+    ns->desktop_overlay = gtk_overlay_new();
+    ns->desktop_bg_da = gtk_drawing_area_new();
+    gtk_widget_set_hexpand(ns->desktop_bg_da, TRUE);
+    gtk_widget_set_vexpand(ns->desktop_bg_da, TRUE);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ns->desktop_bg_da), draw_desktop_wallpaper, ns, nullptr);
+    gtk_overlay_set_child(GTK_OVERLAY(ns->desktop_overlay), ns->desktop_bg_da);
+
+    ns->desktop_flow = gtk_flow_box_new();
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(ns->desktop_flow), GTK_ORIENTATION_VERTICAL);
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(ns->desktop_flow), GTK_SELECTION_NONE);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(ns->desktop_flow), 4);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(ns->desktop_flow), 6);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(ns->desktop_flow), TRUE);
+    gtk_widget_set_halign(ns->desktop_flow, GTK_ALIGN_START);
+    gtk_widget_set_valign(ns->desktop_flow, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(ns->desktop_flow, 40);
+    gtk_widget_set_margin_start(ns->desktop_flow, 16);
+    gtk_widget_set_margin_bottom(ns->desktop_flow, 88);
+    gtk_overlay_add_overlay(GTK_OVERLAY(ns->desktop_overlay), ns->desktop_flow);
+
+    build_desktop_popover(ns);
+    GtkGesture *rclick = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(rclick), GDK_BUTTON_SECONDARY);
+    g_signal_connect(rclick, "pressed", G_CALLBACK(on_desktop_right_click), ns);
+    gtk_widget_add_controller(ns->desktop_overlay, GTK_EVENT_CONTROLLER(rclick));
+
+    gtk_window_set_child(win, ns->desktop_overlay);
+    ns->desktop_win = win;
+    ns->wallpaper = get_wallpaper_pref();
+    rebuild_desktop_shortcuts(ns);
+    gtk_window_present(win);
+}
+
+/* ==================== 3. Native Cairo Frosted Bottom Dock ==================== */
+
+constexpr double kDockHeight = 124.0;
+constexpr double kDockBottomPad = 6.0;
+constexpr double kDockIconBase = 48.0;
+constexpr double kDockGap = 8.0;
+constexpr double kDockPadX = 14.0;
+constexpr double kDockDividerW = 14.0;
+
+int dock_total_items(const NativeShellState *ns) {
+    return static_cast<int>(ns->pinned_items.size() + ns->extra_items.size());
+}
+
+const DockItem *dock_item_at(const NativeShellState *ns, int idx) {
+    int p = static_cast<int>(ns->pinned_items.size());
+    if (idx >= 0 && idx < p) return &ns->pinned_items[idx];
+    int e = idx - p;
+    if (e >= 0 && e < static_cast<int>(ns->extra_items.size())) return &ns->extra_items[e];
+    return nullptr;
+}
+
+DockItem *dock_item_at_mut(NativeShellState *ns, int idx) {
+    int p = static_cast<int>(ns->pinned_items.size());
+    if (idx >= 0 && idx < p) return &ns->pinned_items[idx];
+    int e = idx - p;
+    if (e >= 0 && e < static_cast<int>(ns->extra_items.size())) return &ns->extra_items[e];
+    return nullptr;
+}
+
+void compute_dock_layout(const NativeShellState *ns,
+                         int widget_w,
+                         double &pill_x,
+                         double &pill_w,
+                         std::vector<double> &centers) {
+    int p = static_cast<int>(ns->pinned_items.size());
+    int e = static_cast<int>(ns->extra_items.size());
+    int total = p + e;
+
+    double content_w = 0.0;
+    for (int i = 0; i < total; ++i) {
+        if (i > 0) content_w += kDockGap;
+        if (e > 0 && i == p) content_w += kDockDividerW;
+        content_w += kDockIconBase;
+    }
+    pill_w = content_w + kDockPadX * 2.0;
+    pill_x = (widget_w - pill_w) * 0.5;
+
+    centers.clear();
+    centers.reserve(total);
+    double cur = pill_x + kDockPadX;
+    for (int i = 0; i < total; ++i) {
+        if (i > 0) cur += kDockGap;
+        if (e > 0 && i == p) cur += kDockDividerW;
+        centers.push_back(cur + kDockIconBase * 0.5);
+        cur += kDockIconBase;
+    }
+}
+
+gboolean on_dock_anim_tick(gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    int total = dock_total_items(ns);
+    bool moving = false;
+
+    for (int i = 0; i < total; ++i) {
+        DockItem *item = dock_item_at_mut(ns, i);
+        double target_sz = kDockIconBase;
+        double target_lift = 0.0;
+        if (ns->hover_index == i) {
+            target_sz = 58.0;
+            target_lift = 8.0;
+        } else if (ns->hover_index >= 0 && std::abs(ns->hover_index - i) == 1) {
+            target_sz = 52.0;
+            target_lift = 3.0;
+        }
+        double d_sz = target_sz - item->anim_size;
+        double d_lf = target_lift - item->anim_lift;
+        if (std::abs(d_sz) > 0.25 || std::abs(d_lf) > 0.2) {
+            item->anim_size += d_sz * 0.34;
+            item->anim_lift += d_lf * 0.34;
+            moving = true;
+        } else {
+            item->anim_size = target_sz;
+            item->anim_lift = target_lift;
+        }
+    }
+
+    if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
+    if (!moving) {
+        ns->dock_anim_timer = 0;
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+void ensure_dock_anim(NativeShellState *ns) {
+    if (ns->dock_anim_timer == 0) {
+        ns->dock_anim_timer = g_timeout_add(16, on_dock_anim_tick, ns);
+    }
+}
+
+void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    double pill_x = 0.0, pill_w = 0.0;
+    std::vector<double> centers;
+    compute_dock_layout(ns, w, pill_x, pill_w, centers);
+
+    double pill_h = 66.0;
+    double pill_y = h - kDockBottomPad - pill_h;
+    double pill_rad = 20.0;
+
+    // Soft glass shadow
+    cairo_rounded_rect(cr, pill_x, pill_y + 3.0, pill_w, pill_h, pill_rad);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.36);
+    cairo_fill(cr);
+
+    // Translucent frosted macOS glass body
+    cairo_pattern_t *glass = cairo_pattern_create_linear(0, pill_y, 0, pill_y + pill_h);
+    cairo_pattern_add_color_stop_rgba(glass, 0.0, 0.28, 0.34, 0.48, 0.62);
+    cairo_pattern_add_color_stop_rgba(glass, 1.0, 0.14, 0.19, 0.30, 0.68);
+    cairo_rounded_rect(cr, pill_x, pill_y, pill_w, pill_h, pill_rad);
+    cairo_set_source(cr, glass);
+    cairo_fill(cr);
+    cairo_pattern_destroy(glass);
+
+    // Outer glass rim + top specular edge
+    cairo_rounded_rect(cr, pill_x + 0.5, pill_y + 0.5, pill_w - 1.0, pill_h - 1.0, pill_rad - 0.5);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.28);
+    cairo_set_line_width(cr, 1.0);
+    cairo_stroke(cr);
+
+    // Divider before extra windows
+    int p = static_cast<int>(ns->pinned_items.size());
+    int e = static_cast<int>(ns->extra_items.size());
+    if (e > 0 && p > 0 && p < static_cast<int>(centers.size())) {
+        double dx = (centers[p - 1] + centers[p]) * 0.5;
+        cairo_move_to(cr, dx, pill_y + 13.0);
+        cairo_line_to(cr, dx, pill_y + pill_h - 15.0);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.24);
+        cairo_set_line_width(cr, 1.0);
+        cairo_stroke(cr);
+    }
+
+    // Draw non-hovered icons first, then hovered icon on top
+    double base_bottom_y = pill_y + pill_h - 11.0;
+    auto draw_one = [&](int idx) {
+        const DockItem *item = dock_item_at(ns, idx);
+        if (!item) return;
+        double cx = centers[idx];
+        double sz = item->anim_size;
+        double ix = cx - sz * 0.5;
+        double iy = base_bottom_y - item->anim_lift - sz;
+        draw_app_icon(ns, cr, ix, iy, sz, item->icon_path, item->fallback_kind);
+
+        if (item->running) {
+            double dot_r = item->activated ? 2.4 : 2.0;
+            double dot_y = pill_y + pill_h - 5.2;
+            cairo_arc(cr, cx, dot_y, dot_r, 0, 2 * M_PI);
+            if (item->minimized) {
+                cairo_set_source_rgba(cr, 0.65, 0.72, 0.82, 0.75);
+            } else {
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
+            }
+            cairo_fill(cr);
+        }
+    };
+
+    int total = dock_total_items(ns);
+    for (int i = 0; i < total; ++i) {
+        if (i != ns->hover_index) draw_one(i);
+    }
+    if (ns->hover_index >= 0 && ns->hover_index < total) {
+        draw_one(ns->hover_index);
+
+        const DockItem *hitem = dock_item_at(ns, ns->hover_index);
+        if (hitem && !hitem->label.empty()) {
+            int tw = 0, th = 0;
+            draw_pango_text(cr, hitem->label, 0, 0, 12.0, false, 1, 1, 1, 1, &tw, &th, true);
+            double pad_x = 11.0;
+            double pad_y = 5.0;
+            double tip_w = tw + pad_x * 2.0;
+            double tip_h = th + pad_y * 2.0;
+            double tip_x = std::clamp(centers[ns->hover_index] - tip_w * 0.5, 4.0, w - tip_w - 4.0);
+            double tip_y = std::max(4.0, base_bottom_y - hitem->anim_lift - hitem->anim_size - tip_h - 10.0);
+
+            cairo_rounded_rect(cr, tip_x, tip_y + 2.0, tip_w, tip_h, 8.0);
+            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.35);
+            cairo_fill(cr);
+
+            cairo_rounded_rect(cr, tip_x, tip_y, tip_w, tip_h, 8.0);
+            cairo_set_source_rgba(cr, 0.09, 0.12, 0.19, 0.94);
+            cairo_fill_preserve(cr);
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.24);
+            cairo_set_line_width(cr, 1.0);
+            cairo_stroke(cr);
+
+            draw_pango_text(cr, hitem->label, tip_x + pad_x, tip_y + pad_y, 12.0, false, 1, 1, 1, 0.98);
+        }
+    }
+}
+
+int hit_test_dock(const NativeShellState *ns, double x, double y) {
+    if (!ns || !ns->dock_da) return -1;
+    int w = gtk_widget_get_width(ns->dock_da);
+    int h = gtk_widget_get_height(ns->dock_da);
+    if (y < h - 78.0 || y > h - 2.0) return -1;
+
+    double pill_x = 0.0, pill_w = 0.0;
+    std::vector<double> centers;
+    compute_dock_layout(ns, w, pill_x, pill_w, centers);
+    if (x < pill_x || x > pill_x + pill_w) return -1;
+
+    int best = -1;
+    double best_d = 30.0;
+    for (size_t i = 0; i < centers.size(); ++i) {
+        double d = std::abs(x - centers[i]);
+        if (d < best_d) {
+            best_d = d;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+void on_dock_motion(GtkEventControllerMotion *, double x, double y, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    int idx = hit_test_dock(ns, x, y);
+    if (idx != ns->hover_index) {
+        ns->hover_index = idx;
+        ensure_dock_anim(ns);
+    }
+}
+
+void on_dock_leave(GtkEventControllerMotion *, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (ns->hover_index != -1) {
+        ns->hover_index = -1;
+        ensure_dock_anim(ns);
+    }
+}
+
+void on_dock_click(GtkGestureClick *gesture, int, double x, double y, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    int idx = hit_test_dock(ns, x, y);
+    const DockItem *item = dock_item_at(ns, idx);
+    if (!item) return;
+
+    guint btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    if (btn == GDK_BUTTON_SECONDARY) {
+        if (item->running && item->win_id > 0) {
+            close_tracked_window(item->win_id);
+        }
+        return;
+    }
+    if (btn == GDK_BUTTON_PRIMARY) {
+        if (item->running && item->win_id > 0) {
+            toggle_or_activate_window(item->win_id);
+        } else {
+            trigger_cmd(ns->app_state, item->cmd);
+        }
+    }
+}
+
+void rebuild_dock_items(NativeShellState *ns, const std::vector<TrackedWindowInfo> &windows) {
+    if (!ns) return;
+
+    struct PinnedDef {
+        std::string title;
+        std::string cmd;
+        std::string kind;
+        std::vector<std::string> icon_keys;
+        std::vector<std::string> win_match;
+    };
+
+    std::vector<PinnedDef> defs = {
+        {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}},
+        {"应用商店", "store:open", "store", {}, {"spinelos 应用商店"}},
+        {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
+        {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
+        {"Thunar 文件管理", "launch:files", "files", {"thunar", "org.xfce.thunar"}, {"thunar"}},
+        {"Foot 终端", "launch:terminal", "terminal", {"foot"}, {"foot"}},
+        {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}}
+    };
+    if (ns->telemetry.is_live) {
+        defs.push_back({"安装 SpinelOS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}});
+    }
+
+    // Preserve previous anim states cleanly
+    std::map<std::string, std::pair<double, double>> prev_anim;
+    for (const auto &it : ns->pinned_items) prev_anim[it.cmd] = {it.anim_size, it.anim_lift};
+    for (const auto &it : ns->extra_items) prev_anim[it.cmd] = {it.anim_size, it.anim_lift};
+
+    std::vector<uint64_t> matched_ids;
+    ns->pinned_items.clear();
+    for (const auto &d : defs) {
+        const TrackedWindowInfo *matched = nullptr;
+        for (const auto &w : windows) {
+            std::string hay = to_lower_copy(w.app_id + " " + w.title);
+            for (const auto &m : d.win_match) {
+                if (hay.find(m) != std::string::npos) {
+                    matched = &w;
+                    break;
+                }
+            }
+            if (matched) break;
+        }
+        DockItem item;
+        item.label = d.title;
+        item.cmd = d.cmd;
+        item.icon_path = find_app_icon_path(ns->desktop_apps, d.icon_keys);
+        item.fallback_kind = d.kind;
+        if (matched) {
+            matched_ids.push_back(matched->id);
+            item.win_id = matched->id;
+            item.running = true;
+            item.activated = matched->activated;
+            item.minimized = matched->minimized;
+        }
+        if (auto it = prev_anim.find(item.cmd); it != prev_anim.end()) {
+            item.anim_size = it->second.first;
+            item.anim_lift = it->second.second;
+        }
+        ns->pinned_items.push_back(std::move(item));
+    }
+
+    ns->extra_items.clear();
+    for (const auto &w : windows) {
+        if (std::find(matched_ids.begin(), matched_ids.end(), w.id) != matched_ids.end()) continue;
+        DockItem item;
+        item.label = !w.title.empty() ? w.title : (!w.app_id.empty() ? w.app_id : "应用窗口");
+        item.cmd = "window:toggle:" + std::to_string(w.id);
+        item.icon_path = find_app_icon_path(ns->desktop_apps, {w.app_id, w.title});
+        item.fallback_kind = match_app_kind(w.app_id + " " + w.title);
+        item.win_id = w.id;
+        item.running = true;
+        item.activated = w.activated;
+        item.minimized = w.minimized;
+        item.closable = true;
+        ns->extra_items.push_back(std::move(item));
+    }
+
+    int total = dock_total_items(ns);
+    int target_w = std::clamp(total * 58 + (ns->extra_items.empty() ? 48 : 64) + 120, 480, 1600);
+    if (ns->dock_win && ns->dock_da && target_w != ns->dock_width) {
+        ns->dock_width = target_w;
+        gtk_widget_set_size_request(ns->dock_da, target_w, static_cast<int>(kDockHeight));
+        gtk_window_set_default_size(ns->dock_win, target_w, static_cast<int>(kDockHeight));
+    }
+    if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
+}
+
+void build_native_dock(GtkApplication *app, NativeShellState *ns) {
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelDock");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, ns->dock_width, static_cast<int>(kDockHeight));
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-dock");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, static_cast<int>(kDockBottomPad));
+    gtk_layer_set_exclusive_zone(win, 74);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    ns->dock_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(ns->dock_da, ns->dock_width, static_cast<int>(kDockHeight));
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ns->dock_da), draw_dock_cb, ns, nullptr);
+
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "motion", G_CALLBACK(on_dock_motion), ns);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_dock_leave), ns);
+    gtk_widget_add_controller(ns->dock_da, motion);
+
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+    g_signal_connect(click, "pressed", G_CALLBACK(on_dock_click), ns);
+    gtk_widget_add_controller(ns->dock_da, GTK_EVENT_CONTROLLER(click));
+
+    gtk_window_set_child(win, ns->dock_da);
+    ns->dock_win = win;
+    rebuild_dock_items(ns, {});
+    gtk_window_present(win);
+}
+
+/* ==================== 4. Native Liquid Glass Control Center ==================== */
+
+GtkWidget *make_cc_circle_icon(BarGlyph kind, const char *circle_cls) {
+    GtkWidget *wrap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(wrap, "spinel-cc-circle");
+    if (circle_cls) gtk_widget_add_css_class(wrap, circle_cls);
+    gtk_widget_set_size_request(wrap, 32, 32);
+    gtk_widget_set_halign(wrap, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(wrap, GTK_ALIGN_CENTER);
+
+    GtkWidget *da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(da, 16, 16);
+    gtk_widget_set_hexpand(da, TRUE);
+    gtk_widget_set_vexpand(da, TRUE);
+    gtk_widget_set_halign(da, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(da, GTK_ALIGN_CENTER);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(kind)), nullptr);
+    gtk_box_append(GTK_BOX(wrap), da);
+    return wrap;
+}
+
+GtkWidget *make_cc_pill(AppState *state,
+                        BarGlyph glyph,
+                        const char *circle_cls,
+                        const char *title,
+                        const char *sub_init,
+                        const char *cmd,
+                        bool has_chevron,
+                        GtkWidget **out_circle,
+                        GtkWidget **out_sub) {
+    GtkWidget *btn = make_cmd_button(state, nullptr, "spinel-cc-pill", cmd);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 9);
+
+    GtkWidget *circle = make_cc_circle_icon(glyph, circle_cls);
+    if (out_circle) *out_circle = circle;
+
+    GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
+    gtk_widget_set_hexpand(col, TRUE);
+    gtk_widget_set_valign(col, GTK_ALIGN_CENTER);
+    GtkWidget *t = gtk_label_new(title);
+    gtk_widget_add_css_class(t, "spinel-cc-title");
+    gtk_widget_set_halign(t, GTK_ALIGN_START);
+    GtkWidget *s = gtk_label_new(sub_init);
+    gtk_widget_add_css_class(s, "spinel-cc-sub");
+    gtk_widget_set_halign(s, GTK_ALIGN_START);
+    gtk_label_set_ellipsize(GTK_LABEL(s), PANGO_ELLIPSIZE_END);
+    if (out_sub) *out_sub = s;
+    gtk_box_append(GTK_BOX(col), t);
+    gtk_box_append(GTK_BOX(col), s);
+
+    gtk_box_append(GTK_BOX(row), circle);
+    gtk_box_append(GTK_BOX(row), col);
+    if (has_chevron) {
+        GtkWidget *chev = gtk_label_new("›");
+        gtk_widget_add_css_class(chev, "spinel-cc-chev");
+        gtk_box_append(GTK_BOX(row), chev);
+    }
+    gtk_button_set_child(GTK_BUTTON(btn), row);
+    return btn;
+}
+
+void on_cc_scale_changed(GtkRange *range, gpointer user_data) {
+    auto *ctx = static_cast<CcSliderCtx *>(user_data);
+    NativeShellState *ns = ctx->state->native;
+    if (!ns || ns->cc_updating_sliders) return;
+    int pct = static_cast<int>(std::round(gtk_range_get_value(range)));
+    std::string pct_str = std::to_string(pct) + "%";
+    if (ctx->is_volume) {
+        if (ns->cc_vol_pct) gtk_label_set_text(GTK_LABEL(ns->cc_vol_pct), pct_str.c_str());
+        trigger_cmd(ctx->state, "system:audio-set:" + std::to_string(pct));
+    } else {
+        if (ns->cc_bright_pct) gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), pct_str.c_str());
+        trigger_cmd(ctx->state, "system:brightness-set:" + std::to_string(pct));
+    }
+}
+
+gboolean on_cc_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (keyval == GDK_KEY_Escape) {
+        native_shell_set_cc_visible(ns->app_state, false);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+GtkWidget *make_cc_slider_card(NativeShellState *ns,
+                               const char *title,
+                               double min_val,
+                               double def_val,
+                               bool is_volume,
+                               GtkWidget **out_pct,
+                               GtkWidget **out_scale) {
+    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_add_css_class(card, "spinel-cc-card");
+
+    GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *lbl = gtk_label_new(title);
+    gtk_widget_add_css_class(lbl, "spinel-cc-title");
+    gtk_widget_set_hexpand(lbl, TRUE);
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+
+    GtkWidget *pct = gtk_label_new(is_volume ? "75%" : "85%");
+    gtk_widget_add_css_class(pct, "spinel-cc-sub");
+    *out_pct = pct;
+    gtk_box_append(GTK_BOX(head), lbl);
+    gtk_box_append(GTK_BOX(head), pct);
+
+    GtkWidget *scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, min_val, 100.0, 1.0);
+    gtk_widget_add_css_class(scale, "spinel-cc-scale");
+    gtk_scale_set_draw_value(GTK_SCALE(scale), FALSE);
+    gtk_range_set_value(GTK_RANGE(scale), def_val);
+    auto *ctx = new CcSliderCtx{ns->app_state, is_volume};
+    ns->slider_ctxs.push_back(ctx);
+    g_signal_connect(scale, "value-changed", G_CALLBACK(on_cc_scale_changed), ctx);
+    *out_scale = scale;
+
+    gtk_box_append(GTK_BOX(card), head);
+    gtk_box_append(GTK_BOX(card), scale);
+    return card;
+}
+
+void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
+    AppState *state = ns->app_state;
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelControlCenter");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 356, 444);
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-controlcenter");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 34);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
+    g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *w, gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
+        if (n && n->bar_cc_btn) gtk_widget_remove_css_class(n->bar_cc_btn, "cc-open");
+        return TRUE;
+    }), ns);
+
+    GtkEventController *key = gtk_event_controller_key_new();
+    g_signal_connect(key, "key-pressed", G_CALLBACK(on_cc_key_pressed), ns);
+    gtk_widget_add_controller(GTK_WIDGET(win), key);
+
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(root, 4);
+    gtk_widget_set_margin_bottom(root, 4);
+    gtk_widget_set_margin_start(root, 4);
+    gtk_widget_set_margin_end(root, 4);
+
+    // Top Row: Left Connectivity Stack + Right Hub Card
+    GtkWidget *top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *stack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_hexpand(stack, TRUE);
+    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, nullptr, &ns->cc_net_val));
+    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, nullptr, nullptr));
+    gtk_box_append(GTK_BOX(stack), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val));
+
+    GtkWidget *hub = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(hub, "spinel-cc-card");
+    gtk_widget_set_hexpand(hub, TRUE);
+
+    GtkWidget *hub_top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *hub_gem = gtk_drawing_area_new();
+    gtk_widget_set_size_request(hub_gem, 26, 26);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(hub_gem), draw_gem_glyph, nullptr, nullptr);
+    ns->cc_gpu_badge = gtk_label_new("GPU");
+    gtk_widget_add_css_class(ns->cc_gpu_badge, "spinel-cc-badge");
+    gtk_widget_set_hexpand(ns->cc_gpu_badge, TRUE);
+    gtk_widget_set_halign(ns->cc_gpu_badge, GTK_ALIGN_END);
+    gtk_label_set_ellipsize(GTK_LABEL(ns->cc_gpu_badge), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(ns->cc_gpu_badge), 12);
+    gtk_box_append(GTK_BOX(hub_top), hub_gem);
+    gtk_box_append(GTK_BOX(hub_top), ns->cc_gpu_badge);
+
+    GtkWidget *hub_title = gtk_label_new("SpinelOS 控制");
+    gtk_widget_add_css_class(hub_title, "spinel-cc-title");
+    gtk_widget_set_halign(hub_title, GTK_ALIGN_START);
+    ns->cc_mem_val = gtk_label_new("内存 --");
+    gtk_widget_add_css_class(ns->cc_mem_val, "spinel-cc-sub");
+    gtk_widget_set_halign(ns->cc_mem_val, GTK_ALIGN_START);
+    gtk_widget_set_vexpand(ns->cc_mem_val, TRUE);
+
+    GtkWidget *hub_btns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_set_homogeneous(GTK_BOX(hub_btns), TRUE);
+    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "游戏", "spinel-cc-chip-btn", "games:open"));
+    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "商店", "spinel-cc-chip-btn", "store:open"));
+    gtk_box_append(GTK_BOX(hub_btns), make_cmd_button(state, "大屏", "spinel-cc-chip-btn", "launch:steam-gamepadui"));
+
+    gtk_box_append(GTK_BOX(hub), hub_top);
+    gtk_box_append(GTK_BOX(hub), hub_title);
+    gtk_box_append(GTK_BOX(hub), ns->cc_mem_val);
+    gtk_box_append(GTK_BOX(hub), hub_btns);
+
+    gtk_box_append(GTK_BOX(top_row), stack);
+    gtk_box_append(GTK_BOX(top_row), hub);
+
+    // Mid Row: MangoHud + FSR + Appearance
+    GtkWidget *mid_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *mh_pill = make_cc_pill(state, BarGlyph::Hud, "active-indigo", "MangoHud", "精简监控", "perf:cycle-mangohud", false, &ns->cc_mh_circle, &ns->cc_mh_val);
+    gtk_widget_set_hexpand(mh_pill, TRUE);
+    ns->cc_fsr_btn = make_cmd_button(state, "FSR", "spinel-cc-orb", "perf:toggle-fsr");
+    gtk_widget_set_size_request(ns->cc_fsr_btn, 52, 52);
+
+    GtkWidget *ap_btn = make_cmd_button(state, nullptr, "spinel-cc-orb", "settings:open:appearance");
+    gtk_widget_set_size_request(ap_btn, 52, 52);
+    gtk_widget_set_tooltip_text(ap_btn, "外观与壁纸");
+    GtkWidget *ap_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(ap_da, 18, 18);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ap_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Appearance)), nullptr);
+    gtk_button_set_child(GTK_BUTTON(ap_btn), ap_da);
+
+    gtk_box_append(GTK_BOX(mid_row), mh_pill);
+    gtk_box_append(GTK_BOX(mid_row), ns->cc_fsr_btn);
+    gtk_box_append(GTK_BOX(mid_row), ap_btn);
+
+    // Util Row: Settings + Reboot + Power
+    GtkWidget *util_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *set_pill = make_cmd_button(state, "系统设置", "spinel-cc-pill", "settings:open:display");
+    gtk_widget_set_hexpand(set_pill, TRUE);
+    gtk_widget_set_size_request(set_pill, -1, 52);
+
+    GtkWidget *rb_orb = make_cmd_button(state, nullptr, "spinel-cc-orb", "power:reboot");
+    gtk_widget_set_size_request(rb_orb, 52, 52);
+    gtk_widget_set_tooltip_text(rb_orb, "重启系统");
+    GtkWidget *rb_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(rb_da, 18, 18);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(rb_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Reboot)), nullptr);
+    gtk_button_set_child(GTK_BUTTON(rb_orb), rb_da);
+
+    GtkWidget *pw_orb = make_cmd_button(state, nullptr, "spinel-cc-orb", "power:shutdown");
+    gtk_widget_add_css_class(pw_orb, "danger-orb");
+    gtk_widget_set_size_request(pw_orb, 52, 52);
+    gtk_widget_set_tooltip_text(pw_orb, "关机");
+    GtkWidget *pw_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(pw_da, 18, 18);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(pw_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Power)), nullptr);
+    gtk_button_set_child(GTK_BUTTON(pw_orb), pw_da);
+
+    gtk_box_append(GTK_BOX(util_row), set_pill);
+    gtk_box_append(GTK_BOX(util_row), rb_orb);
+    gtk_box_append(GTK_BOX(util_row), pw_orb);
+
+    // Sliders
+    GtkWidget *br_card = make_cc_slider_card(ns, "显示器", 15.0, 85.0, false, &ns->cc_bright_pct, &ns->cc_bright_scale);
+    GtkWidget *vo_card = make_cc_slider_card(ns, "声音", 0.0, 75.0, true, &ns->cc_vol_pct, &ns->cc_vol_scale);
+
+    gtk_box_append(GTK_BOX(root), top_row);
+    gtk_box_append(GTK_BOX(root), mid_row);
+    gtk_box_append(GTK_BOX(root), util_row);
+    gtk_box_append(GTK_BOX(root), br_card);
+    gtk_box_append(GTK_BOX(root), vo_card);
+
+    gtk_window_set_child(win, root);
+    ns->cc_win = win;
+}
+
+void load_native_css() {
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(
+        css,
+        "window.spinel-transparent, window.spinel-transparent.background {\n"
+        "  background-color: transparent;\n"
+        "  background-image: none;\n"
+        "  box-shadow: none;\n"
+        "  border: none;\n"
+        "}\n"
+        ".spinel-topbar {\n"
+        "  background-color: rgba(14, 20, 36, 0.70);\n"
+        "  border-bottom: 1px solid rgba(255, 255, 255, 0.10);\n"
+        "  padding: 0 12px;\n"
+        "}\n"
+        ".spinel-bar-active {\n"
+        "  color: #ffffff;\n"
+        "  font-weight: 700;\n"
+        "  font-size: 12.5px;\n"
+        "  padding: 0 8px 0 4px;\n"
+        "}\n"
+        ".spinel-bar-btn, .spinel-bar-icon-btn {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  color: rgba(255, 255, 255, 0.92);\n"
+        "  font-size: 12px;\n"
+        "  font-weight: 500;\n"
+        "  padding: 2px 8px;\n"
+        "  min-height: 20px;\n"
+        "  min-width: 20px;\n"
+        "  border-radius: 5px;\n"
+        "}\n"
+        ".spinel-bar-icon-btn {\n"
+        "  padding: 2px 6px;\n"
+        "}\n"
+        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover {\n"
+        "  background-color: rgba(255, 255, 255, 0.18);\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-bar-icon-btn.cc-open {\n"
+        "  background-color: rgba(255, 255, 255, 0.28);\n"
+        "}\n"
+        ".spinel-bar-icon-btn.danger-hover:hover {\n"
+        "  background-color: rgba(244, 63, 94, 0.34);\n"
+        "}\n"
+        ".spinel-bar-mem, .spinel-bar-clock {\n"
+        "  color: rgba(255, 255, 255, 0.94);\n"
+        "  font-size: 12px;\n"
+        "  font-weight: 500;\n"
+        "}\n"
+        ".spinel-bar-clock {\n"
+        "  padding-left: 6px;\n"
+        "}\n"
+        ".spinel-shortcut-btn {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: 1px solid transparent;\n"
+        "  box-shadow: none;\n"
+        "  border-radius: 12px;\n"
+        "  padding: 5px 4px;\n"
+        "}\n"
+        ".spinel-shortcut-btn:hover {\n"
+        "  background-color: rgba(255, 255, 255, 0.12);\n"
+        "  border-color: rgba(255, 255, 255, 0.18);\n"
+        "}\n"
+        ".spinel-shortcut-label {\n"
+        "  color: #f8fafc;\n"
+        "  font-size: 11.5px;\n"
+        "  font-weight: 500;\n"
+        "  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);\n"
+        "}\n"
+        ".spinel-ctx-popover contents {\n"
+        "  background-color: rgba(16, 23, 40, 0.95);\n"
+        "  background-image: none;\n"
+        "  border: 1px solid rgba(255, 255, 255, 0.22);\n"
+        "  border-radius: 12px;\n"
+        "  padding: 6px;\n"
+        "  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.52);\n"
+        "}\n"
+        ".spinel-ctx-item {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  color: #eef2ff;\n"
+        "  font-size: 12.5px;\n"
+        "  min-width: 190px;\n"
+        "  padding: 6px 10px;\n"
+        "  border-radius: 8px;\n"
+        "}\n"
+        ".spinel-ctx-item:hover {\n"
+        "  background-color: rgba(56, 189, 248, 0.28);\n"
+        "}\n"
+        ".spinel-cc-pill, .spinel-cc-card, .spinel-cc-orb {\n"
+        "  background-image: linear-gradient(155deg, rgba(64, 76, 102, 0.92), rgba(36, 45, 66, 0.95));\n"
+        "  border: 1px solid rgba(255, 255, 255, 0.34);\n"
+        "  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40), 0 10px 24px rgba(0, 0, 0, 0.34);\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-cc-pill {\n"
+        "  border-radius: 999px;\n"
+        "  padding: 7px 11px 7px 8px;\n"
+        "}\n"
+        ".spinel-cc-pill:hover, .spinel-cc-orb:hover {\n"
+        "  background-image: linear-gradient(155deg, rgba(78, 92, 122, 0.95), rgba(44, 55, 80, 0.96));\n"
+        "}\n"
+        ".spinel-cc-card {\n"
+        "  border-radius: 20px;\n"
+        "  padding: 12px 13px;\n"
+        "}\n"
+        ".spinel-cc-orb {\n"
+        "  border-radius: 999px;\n"
+        "  padding: 0;\n"
+        "  font-size: 11px;\n"
+        "  font-weight: 800;\n"
+        "}\n"
+        ".spinel-cc-orb.active {\n"
+        "  background-image: linear-gradient(145deg, rgba(56, 189, 248, 0.72), rgba(37, 99, 235, 0.72));\n"
+        "  border-color: rgba(186, 230, 253, 0.75);\n"
+        "}\n"
+        ".spinel-cc-orb.danger-orb:hover {\n"
+        "  background-image: linear-gradient(145deg, rgba(244, 63, 94, 0.65), rgba(190, 18, 60, 0.70));\n"
+        "}\n"
+        ".spinel-cc-circle {\n"
+        "  border-radius: 999px;\n"
+        "  background-color: rgba(255, 255, 255, 0.18);\n"
+        "}\n"
+        ".spinel-cc-circle.active-blue {\n"
+        "  background-color: #0a84ff;\n"
+        "}\n"
+        ".spinel-cc-circle.active-indigo {\n"
+        "  background-color: #6366f1;\n"
+        "}\n"
+        ".spinel-cc-title {\n"
+        "  font-size: 12.5px;\n"
+        "  font-weight: 600;\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-cc-sub {\n"
+        "  font-size: 10.5px;\n"
+        "  color: rgba(255, 255, 255, 0.76);\n"
+        "}\n"
+        ".spinel-cc-chev {\n"
+        "  font-size: 15px;\n"
+        "  color: rgba(255, 255, 255, 0.65);\n"
+        "}\n"
+        ".spinel-cc-badge {\n"
+        "  font-size: 10px;\n"
+        "  font-weight: 600;\n"
+        "  padding: 2px 7px;\n"
+        "  border-radius: 999px;\n"
+        "  background-color: rgba(255, 255, 255, 0.16);\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-cc-chip-btn {\n"
+        "  background-color: rgba(255, 255, 255, 0.16);\n"
+        "  background-image: none;\n"
+        "  border: 1px solid rgba(255, 255, 255, 0.22);\n"
+        "  border-radius: 999px;\n"
+        "  color: #ffffff;\n"
+        "  font-size: 11px;\n"
+        "  font-weight: 600;\n"
+        "  padding: 4px 2px;\n"
+        "  min-height: 24px;\n"
+        "}\n"
+        ".spinel-cc-chip-btn:hover {\n"
+        "  background-color: rgba(255, 255, 255, 0.28);\n"
+        "}\n"
+        ".spinel-cc-scale trough {\n"
+        "  min-height: 14px;\n"
+        "  border-radius: 999px;\n"
+        "  background-color: rgba(255, 255, 255, 0.22);\n"
+        "}\n"
+        ".spinel-cc-scale highlight {\n"
+        "  min-height: 14px;\n"
+        "  border-radius: 999px;\n"
+        "  background-color: rgba(255, 255, 255, 0.90);\n"
+        "}\n"
+        ".spinel-cc-scale slider {\n"
+        "  min-width: 16px;\n"
+        "  min-height: 16px;\n"
+        "  border-radius: 999px;\n"
+        "  background-color: #ffffff;\n"
+        "  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);\n"
+        "}\n");
+    if (GdkDisplay *display = gdk_display_get_default()) {
+        gtk_style_context_add_provider_for_display(
+            display, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
+    }
+    g_object_unref(css);
+}
+
+}  // namespace
+
+void init_native_shell(GtkApplication *app, AppState *state) {
+    if (!state || state->native) return;
+    auto *ns = new NativeShellState();
+    ns->app_state = state;
+    state->native = ns;
+
+    load_native_css();
+    ns->telemetry = collect_telemetry();
+    ns->desktop_apps = list_desktop_apps();
+
+    build_native_desktop(app, ns);
+    build_native_top_bar(app, ns);
+    build_native_dock(app, ns);
+    build_native_control_center(app, ns);
+
+    native_shell_sync_telemetry(state);
+    native_shell_sync_perf(state);
+}
+
+void shutdown_native_shell(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
+    if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
+    for (auto &kv : ns->surface_cache) {
+        if (kv.second) cairo_surface_destroy(kv.second);
+    }
+    for (auto *ctx : ns->slider_ctxs) delete ctx;
+    delete ns;
+    state->native = nullptr;
+}
+
+void native_shell_sync_telemetry(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    bool prev_live = ns->telemetry.is_live;
+    ns->telemetry = collect_telemetry();
+
+    if (ns->bar_mem_lbl) {
+        std::string m = ns->telemetry.mem_used_mb > 0
+            ? (std::to_string(ns->telemetry.mem_used_mb) + "M")
+            : ns->telemetry.mem;
+        gtk_label_set_text(GTK_LABEL(ns->bar_mem_lbl), m.c_str());
+    }
+    if (ns->bar_net_btn) {
+        std::string tip = "网络: " + ns->telemetry.net;
+        gtk_widget_set_tooltip_text(ns->bar_net_btn, tip.c_str());
+    }
+    if (ns->cc_net_val) gtk_label_set_text(GTK_LABEL(ns->cc_net_val), ns->telemetry.net.c_str());
+    if (ns->cc_gpu_badge) gtk_label_set_text(GTK_LABEL(ns->cc_gpu_badge), ns->telemetry.gpu.c_str());
+    if (ns->cc_mem_val) {
+        std::string mem_s = "内存 " + ns->telemetry.mem;
+        gtk_label_set_text(GTK_LABEL(ns->cc_mem_val), mem_s.c_str());
+    }
+    if (prev_live != ns->telemetry.is_live) {
+        rebuild_desktop_shortcuts(ns);
+        rebuild_dock_items(ns, list_tracked_windows());
+    }
+}
+
+void native_shell_sync_windows(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    auto windows = list_tracked_windows();
+
+    std::string active_name = "访达";
+    for (const auto &w : windows) {
+        if (w.activated) {
+            active_name = !w.title.empty() ? w.title : (!w.app_id.empty() ? w.app_id : "应用");
+            break;
+        }
+    }
+    if (active_name == "访达" && !windows.empty()) {
+        const auto &w = windows.front();
+        active_name = !w.title.empty() ? w.title : (!w.app_id.empty() ? w.app_id : "应用");
+    }
+    if (ns->bar_active_lbl) gtk_label_set_text(GTK_LABEL(ns->bar_active_lbl), active_name.c_str());
+
+    rebuild_dock_items(ns, windows);
+}
+
+void native_shell_sync_desktop(AppState *state) {
+    if (!state || !state->native) return;
+    state->native->desktop_apps = list_desktop_apps();
+    rebuild_desktop_shortcuts(state->native);
+}
+
+void native_shell_sync_wallpaper(AppState *state) {
+    if (!state || !state->native) return;
+    state->native->wallpaper = get_wallpaper_pref();
+    if (state->native->desktop_bg_da) {
+        gtk_widget_queue_draw(state->native->desktop_bg_da);
+    }
+}
+
+void native_shell_sync_perf(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    PerfConfig cfg = load_perf_config();
+
+    if (ns->cc_gm_circle) {
+        if (cfg.gamemode) gtk_widget_add_css_class(ns->cc_gm_circle, "active-blue");
+        else gtk_widget_remove_css_class(ns->cc_gm_circle, "active-blue");
+    }
+    if (ns->cc_gm_val) gtk_label_set_text(GTK_LABEL(ns->cc_gm_val), cfg.gamemode ? "已开启" : "已关闭");
+
+    if (ns->cc_mh_circle) {
+        if (cfg.mangohud != "off") gtk_widget_add_css_class(ns->cc_mh_circle, "active-indigo");
+        else gtk_widget_remove_css_class(ns->cc_mh_circle, "active-indigo");
+    }
+    if (ns->cc_mh_val) {
+        const char *lbl = cfg.mangohud == "full" ? "详细监控" : (cfg.mangohud == "off" ? "已关闭" : "精简监控");
+        gtk_label_set_text(GTK_LABEL(ns->cc_mh_val), lbl);
+    }
+
+    if (ns->cc_fsr_btn) {
+        if (cfg.fsr) gtk_widget_add_css_class(ns->cc_fsr_btn, "active");
+        else gtk_widget_remove_css_class(ns->cc_fsr_btn, "active");
+    }
+}
+
+void native_shell_set_cc_visible(AppState *state, bool visible) {
+    if (!state || !state->native || !state->native->cc_win) return;
+    NativeShellState *ns = state->native;
+    gtk_widget_set_visible(GTK_WIDGET(ns->cc_win), visible ? TRUE : FALSE);
+    if (ns->bar_cc_btn) {
+        if (visible) gtk_widget_add_css_class(ns->bar_cc_btn, "cc-open");
+        else gtk_widget_remove_css_class(ns->bar_cc_btn, "cc-open");
+    }
+    if (visible) {
+        native_shell_sync_telemetry(state);
+        native_shell_sync_perf(state);
+        MediaSnapshot media = collect_media_state();
+        ns->cc_updating_sliders = true;
+        if (ns->cc_vol_scale && ns->cc_vol_pct) {
+            gtk_range_set_value(GTK_RANGE(ns->cc_vol_scale), media.volume);
+            std::string s = std::to_string(media.volume) + "%";
+            gtk_label_set_text(GTK_LABEL(ns->cc_vol_pct), s.c_str());
+        }
+        if (ns->cc_bright_scale && ns->cc_bright_pct) {
+            if (media.brightness >= 0) {
+                gtk_widget_set_sensitive(ns->cc_bright_scale, TRUE);
+                gtk_range_set_value(GTK_RANGE(ns->cc_bright_scale), media.brightness);
+                std::string s = std::to_string(media.brightness) + "%";
+                gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), s.c_str());
+            } else {
+                gtk_widget_set_sensitive(ns->cc_bright_scale, FALSE);
+                gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), "外接/VM");
+            }
+        }
+        ns->cc_updating_sliders = false;
+        gtk_window_present(ns->cc_win);
+    }
+}
+
+void native_shell_toggle_cc(AppState *state) {
+    if (!state || !state->native || !state->native->cc_win) return;
+    bool vis = gtk_widget_get_visible(GTK_WIDGET(state->native->cc_win));
+    native_shell_set_cc_visible(state, !vis);
+}

@@ -1,5 +1,6 @@
 #include "desktop_apps.hpp"
 #include "common.hpp"
+#include "native_shell.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -19,16 +20,17 @@ struct DesktopApp {
     std::string name;
     std::string exec;
     std::string icon_name;
+    std::string icon_path;
     std::string icon_uri;
     std::string category;
     bool terminal = false;
 };
 
-std::string resolve_icon_uri(const std::string &icon) {
+std::string resolve_icon_path(const std::string &icon) {
     if (icon.empty()) return "";
     std::error_code ec;
     if (icon.front() == '/' && fs::exists(icon, ec)) {
-        return "file://" + icon;
+        return icon;
     }
 
     fs::path local_icons = fs::path(home_dir()) / ".local/share/icons/hicolor";
@@ -65,7 +67,7 @@ std::string resolve_icon_uri(const std::string &icon) {
         for (const auto &ext : exts) {
             fs::path p = dir / (icon + ext);
             if (fs::exists(p, ec) && fs::is_regular_file(p, ec)) {
-                return "file://" + p.string();
+                return p.string();
             }
         }
     }
@@ -148,7 +150,8 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
     app.id = path.stem().string();
     app.name = !name_zh.empty() ? name_zh : name_en;
     if (app.name.empty()) app.name = app.id;
-    app.icon_uri = resolve_icon_uri(app.icon_name);
+    app.icon_path = resolve_icon_path(app.icon_name);
+    app.icon_uri = app.icon_path.empty() ? "" : ("file://" + app.icon_path);
     return true;
 }
 
@@ -185,6 +188,19 @@ std::vector<DesktopApp> scan_all_apps() {
 
 }  // namespace
 
+std::vector<DesktopAppInfo> list_desktop_apps() {
+    auto apps = scan_all_apps();
+    std::vector<DesktopAppInfo> out;
+    out.reserve(apps.size());
+    for (auto &a : apps) {
+        out.push_back(DesktopAppInfo{
+            std::move(a.id), std::move(a.name), std::move(a.icon_name),
+            std::move(a.icon_path), std::move(a.icon_uri), std::move(a.category)
+        });
+    }
+    return out;
+}
+
 void push_desktop_apps(AppState *state) {
     if (!state) return;
     auto apps = scan_all_apps();
@@ -207,6 +223,8 @@ void push_desktop_apps(AppState *state) {
     eval_js(state->games_view, script);
     eval_js(state->dock_view, script);
     eval_js(state->store_view, script);
+    native_shell_sync_desktop(state);
+    native_shell_sync_windows(state);
 }
 
 void launch_desktop_app_id(const std::string &desktop_id) {
@@ -229,17 +247,23 @@ void launch_desktop_app_id(const std::string &desktop_id) {
     }
 }
 
-void push_wallpaper_pref(AppState *state) {
-    if (!state) return;
+std::string get_wallpaper_pref() {
     std::string wp = trim_copy(read_first_line(
         (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), "crystal-blue"
     ));
     if (wp != "crystal-blue" && wp != "obsidian-purple" && wp != "emerald-aurora" && wp != "amber-dusk") {
         wp = "crystal-blue";
     }
+    return wp;
+}
+
+void push_wallpaper_pref(AppState *state) {
+    if (!state) return;
+    std::string wp = get_wallpaper_pref();
     std::string js = "window.__spinelWallpaper && window.__spinelWallpaper(\"" + wp + "\");";
     eval_js(state->desktop_view, js);
     eval_js(state->settings_view, js);
+    native_shell_sync_wallpaper(state);
 }
 
 void set_wallpaper_pref(AppState *state, const std::string &theme_id) {

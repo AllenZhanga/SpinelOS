@@ -1,5 +1,6 @@
 #include "steam_library.hpp"
 #include "common.hpp"
+#include "native_shell.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -121,7 +122,7 @@ std::vector<fs::path> discover_library_folders(const std::vector<fs::path> &root
     return libs;
 }
 
-std::string find_local_cover_uri(const std::vector<fs::path> &roots, const std::string &appid) {
+std::string find_local_cover_path(const std::vector<fs::path> &roots, const std::string &appid) {
     for (const auto &root : roots) {
         fs::path cache = root / "appcache/librarycache";
         std::vector<fs::path> candidates = {
@@ -135,7 +136,7 @@ std::string find_local_cover_uri(const std::vector<fs::path> &roots, const std::
         std::error_code ec;
         for (const auto &c : candidates) {
             if (fs::exists(c, ec) && fs::is_regular_file(c, ec)) {
-                return "file://" + fs::absolute(c, ec).string();
+                return fs::absolute(c, ec).string();
             }
         }
         // Scan per-appid directory for hashed/variant capsule image if present
@@ -147,7 +148,7 @@ std::string find_local_cover_uri(const std::vector<fs::path> &roots, const std::
                 if (ext == ".jpg" || ext == ".png" || ext == ".webp") {
                     std::string fname = entry.path().filename().string();
                     if (fname.find("library") != std::string::npos || fname.find("header") != std::string::npos) {
-                        return "file://" + fs::absolute(entry.path(), ec).string();
+                        return fs::absolute(entry.path(), ec).string();
                     }
                 }
             }
@@ -240,13 +241,11 @@ void ensure_steam_play_preconfig() {
     }
 }
 
-void push_steam_library(AppState *state) {
-    if (!state) return;
-
+std::vector<SteamGameInfo> list_steam_games() {
     auto roots = discover_steam_roots();
     auto libs = discover_library_folders(roots);
 
-    std::vector<SteamGame> games;
+    std::vector<SteamGameInfo> games;
     std::set<std::string> seen_appids;
 
     for (const auto &lib : libs) {
@@ -259,16 +258,30 @@ void push_steam_library(AppState *state) {
 
             SteamGame g;
             if (parse_app_manifest(entry.path(), g) && seen_appids.insert(g.appid).second) {
-                g.cover_uri = find_local_cover_uri(roots, g.appid);
-                games.push_back(std::move(g));
+                std::string cover_path = find_local_cover_path(roots, g.appid);
+                SteamGameInfo info;
+                info.appid = std::move(g.appid);
+                info.name = std::move(g.name);
+                info.size_bytes = g.size_bytes;
+                info.last_updated = g.last_updated;
+                info.cover_path = cover_path;
+                info.cover_uri = cover_path.empty() ? "" : ("file://" + cover_path);
+                games.push_back(std::move(info));
             }
         }
     }
 
-    std::sort(games.begin(), games.end(), [](const SteamGame &a, const SteamGame &b) {
+    std::sort(games.begin(), games.end(), [](const SteamGameInfo &a, const SteamGameInfo &b) {
         if (a.last_updated != b.last_updated) return a.last_updated > b.last_updated;
         return a.name < b.name;
     });
+    return games;
+}
+
+void push_steam_library(AppState *state) {
+    if (!state) return;
+
+    auto games = list_steam_games();
 
     std::ostringstream js;
     js << "window.__spinelSteamGames && window.__spinelSteamGames([";
@@ -285,6 +298,7 @@ void push_steam_library(AppState *state) {
     std::string script = js.str();
     eval_js(state->desktop_view, script);
     eval_js(state->games_view, script);
+    native_shell_sync_desktop(state);
 }
 
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {

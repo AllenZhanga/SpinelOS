@@ -9,8 +9,13 @@
 #include <string>
 #include <thread>
 
+struct NativeShellState;
+
 struct AppState {
-    // Persistent Layer-Shell surfaces
+    // Pure Native GTK4/Cairo Resident Shell (zero WebKit processes at idle)
+    NativeShellState *native = nullptr;
+
+    // Legacy pointers retained as nullptr for callers / optional views
     WebKitWebView *bar_view = nullptr;
     WebKitWebView *desktop_view = nullptr;
     WebKitWebView *dock_view = nullptr;
@@ -18,7 +23,7 @@ struct AppState {
     WebKitWebView *cc_view = nullptr;
     GtkWindow *cc_window = nullptr;
 
-    // Normal macOS-style managed Application Windows
+    // On-Demand Rich-Content WebKitGTK6 Application Windows (destroyed on close)
     GtkWindow *games_win = nullptr;
     WebKitWebView *games_view = nullptr;
 
@@ -48,3 +53,5 @@ inline void eval_js(WebKitWebView *view, const std::string &script) {
         view, script.c_str(), -1, nullptr, nullptr, nullptr, nullptr, nullptr
     );
 }
+
+void handle_shell_command(AppState *state, const std::string &cmd);

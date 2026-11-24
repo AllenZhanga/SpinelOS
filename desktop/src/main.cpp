@@ -3,12 +3,12 @@
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "installer.hpp"
+#include "native_shell.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
 #include "window_tracker.hpp"
 
 #include <gtk/gtk.h>
-#include <gtk4-layer-shell.h>
 #include <webkit/webkit.h>
 
 #include <algorithm>
@@ -22,6 +22,12 @@ namespace {
 
 GtkApplication *g_app = nullptr;
 
+struct AppWindowSlotCtx {
+    AppState *state = nullptr;
+    GtkWindow **win_slot = nullptr;
+    WebKitWebView **view_slot = nullptr;
+};
+
 std::string resolve_ui_uri(const std::string &page_query) {
     const char *env_dir = std::getenv("SPINEL_UI_DIR");
     fs::path base = env_dir ? fs::path(env_dir) : fs::path("/usr/share/spinel-shell/ui");
@@ -32,34 +38,11 @@ std::string resolve_ui_uri(const std::string &page_query) {
 }
 
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data);
-GtkWindow *create_control_center_layer(GtkApplication *app, AppState *state);
 
-void set_control_center_visible(AppState *state, bool visible) {
-    if (!state || !state->cc_window) return;
-    gtk_widget_set_visible(GTK_WIDGET(state->cc_window), visible ? TRUE : FALSE);
-    if (visible) {
-        gtk_window_present(state->cc_window);
-        push_telemetry_to_view(state->cc_view);
-        push_perf_config(state);
-        push_cc_media_state(state);
-    }
-    eval_js(state->bar_view, visible
-        ? "window.__spinelCcOpen && window.__spinelCcOpen(true);"
-        : "window.__spinelCcOpen && window.__spinelCcOpen(false);");
-}
-
-gboolean on_suppress_context_menu(WebKitWebView *,
-                                    WebKitContextMenu *,
-                                    GdkEvent *,
-                                    WebKitHitTestResult *,
-                                    gpointer) {
-    return TRUE;
-}
-
-WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark, bool allow_native_menu = true) {
+WebKitWebView *create_configured_webview(AppState *state) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
-    GdkRGBA bg = opaque_dark ? GdkRGBA{0.031, 0.043, 0.071, 1.0} : GdkRGBA{0.0, 0.0, 0.0, 0.0};
+    GdkRGBA bg{0.031, 0.043, 0.071, 1.0};
     webkit_web_view_set_background_color(web, &bg);
 
     WebKitSettings *settings = webkit_web_view_get_settings(web);
@@ -73,16 +56,28 @@ WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark, bool
     g_signal_connect(ucm, "script-message-received::sysbridge", G_CALLBACK(on_script_message), state);
     webkit_user_content_manager_register_script_message_handler(ucm, "sysbridge", nullptr);
 
-    if (!allow_native_menu) {
-        g_signal_connect(web, "context-menu", G_CALLBACK(on_suppress_context_menu), nullptr);
-    }
-
     return web;
 }
 
-gboolean on_hide_window_instead_of_destroy(GtkWindow *win, gpointer) {
-    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
-    return TRUE;
+gboolean on_app_window_close_request(GtkWindow *win, gpointer user_data) {
+    auto *ctx = static_cast<AppWindowSlotCtx *>(user_data);
+    if (ctx && ctx->state) {
+        if ((win == ctx->state->installer_win && ctx->state->install_running.load()) ||
+            (win == ctx->state->store_win && ctx->state->store_busy.load())) {
+            gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+            return TRUE;  // Keep alive while disk install / package install runs
+        }
+    }
+    return FALSE;  // Destroy window & terminate its WebKitWebProcess to reclaim RAM
+}
+
+void on_app_window_destroy(GtkWidget *, gpointer user_data) {
+    auto *ctx = static_cast<AppWindowSlotCtx *>(user_data);
+    if (ctx) {
+        if (ctx->win_slot) *ctx->win_slot = nullptr;
+        if (ctx->view_slot) *ctx->view_slot = nullptr;
+        delete ctx;
+    }
 }
 
 void ensure_app_window(AppState *state,
@@ -96,9 +91,12 @@ void ensure_app_window(AppState *state,
         GtkWindow *win = GTK_WINDOW(gtk_application_window_new(g_app));
         gtk_window_set_title(win, title);
         gtk_window_set_default_size(win, width, height);
-        g_signal_connect(win, "close-request", G_CALLBACK(on_hide_window_instead_of_destroy), nullptr);
 
-        WebKitWebView *view = create_configured_webview(state, true);
+        auto *ctx = new AppWindowSlotCtx{state, win_slot, view_slot};
+        g_signal_connect(win, "close-request", G_CALLBACK(on_app_window_close_request), ctx);
+        g_signal_connect(win, "destroy", G_CALLBACK(on_app_window_destroy), ctx);
+
+        WebKitWebView *view = create_configured_webview(state);
         gtk_window_set_child(win, GTK_WIDGET(view));
         std::string uri = resolve_ui_uri(query);
         webkit_web_view_load_uri(view, uri.c_str());
@@ -142,12 +140,7 @@ void open_store_window(AppState *state) {
 }
 
 void push_all_telemetry(AppState *state) {
-    push_telemetry_to_view(state->bar_view);
-    push_telemetry_to_view(state->desktop_view);
-    push_telemetry_to_view(state->dock_view);
-    if (state->cc_window && gtk_widget_get_visible(GTK_WIDGET(state->cc_window))) {
-        push_telemetry_to_view(state->cc_view);
-    }
+    native_shell_sync_telemetry(state);
     if (state->games_win && gtk_widget_get_visible(GTK_WIDGET(state->games_win))) {
         push_telemetry_to_view(state->games_view);
     }
@@ -164,26 +157,50 @@ gboolean on_telemetry_tick(gpointer user_data) {
     return G_SOURCE_CONTINUE;
 }
 
-void handle_command(AppState *state, const std::string &cmd) {
+void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    if (!jsc_value_is_string(value)) return;
+    g_autofree char *msg = jsc_value_to_string(value);
+    if (msg) {
+        handle_shell_command(state, msg);
+    }
+}
+
+void on_activate(GtkApplication *app, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    g_app = app;
+    ensure_steam_play_preconfig();
+
+    init_native_shell(app, state);
+    init_window_tracker(state);
+
+    g_timeout_add_seconds(3, on_telemetry_tick, state);
+}
+
+}  // namespace
+
+void handle_shell_command(AppState *state, const std::string &cmd) {
+    if (!state) return;
+
     if (cmd == "launch:steam") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
         spawn_argv_detached({"steam"});
     } else if (cmd == "launch:steam-gamepadui") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
         launch_steam_gamepadui(load_perf_config());
     } else if (cmd.rfind("steam:launch:", 0) == 0) {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         ensure_steam_play_preconfig();
         launch_steam_game(cmd.substr(13), load_perf_config());
     } else if (cmd == "steam:scan") {
         push_steam_library(state);
     } else if (cmd == "launch:terminal") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         spawn_argv_detached({"foot"});
     } else if (cmd == "launch:files") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         spawn_argv_detached({"thunar"});
     } else if (cmd == "desktop:open-folder") {
         std::error_code ec;
@@ -202,7 +219,7 @@ void handle_command(AppState *state, const std::string &cmd) {
         fs::create_directory(target, ec);
         spawn_argv_detached({"thunar", desk.string()});
     } else if (cmd == "launch:browser") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         std::string tmp_out;
         int rc = 1;
         if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
@@ -215,13 +232,13 @@ void handle_command(AppState *state, const std::string &cmd) {
             open_store_window(state);
         }
     } else if (cmd.rfind("app:launch:", 0) == 0) {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         launch_desktop_app_id(cmd.substr(11));
     } else if (cmd == "games:open") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         open_games_window(state);
     } else if (cmd == "store:open") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         open_store_window(state);
     } else if (cmd == "store:refresh") {
         push_store_catalog(state);
@@ -230,27 +247,21 @@ void handle_command(AppState *state, const std::string &cmd) {
     } else if (cmd.rfind("store:remove\n", 0) == 0) {
         start_store_action(state, "remove", cmd);
     } else if (cmd.rfind("store:launch:", 0) == 0) {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         launch_store_app(state, cmd.substr(13));
     } else if (cmd == "installer:open") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
         if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "appearance") {
-            set_control_center_visible(state, false);
+            native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
         }
     } else if (cmd == "cc:toggle") {
-        if (!state->cc_window && g_app) {
-            state->cc_window = create_control_center_layer(g_app, state);
-        }
-        if (state->cc_window) {
-            bool vis = gtk_widget_get_visible(GTK_WIDGET(state->cc_window));
-            set_control_center_visible(state, !vis);
-        }
+        native_shell_toggle_cc(state);
     } else if (cmd == "cc:close") {
-        set_control_center_visible(state, false);
+        native_shell_set_cc_visible(state, false);
     } else if (cmd.rfind("system:audio-set:", 0) == 0) {
         int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
@@ -269,12 +280,6 @@ void handle_command(AppState *state, const std::string &cmd) {
     } else if (cmd.rfind("window:close:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(13).c_str(), nullptr, 10);
         if (wid > 0) close_tracked_window(wid);
-    } else if (cmd.rfind("dock:resize:", 0) == 0) {
-        int w = std::clamp(std::atoi(cmd.substr(12).c_str()), 380, 1600);
-        if (state->dock_window && state->dock_view) {
-            gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), w, 124);
-            gtk_window_set_default_size(state->dock_window, w, 124);
-        }
     } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
         set_wallpaper_pref(state, cmd.substr(14));
     } else if (cmd == "system:audio-down") {
@@ -292,11 +297,18 @@ void handle_command(AppState *state, const std::string &cmd) {
         push_desktop_apps(state);
         push_wallpaper_pref(state);
         push_windows_to_ui(state);
-        if (state->cc_window && gtk_widget_get_visible(GTK_WIDGET(state->cc_window))) {
-            push_cc_media_state(state);
-        }
     } else if (cmd == "perf:get") {
         push_perf_config(state);
+    } else if (cmd == "perf:toggle-gamemode") {
+        PerfConfig cfg = load_perf_config();
+        update_perf_config(state, std::string("gamemode=") + (cfg.gamemode ? "false" : "true"));
+    } else if (cmd == "perf:toggle-fsr") {
+        PerfConfig cfg = load_perf_config();
+        update_perf_config(state, std::string("fsr=") + (cfg.fsr ? "false" : "true"));
+    } else if (cmd == "perf:cycle-mangohud") {
+        PerfConfig cfg = load_perf_config();
+        std::string next = cfg.mangohud == "off" ? "compact" : (cfg.mangohud == "compact" ? "full" : "off");
+        update_perf_config(state, "mangohud=" + next);
     } else if (cmd.rfind("perf:set\n", 0) == 0) {
         update_perf_config(state, cmd);
     } else if (cmd == "settings:wifi-list") {
@@ -332,140 +344,6 @@ void handle_command(AppState *state, const std::string &cmd) {
     }
 }
 
-void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
-    auto *state = static_cast<AppState *>(user_data);
-    if (!jsc_value_is_string(value)) return;
-    g_autofree char *msg = jsc_value_to_string(value);
-    if (msg) {
-        handle_command(state, msg);
-    }
-}
-
-GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
-    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
-    gtk_window_set_title(win, "SpinelTopBar");
-    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, -1, 28);
-
-    gtk_layer_init_for_window(win);
-    gtk_layer_set_namespace(win, "spinel-bar");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_auto_exclusive_zone_enable(win);
-    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
-
-    state->bar_view = create_configured_webview(state, false, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->bar_view), -1, 28);
-    gtk_window_set_child(win, GTK_WIDGET(state->bar_view));
-
-    webkit_web_view_load_uri(state->bar_view, resolve_ui_uri("?mode=bar").c_str());
-    return win;
-}
-
-GtkWindow *create_desktop_layer(GtkApplication *app, AppState *state) {
-    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
-    gtk_window_set_title(win, "SpinelDesktop");
-
-    gtk_layer_init_for_window(win);
-    gtk_layer_set_namespace(win, "spinel-desktop");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_BOTTOM);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_exclusive_zone(win, -1);
-    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
-
-    state->desktop_view = create_configured_webview(state, true, false);
-    gtk_window_set_child(win, GTK_WIDGET(state->desktop_view));
-
-    webkit_web_view_load_uri(state->desktop_view, resolve_ui_uri("?mode=desktop").c_str());
-    return win;
-}
-
-GtkWindow *create_dock_layer(GtkApplication *app, AppState *state) {
-    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
-    gtk_window_set_title(win, "SpinelDock");
-    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 580, 124);
-
-    gtk_layer_init_for_window(win);
-    gtk_layer_set_namespace(win, "spinel-dock");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, 6);
-    gtk_layer_set_exclusive_zone(win, 74);
-    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
-
-    state->dock_view = create_configured_webview(state, false, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 124);
-    gtk_window_set_child(win, GTK_WIDGET(state->dock_view));
-
-    webkit_web_view_load_uri(state->dock_view, resolve_ui_uri("?mode=dock").c_str());
-    return win;
-}
-
-GtkWindow *create_control_center_layer(GtkApplication *app, AppState *state) {
-    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
-    gtk_window_set_title(win, "SpinelControlCenter");
-    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 356, 466);
-
-    gtk_layer_init_for_window(win);
-    gtk_layer_set_namespace(win, "spinel-controlcenter");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 34);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
-    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
-    g_signal_connect(win, "close-request", G_CALLBACK(on_hide_window_instead_of_destroy), nullptr);
-
-    state->cc_view = create_configured_webview(state, false, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->cc_view), 356, 466);
-    gtk_window_set_child(win, GTK_WIDGET(state->cc_view));
-
-    webkit_web_view_load_uri(state->cc_view, resolve_ui_uri("?mode=cc").c_str());
-    return win;
-}
-
-void on_activate(GtkApplication *app, gpointer user_data) {
-    auto *state = static_cast<AppState *>(user_data);
-    g_app = app;
-    ensure_steam_play_preconfig();
-
-    GtkCssProvider *css = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(
-        css,
-        "window.spinel-transparent, window.spinel-transparent.background {\n"
-        "  background-color: transparent;\n"
-        "  background-image: none;\n"
-        "  box-shadow: none;\n"
-        "  border: none;\n"
-        "}\n");
-    if (GdkDisplay *display = gdk_display_get_default()) {
-        gtk_style_context_add_provider_for_display(
-            display, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
-    }
-    g_object_unref(css);
-
-    GtkWindow *desktop = create_desktop_layer(app, state);
-    GtkWindow *bar = create_top_bar(app, state);
-    state->dock_window = create_dock_layer(app, state);
-
-    init_window_tracker(state);
-
-    gtk_window_present(desktop);
-    gtk_window_present(bar);
-    gtk_window_present(state->dock_window);
-
-    g_timeout_add_seconds(3, on_telemetry_tick, state);
-}
-
-}  // namespace
-
 int main(int argc, char **argv) {
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);
@@ -473,6 +351,7 @@ int main(int argc, char **argv) {
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     state.shutting_down.store(true);
     shutdown_window_tracker();
+    shutdown_native_shell(&state);
     if (state.install_thread.joinable()) {
         state.install_thread.join();
     }

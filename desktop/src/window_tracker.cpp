@@ -1,5 +1,6 @@
 #include "window_tracker.hpp"
 #include "common.hpp"
+#include "native_shell.hpp"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 #include <wayland-client.h>
@@ -246,23 +247,40 @@ void shutdown_window_tracker() {
     }
 }
 
+std::vector<TrackedWindowInfo> list_tracked_windows() {
+    std::vector<TrackedWindowInfo> out;
+    for (const auto &w : g_ctx.windows) {
+        if (!w->ready) continue;
+        TrackedWindowInfo info;
+        info.id = w->id;
+        info.title = w->title;
+        info.app_id = w->app_id;
+        info.activated = w->activated;
+        info.minimized = w->minimized;
+        info.maximized = w->maximized;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
 void push_windows_to_ui(AppState *state) {
     if (!state || state->shutting_down.load()) return;
 
+    native_shell_sync_windows(state);
+    if (!state->bar_view && !state->dock_view) return;
+
+    auto list = list_tracked_windows();
     std::ostringstream js;
     js << "window.__spinelWindows && window.__spinelWindows([";
-    bool first = true;
-    for (const auto &w : g_ctx.windows) {
-        if (!w->ready) continue;
-        if (!first) js << ",";
-        first = false;
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (i > 0) js << ",";
         js << "{"
-           << "\"id\":" << w->id << ","
-           << "\"title\":\"" << json_escape(w->title) << "\","
-           << "\"app_id\":\"" << json_escape(w->app_id) << "\","
-           << "\"activated\":" << (w->activated ? "true" : "false") << ","
-           << "\"minimized\":" << (w->minimized ? "true" : "false") << ","
-           << "\"maximized\":" << (w->maximized ? "true" : "false")
+           << "\"id\":" << list[i].id << ","
+           << "\"title\":\"" << json_escape(list[i].title) << "\","
+           << "\"app_id\":\"" << json_escape(list[i].app_id) << "\","
+           << "\"activated\":" << (list[i].activated ? "true" : "false") << ","
+           << "\"minimized\":" << (list[i].minimized ? "true" : "false") << ","
+           << "\"maximized\":" << (list[i].maximized ? "true" : "false")
            << "}";
     }
     js << "]);";

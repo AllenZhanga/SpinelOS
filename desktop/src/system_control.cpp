@@ -1,5 +1,6 @@
 #include "system_control.hpp"
 #include "common.hpp"
+#include "native_shell.hpp"
 
 #include <sys/stat.h>
 
@@ -149,7 +150,7 @@ std::string detect_gpu_summary() {
     return gpu.empty() ? "Generic DRM/Mesa" : gpu;
 }
 
-std::string detect_mem_usage() {
+std::string detect_mem_usage(int *used_mb_out = nullptr) {
     std::ifstream ifs("/proc/meminfo");
     if (!ifs.is_open()) return "N/A";
     long total_kb = 0;
@@ -164,6 +165,7 @@ std::string detect_mem_usage() {
     if (total_kb <= 0) return "N/A";
     long used_mb = (total_kb - avail_kb) / 1024;
     long total_mb = total_kb / 1024;
+    if (used_mb_out) *used_mb_out = static_cast<int>(used_mb);
     std::ostringstream oss;
     oss << used_mb << " / " << total_mb << " MB";
     return oss.str();
@@ -266,40 +268,29 @@ void update_perf_config(AppState *state, const std::string &payload) {
     }
     sync_mangohud_config(cfg);
     push_perf_config(state);
+    native_shell_sync_perf(state);
 }
 
-void push_telemetry_to_view(WebKitWebView *view) {
-    if (!view) return;
-    std::string gpu = json_escape(detect_gpu_summary());
-    std::string mem = json_escape(detect_mem_usage());
-    std::string net = json_escape(detect_network_status());
-    std::string kernel = json_escape(read_first_line("/proc/sys/kernel/osrelease", "Linux"));
-    bool is_live = is_live_iso_env();
-    bool low_fx = detect_low_fx_mode();
-
-    std::ostringstream js;
-    js << "window.__spinelUpdateTelemetry && window.__spinelUpdateTelemetry({"
-       << "\"gpu\":\"" << gpu << "\","
-       << "\"mem\":\"" << mem << "\","
-       << "\"net\":\"" << net << "\","
-       << "\"kernel\":\"" << kernel << "\","
-       << "\"is_live\":" << (is_live ? "true" : "false") << ","
-       << "\"low_fx\":" << (low_fx ? "true" : "false")
-       << "});";
-    eval_js(view, js.str());
+TelemetrySnapshot collect_telemetry() {
+    TelemetrySnapshot snap;
+    snap.gpu = detect_gpu_summary();
+    snap.mem = detect_mem_usage(&snap.mem_used_mb);
+    snap.net = detect_network_status();
+    snap.kernel = read_first_line("/proc/sys/kernel/osrelease", "Linux");
+    snap.is_live = is_live_iso_env();
+    snap.low_fx = detect_low_fx_mode();
+    return snap;
 }
 
-void push_cc_media_state(AppState *state) {
-    if (!state || !state->cc_view) return;
-    int vol_pct = 75;
+MediaSnapshot collect_media_state() {
+    MediaSnapshot snap;
     std::string vol_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null");
     auto pos = vol_out.find("Volume:");
     if (pos != std::string::npos) {
         double v = std::atof(vol_out.c_str() + pos + 7);
-        vol_pct = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+        snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
     }
 
-    int bright_pct = -1;
     std::string br_out = run_cmd_capture(
         "for d in /sys/class/backlight/*; do "
         "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
@@ -307,13 +298,38 @@ void push_cc_media_state(AppState *state) {
         "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
         "done 2>/dev/null");
     if (!br_out.empty()) {
-        bright_pct = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+        snap.brightness = std::clamp(std::atoi(br_out.c_str()), 5, 100);
     }
+    return snap;
+}
+
+void push_telemetry_to_view(WebKitWebView *view) {
+    if (!view) return;
+    TelemetrySnapshot snap = collect_telemetry();
+    std::string gpu = json_escape(snap.gpu);
+    std::string mem = json_escape(snap.mem);
+    std::string net = json_escape(snap.net);
+    std::string kernel = json_escape(snap.kernel);
 
     std::ostringstream js;
+    js << "window.__spinelUpdateTelemetry && window.__spinelUpdateTelemetry({"
+       << "\"gpu\":\"" << gpu << "\","
+       << "\"mem\":\"" << mem << "\","
+       << "\"net\":\"" << net << "\","
+       << "\"kernel\":\"" << kernel << "\","
+       << "\"is_live\":" << (snap.is_live ? "true" : "false") << ","
+       << "\"low_fx\":" << (snap.low_fx ? "true" : "false")
+       << "});";
+    eval_js(view, js.str());
+}
+
+void push_cc_media_state(AppState *state) {
+    if (!state || !state->cc_view) return;
+    MediaSnapshot snap = collect_media_state();
+    std::ostringstream js;
     js << "window.__spinelControlState && window.__spinelControlState({"
-       << "\"volume\":" << vol_pct << ","
-       << "\"brightness\":" << bright_pct
+       << "\"volume\":" << snap.volume << ","
+       << "\"brightness\":" << snap.brightness
        << "});";
     eval_js(state->cc_view, js.str());
 }
