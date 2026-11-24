@@ -47,7 +47,7 @@ xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
 polkit
 polkit-gnome
-foot
+ptyxis
 
 # Desktop Apps (App Store + File Manager, Editor, Viewer; browsers via App Store)
 flatpak

@@ -65,6 +65,8 @@ void open_native_log_window(AppState *state, const std::string &banner = "");
 
 void ensure_fcitx5_defaults(bool is_light);
 void sync_fcitx5_theme(bool is_light);
+void ensure_terminal_defaults(bool is_light);
+void sync_terminal_theme(bool is_light);
 void push_ime_state(AppState *state);
 void set_ime_engine(AppState *state, const std::string &engine);
 void install_rime_ice_dict(AppState *state);

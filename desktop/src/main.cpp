@@ -267,7 +267,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_steam_library(state);
     } else if (cmd == "launch:terminal") {
         native_shell_set_cc_visible(state, false);
-        spawn_argv_logged({"foot"}, "Terminal");
+        spawn_argv_logged({has_executable("ptyxis") ? "ptyxis" : "foot"}, "Terminal");
     } else if (cmd == "launch:files") {
         native_shell_set_cc_visible(state, false);
         spawn_argv_logged({"thunar"}, "Files");
@@ -504,6 +504,7 @@ int main(int argc, char **argv) {
     ThemeSpec startup_theme = get_active_theme();
     sync_labwc_window_theme(startup_theme.is_light);
     ensure_fcitx5_defaults(startup_theme.is_light);
+    ensure_terminal_defaults(startup_theme.is_light);
 
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);

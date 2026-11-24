@@ -133,7 +133,7 @@ std::string match_app_kind(const std::string &s) {
     if (l.find("chromium") != std::string::npos || l.find("chrome") != std::string::npos ||
         l.find("firefox") != std::string::npos) return "browser";
     if (l.find("thunar") != std::string::npos || l.find("files") != std::string::npos) return "files";
-    if (l.find("foot") != std::string::npos || l.find("terminal") != std::string::npos) return "terminal";
+    if (l.find("ptyxis") != std::string::npos || l.find("foot") != std::string::npos || l.find("terminal") != std::string::npos) return "terminal";
     if (l.find("应用商店") != std::string::npos || l.find("app-store") != std::string::npos) return "store";
     if (l.find("游戏与启动中心") != std::string::npos || l.find("app-games") != std::string::npos) return "games";
     if (l.find("系统设置") != std::string::npos || l.find("settings") != std::string::npos) return "settings";
@@ -832,8 +832,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             profile = "browser";
             out_display_name = hay.find("firefox") != std::string::npos ? "Firefox" :
                                (hay.find("chrome") != std::string::npos ? "Chrome" : "Chromium");
-        } else if (hay.find("foot") != std::string::npos || hay.find("terminal") != std::string::npos ||
-                   hay.find("终端") != std::string::npos) {
+        } else if (hay.find("ptyxis") != std::string::npos || hay.find("foot") != std::string::npos ||
+                   hay.find("terminal") != std::string::npos || hay.find("终端") != std::string::npos) {
             profile = "terminal";
             out_display_name = "终端";
         } else if (hay.find("thunar") != std::string::npos || hay.find("文件管理") != std::string::npos) {
@@ -1242,7 +1242,7 @@ void build_desktop_popover(NativeShellState *ns) {
     const MenuItem entries[] = {
         {"新建文件夹", "desktop:new-folder"},
         {"在文件管理器中打开桌面", "desktop:open-folder"},
-        {"打开终端 (Foot)", "launch:terminal"},
+        {"打开终端", "launch:terminal"},
         {nullptr, nullptr},
         {"打开应用商店", "store:open"},
         {"打开游戏中心", "games:open"},
@@ -1613,7 +1613,7 @@ void rebuild_dock_items(NativeShellState *ns, const std::vector<TrackedWindowInf
         {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
         {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
         {"文件管理", "launch:files", "files", {}, {"thunar"}},
-        {"终端", "launch:terminal", "terminal", {}, {"foot"}},
+        {"终端", "launch:terminal", "terminal", {}, {"ptyxis", "org.gnome.ptyxis", "foot"}},
         {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}}
     };
     if (ns->telemetry.is_live) {

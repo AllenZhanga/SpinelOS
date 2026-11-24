@@ -1165,6 +1165,41 @@ void sync_fcitx5_theme(bool is_light) {
     }
 }
 
+void sync_terminal_theme(bool is_light) {
+    if (!has_executable("gsettings")) return;
+    std::string scheme = is_light ? "prefer-light" : "prefer-dark";
+    std::string style = is_light ? "light" : "dark";
+    std::string script =
+        "gsettings set org.gnome.desktop.interface color-scheme '" + scheme + "' 2>/dev/null || true; "
+        "gsettings set org.gnome.Ptyxis interface-style '" + style + "' 2>/dev/null || true";
+    spawn_argv_detached({"sh", "-c", script});
+}
+
+void ensure_terminal_defaults(bool is_light) {
+    sync_terminal_theme(is_light);
+    if (!has_executable("ptyxis") || !has_executable("gsettings")) return;
+    std::error_code ec;
+    fs::path stamp = fs::path(home_dir()) / ".config/spinelos/ptyxis-v1.stamp";
+    if (fs::exists(stamp, ec)) return;
+
+    const char *script = R"SH(
+if gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.Ptyxis.Shortcuts'; then
+  CUR="$(gsettings get org.gnome.Ptyxis.Shortcuts new-tab 2>/dev/null || true)"
+  case "$CUR" in
+    \[*) gsettings set org.gnome.Ptyxis.Shortcuts new-tab "['<Control>t']" 2>/dev/null || true ;;
+    *)   gsettings set org.gnome.Ptyxis.Shortcuts new-tab '<Control>t' 2>/dev/null || true ;;
+  esac
+  CUR_FONT="$(gsettings get org.gnome.Ptyxis font-name 2>/dev/null || true)"
+  if [ -n "$CUR_FONT" ]; then
+    gsettings set org.gnome.Ptyxis use-system-font false 2>/dev/null || true
+    gsettings set org.gnome.Ptyxis font-name 'Noto Sans Mono CJK SC 11' 2>/dev/null || true
+  fi
+fi
+)SH";
+    spawn_argv_detached({"sh", "-c", script});
+    write_text_file(stamp.string(), "ok\n");
+}
+
 void push_ime_state(AppState *state) {
     if (!state || !state->settings_view) return;
     bool installed = has_executable("fcitx5");

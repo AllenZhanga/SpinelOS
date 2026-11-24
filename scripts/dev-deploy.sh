@@ -73,18 +73,17 @@ sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 
 if [ "$MODE" = "full" ]; then
-  echo "==> Updating SpinelDark theme, labwc/foot config & desktop packages..."
+  echo "==> Updating SpinelDark theme, labwc/ptyxis config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
+    flatpak ptyxis spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
     polkit-gnome xdg-desktop-portal-gtk \
     fcitx5 fcitx5-chinese-addons fcitx5-pinyin-zhwiki fcitx5-rime rime-pinyin-simp fcitx5-gtk fcitx5-qt fcitx5-configtool
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
-  sudo cp -a /tmp/spinel-dev/foot/. /etc/xdg/foot/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo cp -a /tmp/spinel-dev/SpinelLight/. /usr/share/themes/SpinelLight/
@@ -186,8 +185,6 @@ rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.
 if [[ "${MODE}" == "full" ]]; then
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
-  rsync -avz -e "${SSH_CMD}" \
-    "${ROOT_DIR}/archiso/airootfs/etc/xdg/foot/" "${DEV_HOST}:/tmp/spinel-dev/foot/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/xdg-desktop-portal/" "${DEV_HOST}:/tmp/spinel-dev/portals/"
   rsync -avz -e "${SSH_CMD}" \

@@ -104,6 +104,7 @@ std::vector<std::string> split_exec_args(const std::string &exec_line) {
 
 bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
     if (is_terminal) return true;
+    if ((id == "foot" || id == "org.codeberg.dnkl.foot") && has_executable("ptyxis")) return true;
     static const std::set<std::string> hidden_ids = {
         "footclient",
         "foot-server",
@@ -184,7 +185,9 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
     if (is_hidden_utility_app(app.id, app.terminal)) return false;
 
     if (app.id == "thunar") app.name = "文件管理";
-    else if (app.id == "foot") app.name = "终端";
+    else if (app.id == "foot" || app.id == "ptyxis" || app.id == "org.gnome.Ptyxis" || app.id == "app.devsuite.Ptyxis") {
+        app.name = "终端";
+    }
     else if (app.id == "fcitx5-configtool") app.name = "输入法设置";
     else app.name = !name_zh.empty() ? name_zh : name_en;
 
@@ -273,8 +276,13 @@ void launch_desktop_app_id(const std::string &desktop_id) {
             auto args = split_exec_args(app.exec);
             if (args.empty()) return;
             if (app.terminal) {
-                args.insert(args.begin(), "-e");
-                args.insert(args.begin(), "foot");
+                if (has_executable("ptyxis")) {
+                    args.insert(args.begin(), "--");
+                    args.insert(args.begin(), "ptyxis");
+                } else {
+                    args.insert(args.begin(), "-e");
+                    args.insert(args.begin(), "foot");
+                }
             }
             // Prefer Wayland ozone & text-input-v3 IME for Chromium
             if (args[0].find("chromium") != std::string::npos || args[0].find("chrome") != std::string::npos) {

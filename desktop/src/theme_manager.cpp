@@ -352,6 +352,7 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
     append_app_log("[Theme] 切换主题 -> " + active.id + (active.is_light ? " (浅色)" : " (深色)"));
     sync_labwc_window_theme(active.is_light);
     sync_fcitx5_theme(active.is_light);
+    sync_terminal_theme(active.is_light);
     push_theme_state(state);
     native_shell_sync_theme(state);
 }
