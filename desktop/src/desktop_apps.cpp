@@ -176,7 +176,7 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
 
     if (type != "Application" || no_display || hidden || app.exec.empty()) return false;
     if (!only_show_in.empty() && only_show_in.find("GNOME") == std::string::npos &&
-        only_show_in.find("XFCE") == std::string::npos) {
+        only_show_in.find("SpinelOS") == std::string::npos) {
         return false;
     }
 

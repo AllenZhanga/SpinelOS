@@ -51,6 +51,8 @@ struct NativeShellState {
     // Top Bar
     GtkWindow *bar_win = nullptr;
     GtkWidget *bar_active_lbl = nullptr;
+    GtkWidget *bar_app_menus = nullptr;
+    std::string bar_menu_key;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_net_btn = nullptr;
     GtkWidget *bar_cc_btn = nullptr;
@@ -75,7 +77,9 @@ struct NativeShellState {
     int dock_width = 580;
 
     // Control Center
+    GtkWindow *cc_backdrop_win = nullptr;
     GtkWindow *cc_win = nullptr;
+    bool cc_was_active = false;
     GtkWidget *cc_net_val = nullptr;
     GtkWidget *cc_gpu_badge = nullptr;
     GtkWidget *cc_mem_val = nullptr;
@@ -748,6 +752,229 @@ gboolean on_clock_tick(gpointer user_data) {
     return G_SOURCE_CONTINUE;
 }
 
+struct TopBarMenuEntry {
+    const char *label;
+    std::string cmd;
+};
+
+GtkWidget *make_topbar_popover_menu(AppState *state,
+                                    const std::vector<TopBarMenuEntry> &entries) {
+    GtkWidget *pop = gtk_popover_new();
+    gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+
+    for (const auto &e : entries) {
+        if (!e.label) {
+            gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+            continue;
+        }
+        GtkWidget *b = gtk_button_new_with_label(e.label);
+        gtk_widget_add_css_class(b, "spinel-ctx-item");
+        GtkWidget *c = gtk_button_get_child(GTK_BUTTON(b));
+        if (GTK_IS_LABEL(c)) gtk_widget_set_halign(c, GTK_ALIGN_START);
+        g_object_set_data_full(G_OBJECT(b), "spinel-cmd", g_strdup(e.cmd.c_str()), g_free);
+        g_object_set_data(G_OBJECT(b), "spinel-pop", pop);
+        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer u) {
+            GtkWidget *p = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "spinel-pop"));
+            if (p) gtk_popover_popdown(GTK_POPOVER(p));
+            on_cmd_button_clicked(btn, u);
+        }), state);
+        gtk_box_append(GTK_BOX(box), b);
+    }
+
+    g_signal_connect(pop, "show", G_CALLBACK(+[](GtkWidget *, gpointer u) {
+        native_shell_set_cc_visible(static_cast<AppState *>(u), false);
+    }), state);
+
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    return pop;
+}
+
+void add_topbar_menu(NativeShellState *ns,
+                     const char *title,
+                     const std::vector<TopBarMenuEntry> &entries) {
+    if (!ns || !ns->bar_app_menus) return;
+    GtkWidget *mb = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(mb), FALSE);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), gtk_label_new(title));
+    gtk_widget_add_css_class(mb, "spinel-bar-menubtn");
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), make_topbar_popover_menu(ns->app_state, entries));
+    gtk_box_append(GTK_BOX(ns->bar_app_menus), mb);
+}
+
+void sync_top_bar_app_menus(NativeShellState *ns,
+                            const TrackedWindowInfo *active_win,
+                            std::string &out_display_name) {
+    if (!ns || !ns->bar_app_menus) return;
+
+    std::string profile = "finder";
+    uint64_t wid = 0;
+    out_display_name = "访达";
+
+    if (active_win) {
+        wid = active_win->id;
+        std::string hay = to_lower_copy(active_win->app_id + " " + active_win->title);
+        if (hay.find("系统设置") != std::string::npos || hay.find("settings") != std::string::npos) {
+            profile = "settings";
+            out_display_name = "系统设置";
+        } else if (hay.find("游戏与启动中心") != std::string::npos || hay.find("app-games") != std::string::npos) {
+            profile = "games";
+            out_display_name = "游戏中心";
+        } else if (hay.find("应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
+            profile = "store";
+            out_display_name = "应用商店";
+        } else if (hay.find("安装") != std::string::npos || hay.find("installer") != std::string::npos) {
+            profile = "installer";
+            out_display_name = "系统安装";
+        } else if (hay.find("chromium") != std::string::npos || hay.find("chrome") != std::string::npos ||
+                   hay.find("firefox") != std::string::npos) {
+            profile = "browser";
+            out_display_name = hay.find("firefox") != std::string::npos ? "Firefox" :
+                               (hay.find("chrome") != std::string::npos ? "Chrome" : "Chromium");
+        } else if (hay.find("foot") != std::string::npos || hay.find("terminal") != std::string::npos ||
+                   hay.find("终端") != std::string::npos) {
+            profile = "terminal";
+            out_display_name = "终端";
+        } else if (hay.find("thunar") != std::string::npos || hay.find("文件管理") != std::string::npos) {
+            profile = "files";
+            out_display_name = "文件管理";
+        } else if (hay.find("steam") != std::string::npos || hay.find("gamescope") != std::string::npos) {
+            profile = "steam";
+            out_display_name = hay.find("gamescope") != std::string::npos ? "主机大屏" : "Steam";
+        } else {
+            profile = "generic";
+            out_display_name = !active_win->title.empty() ? active_win->title :
+                               (!active_win->app_id.empty() ? active_win->app_id : "应用");
+        }
+    }
+
+    std::string key = profile + ":" + std::to_string(wid);
+    if (key == ns->bar_menu_key) return;
+    ns->bar_menu_key = key;
+
+    while (GtkWidget *child = gtk_widget_get_first_child(ns->bar_app_menus)) {
+        gtk_box_remove(GTK_BOX(ns->bar_app_menus), child);
+    }
+
+    std::string close_cmd = "window:close:" + std::to_string(wid);
+    std::string toggle_cmd = "window:toggle:" + std::to_string(wid);
+
+    if (profile == "finder") {
+        add_topbar_menu(ns, "文件", {
+            {"新建桌面文件夹", "desktop:new-folder"},
+            {"在文件管理中打开桌面", "desktop:open-folder"},
+            {nullptr, ""},
+            {"打开文件管理", "launch:files"},
+            {"打开终端", "launch:terminal"}
+        });
+        add_topbar_menu(ns, "显示", {
+            {"更换壁纸与主题...", "settings:open:appearance"},
+            {"显示器与缩放设置...", "settings:open:display"},
+            {"刷新桌面", "telemetry:refresh"}
+        });
+        add_topbar_menu(ns, "前往", {
+            {"游戏与启动中心", "games:open"},
+            {"应用商店", "store:open"},
+            {"浏览器", "launch:browser"},
+            {"Steam", "launch:steam"}
+        });
+    } else if (profile == "games") {
+        add_topbar_menu(ns, "游戏库", {
+            {"扫描本地 Steam 游戏", "steam:scan"},
+            {"启动 Steam 客户端", "launch:steam"},
+            {"启动主机大屏 (Gamescope)", "launch:steam-gamepadui"}
+        });
+        add_topbar_menu(ns, "性能", {
+            {"游戏性能与 MangoHud 设置...", "settings:open:perf"},
+            {"蓝牙手柄配对...", "settings:open:bt"}
+        });
+        add_topbar_menu(ns, "窗口", {
+            {"应用商店", "store:open"},
+            {nullptr, ""},
+            {"关闭游戏中心", close_cmd}
+        });
+    } else if (profile == "store") {
+        add_topbar_menu(ns, "商店", {
+            {"刷新应用目录", "store:refresh"},
+            {"游戏与启动中心", "games:open"}
+        });
+        add_topbar_menu(ns, "网络", {
+            {"网络与代理设置...", "settings:open:wifi"}
+        });
+        add_topbar_menu(ns, "窗口", {
+            {"关闭应用商店", close_cmd}
+        });
+    } else if (profile == "settings") {
+        add_topbar_menu(ns, "设置", {
+            {"Wi-Fi 与网络代理", "settings:open:wifi"},
+            {"蓝牙与手柄", "settings:open:bt"},
+            {"显示器分辨率", "settings:open:display"},
+            {"游戏性能优化", "settings:open:perf"},
+            {"外观主题与输入法", "settings:open:appearance"},
+            {"系统日志与排障", "settings:open:logs"}
+        });
+        add_topbar_menu(ns, "窗口", {
+            {"关闭系统设置", close_cmd}
+        });
+    } else if (profile == "browser") {
+        add_topbar_menu(ns, "文件", {
+            {"新建浏览器窗口", "launch:browser"},
+            {"打开文件管理", "launch:files"},
+            {nullptr, ""},
+            {"关闭当前窗口", close_cmd}
+        });
+        add_topbar_menu(ns, "网络与输入", {
+            {"网络代理设置...", "settings:open:wifi"},
+            {"中文输入法设置...", "settings:open:appearance"}
+        });
+    } else if (profile == "terminal") {
+        add_topbar_menu(ns, "Shell", {
+            {"新建终端窗口", "launch:terminal"},
+            {"打开文件管理", "launch:files"},
+            {nullptr, ""},
+            {"关闭当前终端", close_cmd}
+        });
+        add_topbar_menu(ns, "工具", {
+            {"网络代理设置...", "settings:open:wifi"},
+            {"查看系统日志", "settings:open:logs"}
+        });
+    } else if (profile == "files") {
+        add_topbar_menu(ns, "文件", {
+            {"新建文件管理窗口", "launch:files"},
+            {"打开桌面文件夹", "desktop:open-folder"},
+            {"打开终端", "launch:terminal"},
+            {nullptr, ""},
+            {"关闭当前窗口", close_cmd}
+        });
+        add_topbar_menu(ns, "前往", {
+            {"游戏与启动中心", "games:open"},
+            {"应用商店", "store:open"}
+        });
+    } else if (profile == "steam") {
+        add_topbar_menu(ns, "Steam", {
+            {"打开游戏中心", "games:open"},
+            {"启动主机大屏 (Gamescope)", "launch:steam-gamepadui"},
+            {nullptr, ""},
+            {"关闭当前窗口", close_cmd}
+        });
+        add_topbar_menu(ns, "性能", {
+            {"MangoHud 与锁帧设置...", "settings:open:perf"},
+            {"蓝牙手柄配对...", "settings:open:bt"}
+        });
+    } else {
+        add_topbar_menu(ns, "应用", {
+            {"最小化 / 切换", toggle_cmd},
+            {"关闭当前窗口", close_cmd}
+        });
+        add_topbar_menu(ns, "前往", {
+            {"游戏与启动中心", "games:open"},
+            {"应用商店", "store:open"},
+            {"系统设置...", "settings:open:display"}
+        });
+    }
+}
+
 void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     AppState *state = ns->app_state;
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
@@ -773,25 +1000,39 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_set_halign(left, GTK_ALIGN_START);
     gtk_widget_set_valign(left, GTK_ALIGN_CENTER);
 
-    GtkWidget *brand_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "games:open");
-    gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 游戏与应用中心");
+    GtkWidget *brand_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(brand_btn), FALSE);
+    gtk_widget_add_css_class(brand_btn, "spinel-bar-menubtn");
+    gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 系统菜单");
     GtkWidget *gem_da = gtk_drawing_area_new();
     gtk_widget_set_size_request(gem_da, 16, 16);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, nullptr, nullptr);
-    gtk_button_set_child(GTK_BUTTON(brand_btn), gem_da);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(brand_btn), gem_da);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
+        {"关于 SpinelOS", "settings:open:appearance"},
+        {"系统设置...", "settings:open:display"},
+        {nullptr, ""},
+        {"游戏与启动中心", "games:open"},
+        {"应用商店", "store:open"},
+        {"查看系统日志", "settings:open:logs"},
+        {nullptr, ""},
+        {"重新启动...", "power:reboot"},
+        {"关机...", "power:shutdown"}
+    }));
 
     ns->bar_active_lbl = gtk_label_new("访达");
     gtk_widget_add_css_class(ns->bar_active_lbl, "spinel-bar-active");
     gtk_label_set_ellipsize(GTK_LABEL(ns->bar_active_lbl), PANGO_ELLIPSIZE_END);
-    gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 28);
+    gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 24);
+
+    ns->bar_app_menus = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 1);
 
     gtk_box_append(GTK_BOX(left), brand_btn);
     gtk_box_append(GTK_BOX(left), ns->bar_active_lbl);
-    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "游戏库", "spinel-bar-btn", "games:open"));
-    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "应用商店", "spinel-bar-btn", "store:open"));
-    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "Steam", "spinel-bar-btn", "launch:steam"));
-    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "主机大屏", "spinel-bar-btn", "launch:steam-gamepadui"));
-    gtk_box_append(GTK_BOX(left), make_cmd_button(state, "外观", "spinel-bar-btn", "settings:open:appearance"));
+    gtk_box_append(GTK_BOX(left), ns->bar_app_menus);
+
+    std::string init_name;
+    sync_top_bar_app_menus(ns, nullptr, init_name);
 
     GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
     gtk_widget_set_halign(right, GTK_ALIGN_END);
@@ -818,28 +1059,10 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
                                    reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Power)), nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(power_btn), power_da);
 
-    GtkWidget *power_pop = gtk_popover_new();
-    gtk_widget_add_css_class(power_pop, "spinel-ctx-popover");
-    gtk_popover_set_has_arrow(GTK_POPOVER(power_pop), FALSE);
-    GtkWidget *pbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    auto add_power_entry = [&](const char *lbl, const char *cmd) {
-        GtkWidget *b = gtk_button_new_with_label(lbl);
-        gtk_widget_add_css_class(b, "spinel-ctx-item");
-        GtkWidget *c = gtk_button_get_child(GTK_BUTTON(b));
-        if (GTK_IS_LABEL(c)) gtk_widget_set_halign(c, GTK_ALIGN_START);
-        g_object_set_data_full(G_OBJECT(b), "spinel-cmd", g_strdup(cmd), g_free);
-        g_object_set_data(G_OBJECT(b), "spinel-pop", power_pop);
-        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer u) {
-            GtkWidget *pop = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "spinel-pop"));
-            if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
-            on_cmd_button_clicked(btn, u);
-        }), state);
-        gtk_box_append(GTK_BOX(pbox), b);
-    };
-    add_power_entry("重新启动...", "power:reboot");
-    add_power_entry("关机...", "power:shutdown");
-    gtk_popover_set_child(GTK_POPOVER(power_pop), pbox);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(power_btn), power_pop);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(power_btn), make_topbar_popover_menu(state, {
+        {"重新启动...", "power:reboot"},
+        {"关机...", "power:shutdown"}
+    }));
 
     ns->bar_clock_lbl = gtk_label_new("--:--");
     gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
@@ -1346,6 +1569,9 @@ void on_dock_leave(GtkEventControllerMotion *, gpointer user_data) {
 
 void on_dock_click(GtkGestureClick *gesture, int, double x, double y, gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
+    if (ns && ns->app_state && ns->cc_win && gtk_widget_get_visible(GTK_WIDGET(ns->cc_win))) {
+        native_shell_set_cc_visible(ns->app_state, false);
+    }
     int idx = hit_test_dock(ns, x, y);
     const DockItem *item = dock_item_at(ns, idx);
     if (!item) return;
@@ -1612,6 +1838,39 @@ GtkWidget *make_cc_slider_card(NativeShellState *ns,
 
 void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     AppState *state = ns->app_state;
+
+    // Transparent backdrop layer (strictly below OVERLAY Control Center) to dismiss on click outside
+    GtkWindow *bd = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(bd, "SpinelControlCenterBackdrop");
+    gtk_widget_add_css_class(GTK_WIDGET(bd), "spinel-transparent");
+    gtk_layer_init_for_window(bd);
+    gtk_layer_set_namespace(bd, "spinel-cc-backdrop");
+    gtk_layer_set_layer(bd, GTK_LAYER_SHELL_LAYER_TOP);
+    gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_margin(bd, GTK_LAYER_SHELL_EDGE_TOP, 28);
+    gtk_layer_set_exclusive_zone(bd, -1);
+    gtk_layer_set_keyboard_mode(bd, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    g_signal_connect(bd, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n && n->app_state) native_shell_set_cc_visible(n->app_state, false);
+        return TRUE;
+    }), ns);
+    GtkWidget *bd_area = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_hexpand(bd_area, TRUE);
+    gtk_widget_set_vexpand(bd_area, TRUE);
+    GtkGesture *bd_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bd_click), 0);
+    g_signal_connect(bd_click, "pressed", G_CALLBACK(+[](GtkGestureClick *, int, double, double, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n && n->app_state) native_shell_set_cc_visible(n->app_state, false);
+    }), ns);
+    gtk_widget_add_controller(bd_area, GTK_EVENT_CONTROLLER(bd_click));
+    gtk_window_set_child(bd, bd_area);
+    ns->cc_backdrop_win = bd;
+
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelControlCenter");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
@@ -1625,11 +1884,20 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 34);
     gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
-    g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *w, gpointer d) -> gboolean {
+    g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
         auto *n = static_cast<NativeShellState *>(d);
-        gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
-        if (n && n->bar_cc_btn) gtk_widget_remove_css_class(n->bar_cc_btn, "cc-open");
+        if (n && n->app_state) native_shell_set_cc_visible(n->app_state, false);
         return TRUE;
+    }), ns);
+    g_signal_connect(win, "notify::is-active", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        auto *w = GTK_WINDOW(obj);
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n) return;
+        if (gtk_window_is_active(w)) {
+            n->cc_was_active = true;
+        } else if (n->cc_was_active && gtk_widget_get_visible(GTK_WIDGET(w))) {
+            native_shell_set_cc_visible(n->app_state, false);
+        }
     }), ns);
 
     GtkEventController *key = gtk_event_controller_key_new();
@@ -1978,17 +2246,19 @@ void native_shell_sync_windows(AppState *state) {
     NativeShellState *ns = state->native;
     auto windows = list_tracked_windows();
 
-    std::string active_name = "访达";
+    const TrackedWindowInfo *active_win = nullptr;
     for (const auto &w : windows) {
         if (w.activated) {
-            active_name = !w.title.empty() ? w.title : (!w.app_id.empty() ? w.app_id : "应用");
+            active_win = &w;
             break;
         }
     }
-    if (active_name == "访达" && !windows.empty()) {
-        const auto &w = windows.front();
-        active_name = !w.title.empty() ? w.title : (!w.app_id.empty() ? w.app_id : "应用");
+    if (!active_win && !windows.empty()) {
+        active_win = &windows.front();
     }
+
+    std::string active_name = "访达";
+    sync_top_bar_app_menus(ns, active_win, active_name);
     if (ns->bar_active_lbl) gtk_label_set_text(GTK_LABEL(ns->bar_active_lbl), active_name.c_str());
 
     rebuild_dock_items(ns, windows);
@@ -2060,6 +2330,11 @@ void native_shell_sync_perf(AppState *state) {
 void native_shell_set_cc_visible(AppState *state, bool visible) {
     if (!state || !state->native || !state->native->cc_win) return;
     NativeShellState *ns = state->native;
+    ns->cc_was_active = false;
+    if (ns->cc_backdrop_win) {
+        gtk_widget_set_visible(GTK_WIDGET(ns->cc_backdrop_win), visible ? TRUE : FALSE);
+        if (visible) gtk_window_present(ns->cc_backdrop_win);
+    }
     gtk_widget_set_visible(GTK_WIDGET(ns->cc_win), visible ? TRUE : FALSE);
     if (ns->bar_cc_btn) {
         if (visible) gtk_widget_add_css_class(ns->bar_cc_btn, "cc-open");
