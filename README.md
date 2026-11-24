@@ -9,6 +9,7 @@
 [![Arch Linux Base](https://img.shields.io/badge/Base-Arch%20Linux-1793D1?logo=archlinux&logoColor=white)](https://archlinux.org/)
 [![Wayland Compositor](https://img.shields.io/badge/Wayland-labwc%20%2B%20GTK4%20Layer--Shell-38BDF8)](https://labwc.github.io/)
 [![C++20](https://img.shields.io/badge/Desktop%20Shell-C%2B%2B20%20%2B%20WebKitGTK%206-6366F1)](desktop/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg)](LICENSE)
 [![GitHub Issues](https://img.shields.io/github/issues/AllenZhanga/SpinelOS)](https://github.com/AllenZhanga/SpinelOS/issues)
 
 [核心特性](#核心特性) · [架构设计](#为什么不用传统桌面) · [快速上手](#快速体验与安装) · [自构建 ISO](#从源码构建-iso) · [English Overview](#english-overview)
@@ -174,3 +175,10 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 1. 运行环境（物理机型号或 VMware / QEMU 配置，以及 GPU 型号）
 2. 问题复现步骤
 3. 在「系统设置 → 系统日志」或 `/tmp/spinel-shell.log`、`~/.local/state/spinelos/apps.log` 捕获的相关日志
+
+---
+
+## 开源许可 (License)
+
+- 本仓库中的 **Spinel Shell 源码、UI 前端、内置主题配置与构建/安装脚本** 基于 [MIT License](LICENSE) 开源。
+- 构建生成的系统镜像及其中集成的第三方开源或专有组件（如 Arch Linux 基础包、Linux 内核、`labwc`、Mesa、NVIDIA 驱动、Ptyxis、Fcitx5、Steam 客户端等）各自遵循其原始开源或最终用户许可协议。
