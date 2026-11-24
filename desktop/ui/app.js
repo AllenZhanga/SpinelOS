@@ -222,6 +222,38 @@
     return "app";
   }
 
+  function findAppIconUri(keys) {
+    if (!Array.isArray(keys) || keys.length === 0 || desktopApps.length === 0) return "";
+    const lowerKeys = keys.map((k) => String(k || "").trim().toLowerCase()).filter(Boolean);
+    if (lowerKeys.length === 0) return "";
+    for (const k of lowerKeys) {
+      const exact = desktopApps.find((a) => a.id.toLowerCase() === k && a.icon_uri);
+      if (exact) return exact.icon_uri;
+    }
+    for (const k of lowerKeys) {
+      const hit = desktopApps.find((a) => {
+        if (!a.icon_uri) return false;
+        const hay = `${a.id} ${a.icon} ${a.name}`.toLowerCase();
+        return hay.includes(k);
+      });
+      if (hit) return hit.icon_uri;
+    }
+    return "";
+  }
+
+  function fillIconContainer(el, iconUri, fallbackKind, altText) {
+    el.innerHTML = "";
+    if (iconUri) {
+      const img = document.createElement("img");
+      img.src = iconUri;
+      img.alt = altText || "";
+      img.onerror = () => { el.innerHTML = makeSvgIcon(fallbackKind); };
+      el.appendChild(img);
+    } else {
+      el.innerHTML = makeSvgIcon(fallbackKind);
+    }
+  }
+
   /* ---------------- 1. Desktop Shortcuts & Wallpaper ---------------- */
   function renderDesktopShortcuts() {
     const grid = document.getElementById("desktop-shortcuts");
@@ -229,16 +261,16 @@
     grid.innerHTML = "";
 
     const baseShortcuts = [
-      { label: "游戏中心", cmd: "games:open", kind: "games" },
-      { label: "Steam", cmd: "launch:steam", kind: "steam" },
-      { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad" },
-      { label: "Chromium", cmd: "launch:browser", kind: "browser" },
-      { label: "文件管理", cmd: "launch:files", kind: "files" },
-      { label: "终端", cmd: "launch:terminal", kind: "terminal" },
-      { label: "系统设置", cmd: "settings:open:display", kind: "settings" }
+      { label: "游戏中心", cmd: "games:open", kind: "games", appKeys: [] },
+      { label: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"] },
+      { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [] },
+      { label: "Chromium", cmd: "launch:browser", kind: "browser", appKeys: ["chromium", "google-chrome", "firefox"] },
+      { label: "文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"] },
+      { label: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["foot"] },
+      { label: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [] }
     ];
     if (isLiveEnv) {
-      baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer" });
+      baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer", appKeys: [] });
     }
 
     baseShortcuts.forEach((sc) => {
@@ -247,7 +279,7 @@
       btn.setAttribute("data-cmd", sc.cmd);
       const icon = document.createElement("div");
       icon.className = "shortcut-icon";
-      icon.innerHTML = makeSvgIcon(sc.kind);
+      fillIconContainer(icon, findAppIconUri(sc.appKeys), sc.kind, sc.label);
       const label = document.createElement("span");
       label.className = "shortcut-label";
       label.textContent = sc.label;
@@ -260,16 +292,8 @@
       btn.className = "shortcut-item";
       btn.setAttribute("data-cmd", `steam:launch:${g.appid}`);
       const icon = document.createElement("div");
-      icon.className = "shortcut-icon";
-      if (g.cover_uri) {
-        const img = document.createElement("img");
-        img.src = g.cover_uri;
-        img.alt = g.name;
-        img.onerror = () => { icon.innerHTML = makeSvgIcon("steam"); };
-        icon.appendChild(img);
-      } else {
-        icon.innerHTML = makeSvgIcon("steam");
-      }
+      icon.className = "shortcut-icon is-cover";
+      fillIconContainer(icon, g.cover_uri || findAppIconUri(["steam"]), "steam", g.name);
       const label = document.createElement("span");
       label.className = "shortcut-label";
       label.textContent = g.name;
@@ -305,22 +329,22 @@
     if (!pinnedEl || !runningEl) return;
 
     const pinned = [
-      { title: "游戏与应用中心", cmd: "games:open", kind: "games", match: ["游戏与启动中心"] },
-      { title: "Steam", cmd: "launch:steam", kind: "steam", match: ["steam"] },
-      { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", match: ["gamescope"] },
-      { title: "Chromium 浏览器", cmd: "launch:browser", kind: "browser", match: ["chromium"] },
-      { title: "Thunar 文件管理", cmd: "launch:files", kind: "files", match: ["thunar"] },
-      { title: "Foot 终端", cmd: "launch:terminal", kind: "terminal", match: ["foot"] },
-      { title: "系统设置", cmd: "settings:open:display", kind: "settings", match: ["spinelos 系统设置"] }
+      { title: "游戏与应用中心", cmd: "games:open", kind: "games", appKeys: [], match: ["游戏与启动中心"] },
+      { title: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"], match: ["steam"] },
+      { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [], match: ["gamescope"] },
+      { title: "Chromium", cmd: "launch:browser", kind: "browser", appKeys: ["chromium", "google-chrome", "firefox"], match: ["chromium"] },
+      { title: "Thunar 文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"], match: ["thunar"] },
+      { title: "Foot 终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["foot"], match: ["foot"] },
+      { title: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [], match: ["spinelos 系统设置"] }
     ];
     if (isLiveEnv) {
-      pinned.push({ title: "安装 SpinelOS 到硬盘", cmd: "installer:open", kind: "installer", match: ["安装 spinel"] });
+      pinned.push({ title: "安装 SpinelOS 到硬盘", cmd: "installer:open", kind: "installer", appKeys: [], match: ["安装 spinel"] });
     }
 
     pinnedEl.innerHTML = "";
     const matchedIds = new Set();
 
-    const createDockItem = (label, cmd, kind, win, closable) => {
+    const createDockItem = (label, cmd, iconUri, fallbackKind, win, closable) => {
       const btn = document.createElement("button");
       btn.className = "dock-item" + (win && win.activated && !win.minimized ? " active" : "") + (win && win.minimized ? " minimized" : "");
       btn.setAttribute("data-cmd", cmd);
@@ -332,7 +356,7 @@
 
       const iconWrap = document.createElement("span");
       iconWrap.className = "dock-icon";
-      iconWrap.innerHTML = makeSvgIcon(kind);
+      fillIconContainer(iconWrap, iconUri, fallbackKind, label);
 
       btn.append(tip, iconWrap);
       if (win) {
@@ -352,8 +376,8 @@
     pinned.forEach((p) => {
       const win = findMatchingWindow(p.match);
       if (win) matchedIds.add(win.id);
-      const label = win ? `${p.title}` : p.title;
-      pinnedEl.appendChild(createDockItem(label, win ? `window:toggle:${win.id}` : p.cmd, p.kind, win, false));
+      const iconUri = findAppIconUri(p.appKeys);
+      pinnedEl.appendChild(createDockItem(p.title, win ? `window:toggle:${win.id}` : p.cmd, iconUri, p.kind, win, false));
     });
 
     const extraWins = trackedWindows.filter((w) => !matchedIds.has(w.id));
@@ -363,7 +387,8 @@
     extraWins.forEach((w) => {
       const label = w.title || w.app_id || "应用窗口";
       const kind = matchAppKind(`${w.app_id} ${w.title}`);
-      runningEl.appendChild(createDockItem(label, `window:toggle:${w.id}`, kind, w, true));
+      const iconUri = findAppIconUri([w.app_id, w.title]);
+      runningEl.appendChild(createDockItem(label, `window:toggle:${w.id}`, iconUri, kind, w, true));
     });
 
     const totalItems = pinned.length + extraWins.length;
@@ -571,6 +596,8 @@
 
   window.__spinelDesktopApps = (apps) => {
     desktopApps = Array.isArray(apps) ? apps : [];
+    renderDesktopShortcuts();
+    renderDock();
     renderLaunchpadApps();
   };
 

@@ -31,13 +31,21 @@ std::string resolve_icon_uri(const std::string &icon) {
         return "file://" + icon;
     }
 
+    fs::path local_icons = fs::path(home_dir()) / ".local/share/icons/hicolor";
     const std::vector<fs::path> search_dirs = {
+        local_icons / "scalable/apps",
+        local_icons / "256x256/apps",
+        local_icons / "128x128/apps",
         "/usr/share/icons/hicolor/scalable/apps",
+        "/usr/share/icons/hicolor/512x512/apps",
         "/usr/share/icons/hicolor/256x256/apps",
         "/usr/share/icons/hicolor/128x128/apps",
         "/usr/share/icons/hicolor/64x64/apps",
         "/usr/share/icons/hicolor/48x48/apps",
         "/usr/share/icons/Adwaita/scalable/apps",
+        "/usr/share/icons/Adwaita/scalable/places",
+        "/usr/share/icons/Adwaita/256x256/apps",
+        "/usr/share/icons/Adwaita/128x128/apps",
         "/usr/share/pixmaps"
     };
     const std::vector<std::string> exts = {".svg", ".png", ""};
