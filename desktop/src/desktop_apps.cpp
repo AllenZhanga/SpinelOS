@@ -102,6 +102,39 @@ std::vector<std::string> split_exec_args(const std::string &exec_line) {
     return args;
 }
 
+bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
+    if (is_terminal) return true;
+    static const std::set<std::string> hidden_ids = {
+        "footclient",
+        "foot-server",
+        "thunar-settings",
+        "thunar-bulk-rename",
+        "org.fcitx.fcitx5-migrator",
+        "org.fcitx.Fcitx5",
+        "org.fcitx.fcitx5-config-qt",
+        "org.fcitx.fcitx5-qt5-gui-wrapper",
+        "org.fcitx.fcitx5-qt6-gui-wrapper",
+        "fcitx5-wayland-launcher",
+        "kcm_fcitx5",
+        "kbd-layout-viewer5",
+        "qv4l2",
+        "qvidcap",
+        "lstopo",
+        "stoken-gui",
+        "stoken-gui-small",
+        "lftp",
+        "vim",
+        "xfce4-about",
+        "avahi-discover",
+        "bssh",
+        "bvnc",
+        "cmake-gui",
+        "xterm",
+        "uxterm"
+    };
+    return hidden_ids.count(id) > 0;
+}
+
 bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
     std::ifstream ifs(path);
     if (!ifs.is_open()) return false;
@@ -148,7 +181,13 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
     }
 
     app.id = path.stem().string();
-    app.name = !name_zh.empty() ? name_zh : name_en;
+    if (is_hidden_utility_app(app.id, app.terminal)) return false;
+
+    if (app.id == "thunar") app.name = "文件管理";
+    else if (app.id == "foot") app.name = "终端";
+    else if (app.id == "fcitx5-configtool") app.name = "输入法设置";
+    else app.name = !name_zh.empty() ? name_zh : name_en;
+
     if (app.name.empty()) app.name = app.id;
     app.icon_path = resolve_icon_path(app.icon_name);
     app.icon_uri = app.icon_path.empty() ? "" : ("file://" + app.icon_path);

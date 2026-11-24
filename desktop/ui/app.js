@@ -112,12 +112,18 @@
         </radialGradient>`,
       files: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#7dd3fc"/>
-          <stop offset="100%" stop-color="#38bdf8"/>
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="55%" stop-color="#0ea5e9"/>
+          <stop offset="100%" stop-color="#0369a1"/>
         </linearGradient>
-        <linearGradient id="${uid}_face" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#2563eb"/>
-          <stop offset="100%" stop-color="#1d4ed8"/>
+        <linearGradient id="${uid}_pocket" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#dbeafe"/>
+        </linearGradient>`,
+      ime: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#60a5fa"/>
+          <stop offset="100%" stop-color="#4f46e5"/>
         </linearGradient>`,
       terminal: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
@@ -240,10 +246,13 @@
         <polygon points="32,32 19,45 28,28" fill="#ffffff"/>
         <circle cx="32" cy="32" r="2.6" fill="#e2e8f0"/>`,
       files: `
-        <path d="M4 18a14 14 0 0 1 14-14h15.5c-2.5 8-3.5 18-3.5 28h7.5c0 9-3 18-6 28H18A14 14 0 0 1 4 46V18z" fill="url(#${uid}_face)"/>
-        <path d="M33.5 4c-2.5 8-3.5 18-3.5 28h7.5c0 9-3 18-6 28" fill="none" stroke="rgba(15,23,42,0.22)" stroke-width="1.8"/>
-        <path d="M21 21v7M43 21v7" stroke="#0f172a" stroke-width="3.4" stroke-linecap="round"/>
-        <path d="M18.5 41.5c4.5 5.2 22.5 5.2 27 0" fill="none" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>`,
+        <path d="M12 20a5 5 0 0 1 5-5h9.5l3.8 4.2H47a5 5 0 0 1 5 5V44a5 5 0 0 1-5 5H17a5 5 0 0 1-5-5V20z" fill="rgba(255,255,255,0.42)"/>
+        <rect x="16" y="19.5" width="32" height="10" rx="2.5" fill="rgba(255,255,255,0.72)"/>
+        <rect x="12" y="23" width="40" height="26" rx="6" fill="url(#${uid}_pocket)"/>
+        <path d="M21 32h22M21 38.5h15" stroke="#0284c7" stroke-width="2.8" stroke-linecap="round"/>`,
+      ime: `
+        <rect x="12" y="14" width="40" height="36" rx="9" fill="rgba(255,255,255,0.22)" stroke="rgba(255,255,255,0.9)" stroke-width="2.2"/>
+        <text x="32" y="39" text-anchor="middle" font-size="22" font-weight="700" fill="#ffffff" font-family="Noto Sans CJK SC, sans-serif">文</text>`,
       terminal: `
         <rect x="6" y="7" width="52" height="50" rx="11" fill="url(#${uid}_scr)"/>
         <path d="M16 23l9 7-9 7" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -342,8 +351,9 @@
     if (s.includes("qbittorrent")) return "qbittorrent";
     if (s.includes("gimp")) return "gimp";
     if (s.includes("browser")) return "browser";
-    if (s.includes("thunar") || s.includes("files")) return "files";
-    if (s.includes("foot") || s.includes("terminal")) return "terminal";
+    if (s.includes("thunar") || s.includes("files") || s.includes("文件管理")) return "files";
+    if (s.includes("foot") || s.includes("terminal") || s.includes("终端")) return "terminal";
+    if (s.includes("fcitx") || s.includes("输入法")) return "ime";
     if (s.includes("应用商店") || s.includes("app-store")) return "store";
     if (s.includes("游戏与启动中心") || s.includes("app-games")) return "games";
     if (s.includes("系统设置") || s.includes("settings")) return "settings";

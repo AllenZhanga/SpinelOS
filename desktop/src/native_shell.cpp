@@ -384,29 +384,33 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
         cairo_fill(cr);
         cairo_restore(cr);
     } else if (kind == "files") {
-        // macOS Finder/Files inspired two-tone rounded folder card
-        cairo_rounded_rect(cr, 11, 14, 22, 10, 4.5);
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.88);
+        // Generic layered folder card file manager icon
+        cairo_rounded_rect(cr, 11, 14, 21, 10, 4.5);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.45);
         cairo_fill(cr);
 
-        cairo_pattern_t *folder = cairo_pattern_create_linear(11, 20, 53, 50);
-        set_rgb_hex(folder, 0.0, 0xEFF6FF, 0.96);
-        set_rgb_hex(folder, 1.0, 0xDBEAFE, 0.94);
-        cairo_rounded_rect(cr, 11, 20, 42, 30, 7.5);
+        cairo_rounded_rect(cr, 15, 19, 34, 9, 2.5);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.75);
+        cairo_fill(cr);
+
+        cairo_pattern_t *folder = cairo_pattern_create_linear(11, 22, 53, 50);
+        set_rgb_hex(folder, 0.0, 0xFFFFFF, 0.98);
+        set_rgb_hex(folder, 1.0, 0xDBEAFE, 0.96);
+        cairo_rounded_rect(cr, 11, 22, 42, 28, 7.0);
         cairo_set_source(cr, folder);
         cairo_fill_preserve(cr);
         cairo_pattern_destroy(folder);
 
-        cairo_set_source_rgba(cr, 0.06, 0.35, 0.72, 0.22);
+        cairo_set_source_rgba(cr, 0.06, 0.35, 0.72, 0.20);
         cairo_set_line_width(cr, 1.4);
         cairo_stroke(cr);
 
-        cairo_set_source_rgba(cr, 0.01, 0.52, 0.78, 0.85);
+        cairo_set_source_rgba(cr, 0.01, 0.52, 0.78, 0.88);
         cairo_set_line_width(cr, 2.6);
-        cairo_move_to(cr, 21, 31);
-        cairo_line_to(cr, 43, 31);
-        cairo_move_to(cr, 21, 39);
-        cairo_line_to(cr, 35, 39);
+        cairo_move_to(cr, 20.5, 32.5);
+        cairo_line_to(cr, 43.5, 32.5);
+        cairo_move_to(cr, 20.5, 39.5);
+        cairo_line_to(cr, 35.5, 39.5);
         cairo_stroke(cr);
     } else if (kind == "terminal") {
         // macOS Terminal sleek dark screen inside metallic squircle frame
