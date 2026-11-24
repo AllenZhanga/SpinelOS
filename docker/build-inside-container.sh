@@ -17,9 +17,13 @@ cmake --build "${BUILD_DIR}" -j"$(nproc)"
 echo "[2/5] Preparing ArchISO profile from releng..."
 cp -r /usr/share/archiso/configs/releng "${PROFILE_DIR}"
 
-# Ensure [multilib] is enabled and disable seccomp sandbox for containerized/Rosetta builds
+# Ensure [multilib] is enabled, enable parallel downloads, and disable seccomp sandbox
 if ! grep -q '^DisableSandboxSyscalls' "${PROFILE_DIR}/pacman.conf"; then
   sed -i '/^\[options\]/a DisableSandboxSyscalls' "${PROFILE_DIR}/pacman.conf"
+fi
+sed -i 's/^#*\s*ParallelDownloads\s*=.*/ParallelDownloads = 10/' "${PROFILE_DIR}/pacman.conf"
+if ! grep -q '^ParallelDownloads' "${PROFILE_DIR}/pacman.conf"; then
+  sed -i '/^\[options\]/a ParallelDownloads = 10' "${PROFILE_DIR}/pacman.conf"
 fi
 if ! grep -q '^\[multilib\]' "${PROFILE_DIR}/pacman.conf"; then
   printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> "${PROFILE_DIR}/pacman.conf"
