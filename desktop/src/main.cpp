@@ -1,21 +1,27 @@
 #include "app_state.hpp"
-#include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
-#include "installer.hpp"
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
 #include "theme_manager.hpp"
+
+#if SPINEL_HAS_WEBKIT
+#include "app_store.hpp"
+#include "installer.hpp"
+#include <malloc.h>
+#include <webkit/webkit.h>
+#else
 #include "window_tracker.hpp"
+#endif
 
 #include <gtk/gtk.h>
-#include <webkit/webkit.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -23,6 +29,35 @@ namespace fs = std::filesystem;
 namespace {
 
 GtkApplication *g_app = nullptr;
+
+void notify_dbus_action(const char *bus_name, const char *obj_path, const char *action_name) {
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if (!bus) return;
+    GVariantBuilder empty_params;
+    g_variant_builder_init(&empty_params, G_VARIANT_TYPE("av"));
+    GVariantBuilder empty_platform;
+    g_variant_builder_init(&empty_platform, G_VARIANT_TYPE("a{sv}"));
+    g_dbus_connection_call(
+        bus,
+        bus_name,
+        obj_path,
+        "org.gtk.Actions",
+        "Activate",
+        g_variant_new("(s@av@a{sv})",
+                      action_name,
+                      g_variant_builder_end(&empty_params),
+                      g_variant_builder_end(&empty_platform)),
+        nullptr,
+        G_DBUS_CALL_FLAGS_NO_AUTO_START,
+        1000,
+        nullptr,
+        nullptr,
+        nullptr
+    );
+    g_object_unref(bus);
+}
+
+#if SPINEL_HAS_WEBKIT
 
 struct AppWindowSlotCtx {
     AppState *state = nullptr;
@@ -43,14 +78,14 @@ void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer use
 
 void on_webview_load_failed(WebKitWebView *, WebKitLoadEvent, gchar *uri, GError *err, gpointer) {
     std::string msg = std::string("WebKit load-failed (") + (uri ? uri : "") + "): " + (err ? err->message : "unknown");
-    std::fprintf(stderr, "[spinel-shell] %s\n", msg.c_str());
+    std::fprintf(stderr, "[spinel-webui] %s\n", msg.c_str());
     append_app_log("[WebKit] " + msg);
 }
 
 void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReason reason, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
     std::string msg = "WebKitWebProcess 渲染进程异常终止 (reason=" + std::to_string(static_cast<int>(reason)) + ")";
-    std::fprintf(stderr, "[spinel-shell] %s\n", msg.c_str());
+    std::fprintf(stderr, "[spinel-webui] %s\n", msg.c_str());
     append_app_log("[WebKit] " + msg);
     if (state && !state->shutting_down.load()) {
         open_native_log_window(state, msg + "。可查看下方日志与环境参数定位原因。");
@@ -58,6 +93,14 @@ void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReaso
 }
 
 WebKitWebView *create_configured_webview(AppState *state) {
+    static bool cache_configured = false;
+    if (!cache_configured) {
+        if (WebKitWebContext *def_ctx = webkit_web_context_get_default()) {
+            webkit_web_context_set_cache_model(def_ctx, WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
+        }
+        cache_configured = true;
+    }
+
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
     ThemeSpec active = get_active_theme();
@@ -100,7 +143,7 @@ gboolean on_app_window_close_request(GtkWindow *win, gpointer user_data) {
             return TRUE;  // Keep alive while disk install / package install runs
         }
     }
-    return FALSE;  // Destroy window & terminate its WebKitWebProcess to reclaim RAM
+    return FALSE;  // Destroy window & reclaim RAM
 }
 
 void on_app_window_destroy(GtkWidget *, gpointer user_data) {
@@ -110,6 +153,7 @@ void on_app_window_destroy(GtkWidget *, gpointer user_data) {
         if (ctx->view_slot) *ctx->view_slot = nullptr;
         delete ctx;
     }
+    malloc_trim(0);
 }
 
 void ensure_app_window(AppState *state,
@@ -131,7 +175,7 @@ void ensure_app_window(AppState *state,
         WebKitWebView *view = create_configured_webview(state);
         gtk_window_set_child(win, GTK_WIDGET(view));
         std::string uri = resolve_ui_uri(query);
-        std::fprintf(stderr, "[spinel-shell] Opening app window: %s -> %s\n", title, uri.c_str());
+        std::fprintf(stderr, "[spinel-webui] Opening app window: %s -> %s\n", title, uri.c_str());
         webkit_web_view_load_uri(view, uri.c_str());
 
         *win_slot = win;
@@ -182,8 +226,46 @@ void open_store_window(AppState *state) {
     }
 }
 
+void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    if (!jsc_value_is_string(value)) return;
+    g_autofree char *msg = jsc_value_to_string(value);
+    if (msg) {
+        handle_shell_command(state, msg);
+    }
+}
+
+#else
+
+std::string resolve_webui_bin() {
+    std::error_code ec;
+    fs::path self_dir = fs::read_symlink("/proc/self/exe", ec).parent_path();
+    if (!self_dir.empty() && fs::exists(self_dir / "spinel-webui", ec)) {
+        return (self_dir / "spinel-webui").string();
+    }
+    return has_executable("spinel-webui") ? "spinel-webui" : "";
+}
+
+void launch_webui_cmd(const std::string &cmd) {
+    std::string bin = resolve_webui_bin();
+    if (bin.empty()) {
+        append_app_log("[Shell] 未找到 spinel-webui 可执行文件，无法打开: " + cmd);
+        return;
+    }
+    spawn_argv_detached({bin, cmd});
+}
+
+void open_games_window(AppState *) { launch_webui_cmd("games:open"); }
+void open_store_window(AppState *) { launch_webui_cmd("store:open"); }
+void open_installer_window(AppState *) { launch_webui_cmd("installer:open"); }
+void open_settings_window(AppState *, const std::string &tab) {
+    launch_webui_cmd("settings:open:" + tab);
+}
+
+#endif  // SPINEL_HAS_WEBKIT
+
 void push_all_telemetry(AppState *state) {
-    native_shell_sync_telemetry(state);
+#if SPINEL_HAS_WEBKIT
     if (state->games_win && gtk_widget_get_visible(GTK_WIDGET(state->games_win))) {
         push_telemetry_to_view(state->games_view);
     }
@@ -193,6 +275,9 @@ void push_all_telemetry(AppState *state) {
     if (state->settings_win && gtk_widget_get_visible(GTK_WIDGET(state->settings_win))) {
         push_telemetry_to_view(state->settings_view);
     }
+#else
+    native_shell_sync_telemetry(state);
+#endif
 }
 
 void on_power_confirm_reply(GObject *source, GAsyncResult *res, gpointer user_data) {
@@ -226,19 +311,80 @@ gboolean on_telemetry_tick(gpointer user_data) {
     return G_SOURCE_CONTINUE;
 }
 
-void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
+#if SPINEL_HAS_WEBKIT
+
+void register_webui_actions(GtkApplication *app, AppState *state) {
+    GSimpleAction *sync_theme = g_simple_action_new("sync-theme", nullptr);
+    g_signal_connect(sync_theme, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        push_theme_state(static_cast<AppState *>(d));
+    }), state);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sync_theme));
+    g_object_unref(sync_theme);
+
+    GSimpleAction *sync_perf = g_simple_action_new("sync-perf", nullptr);
+    g_signal_connect(sync_perf, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        push_perf_config(static_cast<AppState *>(d));
+    }), state);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sync_perf));
+    g_object_unref(sync_perf);
+}
+
+int on_webui_command_line(GtkApplication *app, GApplicationCommandLine *cmdline, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
-    if (!jsc_value_is_string(value)) return;
-    g_autofree char *msg = jsc_value_to_string(value);
-    if (msg) {
-        handle_shell_command(state, msg);
+    if (!g_app) {
+        g_app = app;
+        ensure_steam_play_preconfig();
+        register_webui_actions(app, state);
+        g_timeout_add_seconds(3, on_telemetry_tick, state);
     }
+
+    int argc = 0;
+    gchar **argv = g_application_command_line_get_arguments(cmdline, &argc);
+    std::string cmd = (argc >= 2 && argv && argv[1]) ? argv[1] : "games:open";
+    handle_shell_command(state, cmd);
+    if (argv) g_strfreev(argv);
+    return 0;
+}
+
+void on_webui_activate(GtkApplication *app, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    if (!g_app) {
+        g_app = app;
+        ensure_steam_play_preconfig();
+        register_webui_actions(app, state);
+        g_timeout_add_seconds(3, on_telemetry_tick, state);
+    }
+    open_games_window(state);
+}
+
+#else
+
+void register_shell_actions(GtkApplication *app, AppState *state) {
+    auto add_act = [&](const char *name, GCallback cb) {
+        GSimpleAction *act = g_simple_action_new(name, nullptr);
+        g_signal_connect(act, "activate", cb, state);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(act));
+        g_object_unref(act);
+    };
+    add_act("sync-theme", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        native_shell_sync_theme(static_cast<AppState *>(d));
+    }));
+    add_act("sync-perf", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        native_shell_sync_perf(static_cast<AppState *>(d));
+    }));
+    add_act("sync-desktop", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        native_shell_sync_desktop(static_cast<AppState *>(d));
+    }));
+    add_act("sync-telemetry", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        push_all_telemetry(static_cast<AppState *>(d));
+    }));
 }
 
 void on_activate(GtkApplication *app, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
     g_app = app;
     ensure_steam_play_preconfig();
+    register_shell_actions(app, state);
 
     init_native_shell(app, state);
     init_window_tracker(state);
@@ -248,7 +394,22 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     g_timeout_add_seconds(3, on_telemetry_tick, state);
 }
 
+#endif  // SPINEL_HAS_WEBKIT
+
 }  // namespace
+
+#if SPINEL_HAS_WEBKIT
+void init_native_shell(GtkApplication *, AppState *) {}
+void shutdown_native_shell(AppState *) {}
+void native_shell_sync_telemetry(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-telemetry"); }
+void native_shell_sync_windows(AppState *) {}
+void native_shell_sync_desktop(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-desktop"); }
+void native_shell_sync_wallpaper(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
+void native_shell_sync_theme(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
+void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-perf"); }
+void native_shell_toggle_cc(AppState *) {}
+void native_shell_set_cc_visible(AppState *, bool) {}
+#endif
 
 void handle_shell_command(AppState *state, const std::string &cmd) {
     if (!state) return;
@@ -314,6 +475,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     } else if (cmd == "store:open") {
         native_shell_set_cc_visible(state, false);
         open_store_window(state);
+#if SPINEL_HAS_WEBKIT
     } else if (cmd == "store:refresh") {
         push_desktop_apps(state);
         push_store_catalog(state);
@@ -330,6 +492,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     } else if (cmd.rfind("store:launch:", 0) == 0) {
         native_shell_set_cc_visible(state, false);
         launch_store_app(state, cmd.substr(13));
+#endif
     } else if (cmd == "installer:open") {
         native_shell_set_cc_visible(state, false);
         open_installer_window(state);
@@ -400,20 +563,28 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         update_shortcuts_config(state, cmd);
     } else if (cmd == "settings:shortcuts-reset") {
         reset_shortcuts_config(state);
+#if !SPINEL_HAS_WEBKIT
     } else if (cmd.rfind("window:toggle:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(14).c_str(), nullptr, 10);
         if (wid > 0) toggle_or_activate_window(wid);
     } else if (cmd.rfind("window:close:", 0) == 0) {
         uint64_t wid = std::strtoull(cmd.substr(13).c_str(), nullptr, 10);
         if (wid > 0) close_tracked_window(wid);
+#endif
     } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
         std::string wp = cmd.substr(14);
         if (wp == "crystal-blue") wp = "crystal-aurora";
         else if (wp == "obsidian-purple") wp = "obsidian-neon";
         else if (wp == "emerald-aurora") wp = "emerald-nordic";
         set_active_theme(state, wp);
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
+#endif
     } else if (cmd.rfind("theme:set:", 0) == 0) {
         set_active_theme(state, cmd.substr(10));
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
+#endif
     } else if (cmd == "theme:refresh") {
         push_theme_state(state);
         native_shell_sync_theme(state);
@@ -434,19 +605,30 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_steam_library(state);
         push_desktop_apps(state);
         push_wallpaper_pref(state);
+#if !SPINEL_HAS_WEBKIT
         push_windows_to_ui(state);
+#endif
     } else if (cmd == "perf:get") {
         push_perf_config(state);
     } else if (cmd == "perf:toggle-gamemode") {
         PerfConfig cfg = load_perf_config();
         update_perf_config(state, std::string("gamemode=") + (cfg.gamemode ? "false" : "true"));
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
+#endif
     } else if (cmd == "perf:toggle-fsr") {
         PerfConfig cfg = load_perf_config();
         update_perf_config(state, std::string("fsr=") + (cfg.fsr ? "false" : "true"));
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
+#endif
     } else if (cmd == "perf:cycle-mangohud") {
         PerfConfig cfg = load_perf_config();
         std::string next = cfg.mangohud == "off" ? "compact" : (cfg.mangohud == "compact" ? "full" : "off");
         update_perf_config(state, "mangohud=" + next);
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
+#endif
     } else if (cmd.rfind("perf:set\n", 0) == 0) {
         update_perf_config(state, cmd);
     } else if (cmd == "perf:apply-steam") {
@@ -502,8 +684,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_system_logs(state, cmd.substr(14));
     } else if (cmd.rfind("settings:logs-clear:", 0) == 0) {
         clear_system_logs(state, cmd.substr(20));
+#if SPINEL_HAS_WEBKIT
     } else if (cmd == "installer:scan-disks") {
         push_installer_env(state);
+#endif
     } else if (cmd == "ime:status") {
         push_ime_state(state);
     } else if (cmd == "ime:mode:pinyin") {
@@ -542,28 +726,57 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         }
     } else if (cmd == "clip:clear") {
         clear_clipboard_history();
+#if SPINEL_HAS_WEBKIT
     } else if (cmd.rfind("installer:start\n", 0) == 0) {
         start_disk_install(state, cmd);
+#endif
     }
 }
 
 int main(int argc, char **argv) {
+#if !SPINEL_HAS_WEBKIT
     if (argc > 1 && std::string(argv[1]) == "--clip-hook") {
         return run_clipboard_hook_from_stdin();
     }
+#endif
     ensure_display_env();
     const char *wlr = std::getenv("WLR_RENDERER");
-    if (wlr && std::string(wlr) == "pixman") {
+    bool is_pixman = (wlr && std::string(wlr) == "pixman");
+#if !SPINEL_HAS_WEBKIT
+    // Native GTK4/Cairo shell avoids Mesa/LLVMpipe/GL shader bloat entirely
+    setenv("GSK_RENDERER", "cairo", 0);
+    (void)is_pixman;
+#else
+    if (is_pixman) {
         setenv("GSK_RENDERER", "cairo", 0);
         setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
         setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
     } else if (collect_telemetry().low_fx) {
+        setenv("GSK_RENDERER", "cairo", 0);
         setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
         setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
         setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     }
+#endif
 
     sync_process_proxy_env();
+
+#if SPINEL_HAS_WEBKIT
+    AppState state;
+    GtkApplication *app = gtk_application_new("org.spinelos.webui", G_APPLICATION_HANDLES_COMMAND_LINE);
+    g_signal_connect(app, "command-line", G_CALLBACK(on_webui_command_line), &state);
+    g_signal_connect(app, "activate", G_CALLBACK(on_webui_activate), &state);
+    int status = g_application_run(G_APPLICATION(app), argc, argv);
+    state.shutting_down.store(true);
+    if (state.install_thread.joinable()) {
+        state.install_thread.join();
+    }
+    if (state.store_thread.joinable()) {
+        state.store_thread.join();
+    }
+    g_object_unref(app);
+    return status;
+#else
     ThemeSpec startup_theme = get_active_theme();
     sync_labwc_window_theme(startup_theme.is_light);
     ensure_fcitx5_defaults(startup_theme.is_light);
@@ -579,12 +792,7 @@ int main(int argc, char **argv) {
     stop_gamepad_hotkey_listener();
     shutdown_window_tracker();
     shutdown_native_shell(&state);
-    if (state.install_thread.joinable()) {
-        state.install_thread.join();
-    }
-    if (state.store_thread.joinable()) {
-        state.store_thread.join();
-    }
     g_object_unref(app);
     return status;
+#endif
 }

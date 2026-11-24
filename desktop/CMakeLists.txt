@@ -50,9 +50,7 @@ add_executable(spinel-shell
     src/common.cpp
     src/steam_library.cpp
     src/system_control.cpp
-    src/installer.cpp
     src/desktop_apps.cpp
-    src/app_store.cpp
     src/theme_manager.cpp
     src/native_shell.cpp
     src/window_tracker.cpp
@@ -62,18 +60,45 @@ add_executable(spinel-shell
 
 add_dependencies(spinel-shell spinel_wayland_protos)
 
+target_compile_definitions(spinel-shell PRIVATE
+    SPINEL_HAS_WEBKIT=0
+)
+
 target_include_directories(spinel-shell PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_link_libraries(spinel-shell PRIVATE
     PkgConfig::GTK4
-    PkgConfig::WEBKIT6
     PkgConfig::LAYER_SHELL
     PkgConfig::WAYLAND_CLIENT
 )
 
 target_compile_options(spinel-shell PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
+)
+
+add_executable(spinel-webui
+    src/main.cpp
+    src/common.cpp
+    src/steam_library.cpp
+    src/system_control.cpp
+    src/installer.cpp
+    src/desktop_apps.cpp
+    src/app_store.cpp
+    src/theme_manager.cpp
+)
+
+target_compile_definitions(spinel-webui PRIVATE
+    SPINEL_HAS_WEBKIT=1
+)
+
+target_link_libraries(spinel-webui PRIVATE
+    PkgConfig::GTK4
+    PkgConfig::WEBKIT6
+)
+
+target_compile_options(spinel-webui PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
@@ -91,5 +116,5 @@ target_compile_options(spinel-terminal PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
-install(TARGETS spinel-shell spinel-terminal DESTINATION bin)
+install(TARGETS spinel-shell spinel-webui spinel-terminal DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)

@@ -72,6 +72,7 @@ if [ "$MODE" != "ui" ]; then
     sudo pacman -Sy --noconfirm --needed vte4
   fi
   sudo install -Dm755 /tmp/spinel-dev/spinel-shell /usr/local/bin/spinel-shell
+  sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
 fi
 sudo mkdir -p /usr/share/spinel-shell/ui
@@ -206,6 +207,7 @@ if command -v fcitx5 >/dev/null 2>&1; then
   sleep 0.2
 fi
 
+pkill -x spinel-webui 2>/dev/null || true
 pkill -x spinel-shell 2>/dev/null || true
 sleep 0.3
 nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
@@ -234,6 +236,7 @@ SSH_CMD="ssh -p ${DEV_PORT} -o ControlMaster=auto -o ControlPath=${CTL_SOCK} -o 
 ssh "${SSH_OPTS[@]}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
 if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-webui" "${DEV_HOST}:/tmp/spinel-dev/spinel-webui"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
 fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"

@@ -42,8 +42,9 @@ if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
     "${PROFILE_DIR}/airootfs/etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf"
 fi
 
-# Install compiled desktop shell, first-party terminal & HTML/CSS/JS UI assets
+# Install compiled desktop shell, on-demand webui, first-party terminal & HTML/CSS/JS UI assets
 install -Dm755 "${BUILD_DIR}/spinel-shell" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-shell"
+install -Dm755 "${BUILD_DIR}/spinel-webui" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-webui"
 install -Dm755 "${BUILD_DIR}/spinel-terminal" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-terminal"
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui"
 cp -a "${WORKSPACE}/desktop/ui/." "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui/"
@@ -107,6 +108,8 @@ airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '10' '-b' '256
 file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"
 file_permissions["/usr/local/bin/start-spinel-desktop"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-shell"]="0:0:0755"
+file_permissions["/usr/local/bin/spinel-webui"]="0:0:0755"
+file_permissions["/usr/local/bin/spinel-terminal"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-install"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-screenshot"]="0:0:0755"
 file_permissions["/usr/local/bin/spinel-lock"]="0:0:0755"

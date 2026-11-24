@@ -352,6 +352,7 @@ void push_theme_state(AppState *state) {
     }
     js << "]});";
     std::string script = js.str();
+#if SPINEL_HAS_WEBKIT
     const GdkRGBA bg = active.is_light
         ? GdkRGBA{0.96f, 0.965f, 0.98f, 1.0f}
         : GdkRGBA{0.031f, 0.043f, 0.071f, 1.0f};
@@ -364,6 +365,9 @@ void push_theme_state(AppState *state) {
     sync_view(state->store_view);
     sync_view(state->settings_view);
     sync_view(state->installer_view);
+#else
+    (void)script;
+#endif
 }
 
 void export_custom_theme_template() {

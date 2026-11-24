@@ -1758,6 +1758,17 @@ void push_process_list(AppState *state) {
             }
         }
         long rss_mb = (rss_pages * page_kb) / 1024;
+        std::ifstream rollup_ifs(entry.path() / "smaps_rollup");
+        if (rollup_ifs.is_open()) {
+            std::string rline;
+            while (std::getline(rollup_ifs, rline)) {
+                if (rline.rfind("Pss:", 0) == 0) {
+                    long pss_kb = std::strtol(rline.c_str() + 4, nullptr, 10);
+                    if (pss_kb > 0) rss_mb = pss_kb / 1024;
+                    break;
+                }
+            }
+        }
         if (rss_mb < 2 && cpu_pct < 0.2) continue;  // Skip tiny idle kernel/system threads for clean UX
 
         struct stat st_buf{};
