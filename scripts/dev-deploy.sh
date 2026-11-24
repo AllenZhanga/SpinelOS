@@ -52,7 +52,12 @@ else
 fi
 
 APPLY_SCRIPT="$(mktemp)"
-trap 'rm -f "${APPLY_SCRIPT}"' EXIT
+CTL_SOCK="/tmp/spinel-ctl-$$.sock"
+cleanup() {
+  ssh -o "ControlPath=${CTL_SOCK}" -O exit "${DEV_HOST}" >/dev/null 2>&1 || true
+  rm -f "${APPLY_SCRIPT}" "${CTL_SOCK}"
+}
+trap cleanup EXIT
 cat > "${APPLY_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -128,8 +133,9 @@ EOF
 chmod +x "${APPLY_SCRIPT}"
 
 echo "==> [2/3] Uploading assets to ${DEV_HOST}:${DEV_PORT}..."
-SSH_CMD="ssh -p ${DEV_PORT}"
-ssh -p "${DEV_PORT}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
+SSH_OPTS=(-p "${DEV_PORT}" -o "ControlMaster=auto" -o "ControlPath=${CTL_SOCK}" -o "ControlPersist=120" -o "StrictHostKeyChecking=accept-new")
+SSH_CMD="ssh -p ${DEV_PORT} -o ControlMaster=auto -o ControlPath=${CTL_SOCK} -o ControlPersist=120 -o StrictHostKeyChecking=accept-new"
+ssh "${SSH_OPTS[@]}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
 if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
 fi
@@ -150,4 +156,4 @@ if [[ "${MODE}" == "full" ]]; then
 fi
 
 echo "==> [3/3] Installing & restarting spinel-shell on live Wayland session..."
-ssh -t -p "${DEV_PORT}" "${DEV_HOST}" "bash /tmp/spinel-dev/apply.sh '${MODE}'"
+ssh -t "${SSH_OPTS[@]}" "${DEV_HOST}" "bash /tmp/spinel-dev/apply.sh '${MODE}'"
