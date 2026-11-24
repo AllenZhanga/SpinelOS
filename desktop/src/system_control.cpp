@@ -1263,9 +1263,25 @@ void push_ime_state(AppState *state) {
                    fs::exists("/usr/share/fcitx5/addon/rime.conf");
     std::error_code ec;
     bool rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    bool zhwiki = fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwiki.dict", ec) ||
+                  fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwikisource.dict", ec);
     std::string pid_out;
     int pid_rc = 1;
     bool running = installed && run_argv_capture({"pgrep", "-x", "fcitx5"}, pid_out, pid_rc) && pid_rc == 0;
+    int rss_mb = 0;
+    if (running) {
+        int pid = std::atoi(trim_copy(pid_out).c_str());
+        if (pid > 0) {
+            std::ifstream sifs("/proc/" + std::to_string(pid) + "/status");
+            std::string line;
+            while (std::getline(sifs, line)) {
+                if (line.rfind("VmRSS:", 0) == 0) {
+                    rss_mb = std::atoi(line.c_str() + 6) / 1024;
+                    break;
+                }
+            }
+        }
+    }
     std::string engine = detect_active_ime_engine();
 
     std::ostringstream js;
@@ -1274,6 +1290,8 @@ void push_ime_state(AppState *state) {
        << "\"running\":" << (running ? "true" : "false") << ","
        << "\"rime_installed\":" << (rime_ok ? "true" : "false") << ","
        << "\"rime_ice\":" << (rime_ice ? "true" : "false") << ","
+       << "\"zhwiki\":" << (zhwiki ? "true" : "false") << ","
+       << "\"rss_mb\":" << rss_mb << ","
        << "\"engine\":\"" << engine << "\""
        << "});";
     eval_js(state->settings_view, js.str());
@@ -1341,6 +1359,68 @@ void install_rime_ice_dict(AppState *state) {
             post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"雾凇拼音下载失败（网络访问 GitHub 超时），可先在「Wi-Fi / 网络」里开启代理后再试，或直接使用内置中文拼音。\");", false);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        g_idle_add([](gpointer d) -> gboolean {
+            auto *st = static_cast<AppState *>(d);
+            if (!st->shutting_down.load()) push_ime_state(st);
+            return G_SOURCE_REMOVE;
+        }, state);
+    }).detach();
+}
+
+void toggle_zhwiki_dict(AppState *state) {
+    if (!state) return;
+    std::error_code ec;
+    bool remove = fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwiki.dict", ec) ||
+                  fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwikisource.dict", ec);
+    post_js_to_main(
+        state,
+        std::string("window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"") +
+            (remove ? "正在卸载 fcitx5-pinyin-zhwiki 并释放内存，若弹出密码框请授权..."
+                    : "正在安装 fcitx5-pinyin-zhwiki 维基扩展词库，若弹出密码框请授权...") +
+            "\");",
+        false);
+    std::thread([state, remove]() {
+        std::string dummy;
+        int sudo_rc = 1;
+        bool nopass = run_argv_capture({"sudo", "-n", "true"}, dummy, sudo_rc) && sudo_rc == 0;
+        std::vector<std::string> cmd = nopass
+            ? std::vector<std::string>{"sudo", "-n"}
+            : std::vector<std::string>{"pkexec"};
+        if (remove) {
+            cmd.insert(cmd.end(), {"pacman", "-Rns", "--noconfirm", "fcitx5-pinyin-zhwiki"});
+        } else {
+            ProxyConfig pc = load_proxy_config();
+            if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
+                std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
+                cmd.insert(cmd.end(), {"env", "http_proxy=" + hv, "https_proxy=" + hv});
+            }
+            cmd.insert(cmd.end(), {"pacman", "-Sy", "--noconfirm", "fcitx5-pinyin-zhwiki"});
+        }
+        std::string out;
+        int rc = 1;
+        run_argv_capture(cmd, out, rc);
+        if (rc == 0) {
+            stop_fcitx5_sync();
+            if (has_executable("fcitx5")) {
+                spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            append_app_log(remove ? "[IME] 已卸载 fcitx5-pinyin-zhwiki，释放约 220MB 内存"
+                                  : "[IME] 已安装 fcitx5-pinyin-zhwiki 维基词库");
+            post_js_to_main(
+                state,
+                std::string("window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"") +
+                    (remove ? "已卸载维基超大词库并重启输入法，内存占用已大幅降低！"
+                            : "已安装维基扩展词库并重启输入法！") +
+                    "\");",
+                false);
+        } else {
+            append_app_log("[IME] zhwiki 词库变更失败: " + out);
+            post_js_to_main(
+                state,
+                "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"操作已取消或执行失败（请查看系统日志）。\");",
+                false);
+        }
         g_idle_add([](gpointer d) -> gboolean {
             auto *st = static_cast<AppState *>(d);
             if (!st->shutting_down.load()) push_ime_state(st);
