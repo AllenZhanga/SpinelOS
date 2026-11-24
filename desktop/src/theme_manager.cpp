@@ -33,7 +33,7 @@ std::string hex6(uint32_t rgb) {
 std::vector<ThemeSpec> builtin_themes() {
     ThemeSpec crystal;
     crystal.id = "crystal-aurora";
-    crystal.name = "尖晶石极光（默认）";
+    crystal.name = "尖晶石深蓝极光";
     crystal.subtitle = "通透深海蓝磨砂玻璃 · 平衡对比度与高光";
     crystal.is_light = false;
     crystal.wp_c0 = 0x071124;
@@ -68,8 +68,8 @@ std::vector<ThemeSpec> builtin_themes() {
 
     ThemeSpec light;
     light.id = "tahoe-light";
-    light.name = "清透浅色液态玻璃";
-    light.subtitle = "macOS 浅色模式 · 白昼冰晶透亮质感";
+    light.name = "macOS 浅色液态玻璃（默认）";
+    light.subtitle = "白昼冰晶透亮质感 · 默认系统风格";
     light.is_light = true;
     light.wp_c0 = 0xDCEAFE;
     light.wp_c1 = 0xEEF2FF;
@@ -171,7 +171,7 @@ std::vector<ThemeSpec> builtin_themes() {
     emerald.ui_accent = "#34d399";
     emerald.ui_accent2 = "#2dd4bf";
 
-    return {crystal, light, obsidian, emerald};
+    return {light, crystal, obsidian, emerald};
 }
 
 bool parse_theme_file(const fs::path &file, const ThemeSpec &base_template, ThemeSpec &out) {
@@ -288,13 +288,13 @@ std::string get_active_theme_id() {
         (fs::path(home_dir()) / ".config/spinelos/theme.conf").string(), ""
     ));
     if (!id.empty()) return id;
-    // Migrate legacy wallpaper.conf if present
+    // Migrate legacy wallpaper.conf only if user explicitly picked a non-default legacy theme
     std::string legacy = trim_copy(read_first_line(
-        (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), "crystal-aurora"
+        (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), ""
     ));
     if (legacy == "obsidian-purple") return "obsidian-neon";
     if (legacy == "emerald-aurora") return "emerald-nordic";
-    return "crystal-aurora";
+    return "tahoe-light";
 }
 
 ThemeSpec get_active_theme() {

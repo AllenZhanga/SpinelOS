@@ -1,16 +1,16 @@
 :root {
-  --bg: #081020;
-  --win-bg: radial-gradient(circle at 18% 15%, #132548 0%, #081020 62%);
-  --toolbar-bg: rgba(11, 18, 34, 0.84);
-  --surface: rgba(16, 25, 45, 0.78);
-  --card-bg: rgba(20, 31, 56, 0.78);
-  --input-bg: #0c1528;
-  --surface-hover: rgba(30, 41, 64, 0.88);
-  --border: rgba(255, 255, 255, 0.13);
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
-  --accent-2: #818cf8;
+  --bg: #f1f5f9;
+  --win-bg: radial-gradient(circle at 18% 15%, #e0f2fe 0%, #f1f5f9 65%);
+  --toolbar-bg: rgba(255, 255, 255, 0.88);
+  --surface: rgba(255, 255, 255, 0.86);
+  --card-bg: rgba(255, 255, 255, 0.94);
+  --input-bg: #ffffff;
+  --surface-hover: rgba(226, 232, 240, 0.88);
+  --border: rgba(15, 23, 42, 0.13);
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #0284c7;
+  --accent-2: #4f46e5;
   --danger: #f43f5e;
   --font: "Noto Sans CJK SC", "Inter", system-ui, sans-serif;
 }

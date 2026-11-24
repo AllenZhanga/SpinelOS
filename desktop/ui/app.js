@@ -328,8 +328,9 @@
     });
   }
 
-  let activeThemeId = "crystal-aurora";
+  let activeThemeId = "tahoe-light";
   let availableThemes = [];
+  document.body.classList.add("theme-light");
 
   function forceSoftwareRepaint() {
     if (!activeRootEl) return;

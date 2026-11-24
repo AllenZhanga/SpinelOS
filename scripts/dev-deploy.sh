@@ -92,7 +92,7 @@ UID_NUM="$(id -u)"
 export XDG_RUNTIME_DIR="/run/user/${UID_NUM}"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 export GDK_BACKEND=wayland
-export GTK_THEME=Adwaita:dark
+export GTK_THEME=Adwaita
 
 WAYLAND_SOCK="$(ls "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n1 || true)"
 if [ -z "$WAYLAND_SOCK" ]; then

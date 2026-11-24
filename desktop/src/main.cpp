@@ -60,7 +60,10 @@ void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReaso
 WebKitWebView *create_configured_webview(AppState *state) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
-    GdkRGBA bg{0.031, 0.043, 0.071, 1.0};
+    ThemeSpec active = get_active_theme();
+    GdkRGBA bg = active.is_light
+        ? GdkRGBA{0.945f, 0.961f, 0.976f, 1.0f}
+        : GdkRGBA{0.031f, 0.043f, 0.071f, 1.0f};
     webkit_web_view_set_background_color(web, &bg);
 
     WebKitSettings *settings = webkit_web_view_get_settings(web);
