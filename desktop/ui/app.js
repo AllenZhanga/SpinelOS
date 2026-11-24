@@ -925,6 +925,9 @@
 
   /* ---------------- 5. Settings Window ---------------- */
   let activeLogSource = "apps";
+  let procTimerId = null;
+  let lastProcPayload = null;
+  let procSortBy = "cpu";
 
   function switchSettingsTab(tab) {
     const titles = {
@@ -934,6 +937,7 @@
       perf: "游戏性能",
       appearance: "外观与输入法",
       perms: "权限与安全",
+      procs: "进程监控",
       logs: "系统日志"
     };
     const tabs = Object.keys(titles);
@@ -947,6 +951,10 @@
     document.querySelectorAll("#app-settings [data-cmd^='settings:tab:']").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-cmd") === `settings:tab:${target}`);
     });
+    if (procTimerId) {
+      clearInterval(procTimerId);
+      procTimerId = null;
+    }
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
@@ -956,6 +964,10 @@
       sendCommand("ime:status");
     }
     else if (target === "perms") sendCommand("settings:perms-get");
+    else if (target === "procs") {
+      sendCommand("settings:procs-get");
+      procTimerId = setInterval(() => sendCommand("settings:procs-get"), 2000);
+    }
     else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
   }
 
@@ -965,18 +977,15 @@
     if (!data) return;
     const polkitDesc = document.getElementById("perms-polkit-desc");
     if (polkitDesc) {
-      if (!data.polkit_installed) polkitDesc.textContent = "未安装 polkit-gnome（需运行 ./scripts/dev-deploy.sh --full 安装）";
-      else polkitDesc.textContent = data.polkit_running ? "运行中 · 支持图形管理员提权密码弹窗" : "已安装但未运行 · 点击右侧启动";
+      if (!data.polkit_installed) polkitDesc.textContent = "未安装密码弹窗组件（请运行 ./scripts/dev-deploy.sh --full）";
+      else polkitDesc.textContent = data.polkit_running ? "已开启 · 敏感操作会自动弹出输入密码框" : "未启动 · 点右侧按钮一键开启";
     }
     const portalDesc = document.getElementById("perms-portal-desc");
     if (portalDesc) {
-      const parts = [
-        `核心网关: ${data.portal_running ? "运行中" : "未运行"}`,
-        `GTK弹窗: ${data.portal_gtk ? "就绪" : "待激活"}`,
-        `录屏截图(wlr): ${data.portal_wlr ? "就绪" : "按需激活"}`,
-        `桌面路由配置: ${data.portal_conf ? "已配置" : "缺失(需 --full)"}`
-      ];
-      portalDesc.textContent = parts.join(" · ");
+      const ok = data.portal_running && data.portal_gtk && data.portal_conf;
+      portalDesc.textContent = ok
+        ? "已开启 · 外部软件申请拍照、录屏或打开文件时会弹窗询问"
+        : `待就绪（网关:${data.portal_running ? "开" : "关"} / 弹窗:${data.portal_gtk ? "开" : "关"} / 配置:${data.portal_conf ? "有" : "缺"}）`;
     }
 
     const appList = document.getElementById("perms-app-list");
@@ -984,14 +993,14 @@
       appList.innerHTML = "";
       const apps = Array.isArray(data.apps) ? data.apps : [];
       if (apps.length === 0) {
-        appList.innerHTML = '<div class="disk-empty">当前尚未安装 Flatpak 沙箱应用（从「应用商店」安装浏览器/Heroic/Discord/OBS 后将在此显示全部权限开关）。</div>';
+        appList.innerHTML = '<div class="disk-empty">目前没有需要单独限权的沙箱应用（从「应用商店」安装浏览器、Discord、OBS、Heroic 等软件后会在这里出现开关）。</div>';
       } else {
         const permDefs = [
-          { key: "home", label: "主目录文件" },
-          { key: "host", label: "全部磁盘" },
-          { key: "network", label: "网络访问" },
-          { key: "devices", label: "手柄/全部设备" },
-          { key: "dri", label: "GPU 3D加速" },
+          { key: "home", label: "访问个人文件夹" },
+          { key: "host", label: "访问全部硬盘" },
+          { key: "network", label: "联网权限" },
+          { key: "devices", label: "手柄与外设" },
+          { key: "dri", label: "3D 显卡加速" },
           { key: "audio", label: "声音与麦克风" }
         ];
         apps.forEach((app) => {
@@ -1052,7 +1061,7 @@
       portalList.innerHTML = "";
       const entries = Array.isArray(data.portal_entries) ? data.portal_entries : [];
       if (entries.length === 0) {
-        portalList.innerHTML = '<div class="disk-empty">暂无动态弹窗授权记录（当应用通过 Portal 弹出授权确认框并选择允许/拒绝后会记录于此）。</div>';
+        portalList.innerHTML = '<div class="disk-empty">暂无已记住的弹窗记录（外部软件弹窗询问并选择“允许/拒绝”后会显示在这里）。</div>';
       } else {
         entries.forEach((pe) => {
           const row = document.createElement("div");
@@ -1062,7 +1071,7 @@
           title.textContent = `${pe.app} · ${pe.table}/${pe.id}`;
           const sub = document.createElement("div");
           sub.className = "muted-hint";
-          sub.textContent = `当前授权: ${pe.perms || "已记录"}`;
+          sub.textContent = `当前状态: ${pe.perms || "已记录"}`;
           info.append(title, sub);
 
           const rev = document.createElement("button");
@@ -1079,6 +1088,105 @@
       }
     }
   };
+
+  function renderProcessList() {
+    const listEl = document.getElementById("procs-list");
+    if (!listEl || !lastProcPayload) return;
+
+    const cpuChip = document.getElementById("procs-cpu-chip");
+    const memChip = document.getElementById("procs-mem-chip");
+    const cntChip = document.getElementById("procs-cnt-chip");
+    if (cpuChip) cpuChip.textContent = `CPU: ${lastProcPayload.cpu_pct ?? "--"}%`;
+    if (memChip) memChip.textContent = `内存: ${lastProcPayload.mem || "--"}`;
+    if (cntChip) cntChip.textContent = `进程: ${lastProcPayload.total_procs ?? "--"}`;
+
+    const q = (document.getElementById("procs-search-input")?.value || "").trim().toLowerCase();
+    let procs = Array.isArray(lastProcPayload.procs) ? [...lastProcPayload.procs] : [];
+    if (q) {
+      procs = procs.filter((p) =>
+        `${p.name} ${p.cmd} ${p.pid}`.toLowerCase().includes(q)
+      );
+    }
+    procs.sort((a, b) => {
+      if (procSortBy === "mem") return (b.mem_mb - a.mem_mb) || (b.cpu - a.cpu);
+      return (b.cpu - a.cpu) || (b.mem_mb - a.mem_mb);
+    });
+
+    listEl.innerHTML = "";
+    if (procs.length === 0) {
+      listEl.innerHTML = '<div class="disk-empty">没有匹配的运行中进程</div>';
+      return;
+    }
+
+    procs.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "proc-row";
+
+      const nameCell = document.createElement("div");
+      nameCell.className = "proc-name-cell";
+      const st = document.createElement("strong");
+      st.textContent = p.name + (p.is_core ? " (系统核心)" : "");
+      const sm = document.createElement("small");
+      sm.textContent = p.cmd || p.name;
+      nameCell.append(st, sm);
+
+      const pidCol = document.createElement("span");
+      pidCol.className = "proc-col-num";
+      pidCol.textContent = String(p.pid);
+
+      const cpuCol = document.createElement("span");
+      cpuCol.className = "proc-col-num";
+      cpuCol.textContent = `${Number(p.cpu || 0).toFixed(1)}%`;
+
+      const memCol = document.createElement("span");
+      memCol.className = "proc-col-num";
+      memCol.textContent = `${p.mem_mb} MB`;
+
+      const actCol = document.createElement("div");
+      actCol.className = "proc-col-act";
+      if (!p.is_core && p.own) {
+        const endBtn = document.createElement("button");
+        endBtn.type = "button";
+        endBtn.className = "btn small";
+        endBtn.textContent = "结束";
+        endBtn.setAttribute("data-cmd", `procs:kill:${p.pid}`);
+
+        const killBtn = document.createElement("button");
+        killBtn.type = "button";
+        killBtn.className = "btn small danger";
+        killBtn.textContent = "强杀";
+        killBtn.setAttribute("data-cmd", `procs:force:${p.pid}`);
+        actCol.append(endBtn, killBtn);
+      } else {
+        const tag = document.createElement("span");
+        tag.className = "muted-hint";
+        tag.textContent = p.is_core ? "受保护" : "系统级";
+        actCol.appendChild(tag);
+      }
+
+      row.append(nameCell, pidCol, cpuCol, memCol, actCol);
+      listEl.appendChild(row);
+    });
+  }
+
+  window.__spinelProcsFeedback = (ok, msg) => showFeedback("procs-feedback", msg || "", !ok);
+
+  window.__spinelProcessList = (data) => {
+    lastProcPayload = data;
+    renderProcessList();
+  };
+
+  document.getElementById("procs-search-input")?.addEventListener("input", renderProcessList);
+  document.querySelectorAll("[data-proc-sort]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      procSortBy = btn.getAttribute("data-proc-sort") || "cpu";
+      document.querySelectorAll("[data-proc-sort]").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+      });
+      renderProcessList();
+    });
+  });
 
   window.__spinelImeState = (data) => {
     if (!data) return;

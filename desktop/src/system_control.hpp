@@ -76,3 +76,6 @@ void reset_flatpak_app_perms(AppState *state, const std::string &app_id);
 void reset_portal_perm(AppState *state, const std::string &payload);
 void restart_polkit_agent(AppState *state);
 void reload_desktop_portals(AppState *state);
+
+void push_process_list(AppState *state);
+void kill_process_by_pid(AppState *state, int pid, bool force);

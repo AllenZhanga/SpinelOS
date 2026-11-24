@@ -312,12 +312,7 @@ void set_wallpaper_pref(AppState *state, const std::string &theme_id) {
         theme_id != "emerald-aurora" && theme_id != "amber-dusk") {
         return;
     }
-    std::error_code ec;
-    fs::path dir = fs::path(home_dir()) / ".config/spinelos";
-    fs::create_directories(dir, ec);
-    std::ofstream ofs(dir / "wallpaper.conf");
-    if (ofs.is_open()) {
-        ofs << theme_id << "\n";
-    }
+    fs::path wp_file = fs::path(home_dir()) / ".config/spinelos/wallpaper.conf";
+    write_text_file(wp_file.string(), theme_id + "\n");
     push_wallpaper_pref(state);
 }

@@ -8,6 +8,7 @@ std::string trim_copy(const std::string &s);
 std::string home_dir();
 std::string spinel_state_dir();
 std::string read_first_line(const std::string &path, const std::string &fallback = "");
+bool write_text_file(const std::string &path, const std::string &content);
 std::string run_cmd_capture(const char *cmd);
 bool run_argv_capture(const std::vector<std::string> &args, std::string &out, int &exit_code);
 bool has_executable(const std::string &cmd);

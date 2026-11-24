@@ -285,6 +285,10 @@
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:procs">
+          <span class="settings-nav-ico ico-amber"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h2.5l1.6-4.5 2.4 8 1.8-4.8L11.8 8.5H14"/></svg></span>
+          <span>进程监控</span>
+        </button>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:logs">
           <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h4"/></svg></span>
           <span>系统日志</span>
@@ -405,9 +409,12 @@
           <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
         </div>
 
-        <div class="perf-controls">
-          <div class="perf-group">
-            <span class="perf-label">MangoHud 监控浮窗</span>
+        <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>MangoHud 性能监控浮窗</strong>
+              <span class="muted-hint">在游戏画面左上角显示帧率、CPU、GPU 占用</span>
+            </div>
             <div class="pill-group">
               <button class="pill-btn" data-perf-key="mangohud" data-perf-val="off">关闭</button>
               <button class="pill-btn active" data-perf-key="mangohud" data-perf-val="compact">精简</button>
@@ -415,8 +422,11 @@
             </div>
           </div>
 
-          <div class="perf-group">
-            <span class="perf-label">Gamescope 锁帧</span>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>Gamescope 帧率上限</strong>
+              <span class="muted-hint">限制最高游戏帧率以降低功耗和发热</span>
+            </div>
             <div class="pill-group">
               <button class="pill-btn active" data-perf-key="fps_limit" data-perf-val="0">不限</button>
               <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="60">60</button>
@@ -426,8 +436,11 @@
             </div>
           </div>
 
-          <div class="perf-group">
-            <span class="perf-label">渲染分辨率 (FSR 缩放)</span>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>内部渲染分辨率</strong>
+              <span class="muted-hint">降低内部分辨率并配合 FSR 拉伸提升游戏帧数</span>
+            </div>
             <div class="pill-group">
               <button class="pill-btn active" data-perf-key="render_res" data-perf-val="native">原生</button>
               <button class="pill-btn" data-perf-key="render_res" data-perf-val="1080p">1080p</button>
@@ -436,18 +449,20 @@
             </div>
           </div>
 
-          <div class="perf-group">
-            <span class="perf-label">FSR 锐化 &amp; GameMode</span>
-            <div class="sp-switch-row-pair">
-              <label class="sp-switch-item">
-                <span>FSR 锐化</span>
-                <button type="button" class="sp-switch" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr" aria-label="FSR 锐化"><span class="sp-switch-thumb"></span></button>
-              </label>
-              <label class="sp-switch-item">
-                <span>GameMode</span>
-                <button type="button" class="sp-switch is-on" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode" aria-label="GameMode"><span class="sp-switch-thumb"></span></button>
-              </label>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>AMD FSR 画面锐化放大</strong>
+              <span class="muted-hint">配合低渲染分辨率改善画面清晰度</span>
             </div>
+            <button type="button" class="sp-switch" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr" aria-label="FSR 锐化"><span class="sp-switch-thumb"></span></button>
+          </div>
+
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>GameMode 游戏调度加速</strong>
+              <span class="muted-hint">自动提升游戏进程 CPU 优先级并优化电源调度</span>
+            </div>
+            <button type="button" class="sp-switch is-on" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode" aria-label="GameMode"><span class="sp-switch-thumb"></span></button>
           </div>
         </div>
         <div id="perf-feedback" class="feedback-banner hidden"></div>
@@ -512,8 +527,8 @@
       <div class="inst-section">
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
-            <h3>实时权限弹窗引擎（Polkit + Desktop Portals）</h3>
-            <p class="muted-hint">外部应用请求管理员提权或摄像头/录屏/文件沙箱授权时，由此双引擎负责弹出系统确认框。</p>
+            <h3>系统弹窗授权保护</h3>
+            <p class="muted-hint">当软件请求管理员密码、读写文件、录屏或使用麦克风时，系统会自动弹出确认框。保持开启即可，日常无需操作。</p>
           </div>
           <div class="footer-actions">
             <button class="btn small" data-cmd="settings:perms-get">刷新状态</button>
@@ -522,17 +537,17 @@
         <div class="status-list" id="perms-infra-list">
           <div class="status-row">
             <div>
-              <strong>管理员密码授权弹窗 (Polkit Agent)</strong>
-              <div class="muted-hint" id="perms-polkit-desc">检测中...</div>
+              <strong>管理员密码确认弹窗</strong>
+              <div class="muted-hint" id="perms-polkit-desc">安装软件或改硬盘等敏感操作时弹窗输密码</div>
             </div>
-            <button class="btn small" data-cmd="settings:perms-polkit">启动/重启授权代理</button>
+            <button class="btn small" data-cmd="settings:perms-polkit">启用 / 重启</button>
           </div>
           <div class="status-row">
             <div>
-              <strong>应用沙箱权限网关 (xdg-desktop-portal)</strong>
-              <div class="muted-hint" id="perms-portal-desc">检测中...</div>
+              <strong>应用拍照 / 录屏 / 文件访问询问</strong>
+              <div class="muted-hint" id="perms-portal-desc">软件想访问摄像头、录屏或打开文件时先征求你的同意</div>
             </div>
-            <button class="btn small" data-cmd="settings:perms-portal">重载 Portal 网关</button>
+            <button class="btn small" data-cmd="settings:perms-portal">刷新服务</button>
           </div>
         </div>
         <div id="perms-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
@@ -541,8 +556,8 @@
       <div class="inst-section">
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
-            <h3>外部应用沙箱权限管理 (Flatpak)</h3>
-            <p class="muted-hint">可随时查看并开关已安装 Flatpak 软件的文件目录、网络、手柄外设、GPU 与音频权限（修改后重启对应软件生效）。</p>
+            <h3>已安装外部应用权限管理</h3>
+            <p class="muted-hint">从「应用商店」下载的第三方软件默认在沙箱中隔离运行。如果发现某软件读不到存档目录或手柄，可在这里一键开启对应权限。</p>
           </div>
         </div>
         <div id="perms-app-list" class="disk-list">
@@ -553,12 +568,43 @@
       <div class="inst-section">
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
-            <h3>动态弹窗授权记录 (Portal Permissions)</h3>
-            <p class="muted-hint">由应用在运行时触发“是否允许录屏/访问位置/后台运行”后的授权记录，可撤销让软件下次重新询问。</p>
+            <h3>已记住的弹窗授权记录</h3>
+            <p class="muted-hint">如果不小心点了“始终拒绝/允许”录屏或摄像头，可以在这里撤销，让软件下次重新弹出询问框。</p>
           </div>
         </div>
         <div id="perms-portal-list" class="disk-list">
-          <div class="disk-empty">暂无动态弹窗授权记录</div>
+          <div class="disk-empty">暂无已记住的弹窗记录</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-procs" class="win-body hidden">
+      <div class="section-head">
+        <div class="bt-head-left">
+          <span class="status-chip" id="procs-cpu-chip">CPU: --%</span>
+          <span class="status-chip" id="procs-mem-chip">内存: --</span>
+          <span class="status-chip" id="procs-cnt-chip">进程: --</span>
+        </div>
+        <div class="footer-actions">
+          <input type="text" id="procs-search-input" class="search-input" placeholder="过滤进程名或 PID..." />
+          <div class="pill-group" id="procs-sort-tabs">
+            <button type="button" class="pill-btn active" data-proc-sort="cpu">按 CPU</button>
+            <button type="button" class="pill-btn" data-proc-sort="mem">按内存</button>
+          </div>
+          <button type="button" class="btn small" data-cmd="settings:procs-get">刷新</button>
+        </div>
+      </div>
+      <div id="procs-feedback" class="feedback-banner hidden"></div>
+      <div class="proc-table-wrap">
+        <div class="proc-head-row">
+          <span>进程名称与命令</span>
+          <span class="proc-col-num">PID</span>
+          <span class="proc-col-num">CPU</span>
+          <span class="proc-col-num">内存</span>
+          <span class="proc-col-act">操作</span>
+        </div>
+        <div id="procs-list" class="proc-list">
+          <div class="disk-empty">正在读取进程列表...</div>
         </div>
       </div>
     </div>

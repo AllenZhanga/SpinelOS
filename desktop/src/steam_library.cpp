@@ -243,10 +243,7 @@ void ensure_steam_play_preconfig() {
     if (brace_pos == std::string::npos) return;
 
     content.insert(brace_pos + 1, "\n" + compat_block);
-    std::ofstream ofs(cfg_file, std::ios::trunc);
-    if (ofs.is_open()) {
-        ofs << content;
-    }
+    write_text_file(cfg_file.string(), content);
 }
 
 std::vector<SteamGameInfo> list_steam_games() {
@@ -312,35 +309,87 @@ void push_steam_library(AppState *state) {
 namespace {
 
 struct AlertPrompt {
+    AppState *state;
     std::string title;
     std::string detail;
 };
 
-void show_steam_alert(const std::string &title, const std::string &detail) {
-    auto *msg = new AlertPrompt{title, detail};
+GtkWindow *pick_alert_parent(AppState *state) {
+    if (!state) return nullptr;
+    GtkWindow *cands[] = {state->games_win, state->settings_win, state->store_win, state->installer_win};
+    for (GtkWindow *w : cands) {
+        if (w && gtk_widget_get_visible(GTK_WIDGET(w))) return w;
+    }
+    return nullptr;
+}
+
+void show_steam_alert(AppState *state, const std::string &title, const std::string &detail) {
+    auto *msg = new AlertPrompt{state, title, detail};
     g_idle_add([](gpointer data) -> gboolean {
         std::unique_ptr<AlertPrompt> prompt(static_cast<AlertPrompt *>(data));
         GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", prompt->title.c_str());
         gtk_alert_dialog_set_detail(dlg, prompt->detail.c_str());
         const char *buttons[] = {"知道了", nullptr};
         gtk_alert_dialog_set_buttons(dlg, buttons);
-        gtk_alert_dialog_choose(dlg, nullptr, nullptr, nullptr, nullptr);
+        gtk_alert_dialog_choose(dlg, pick_alert_parent(prompt->state), nullptr, nullptr, nullptr);
         g_object_unref(dlg);
         return G_SOURCE_REMOVE;
     }, msg);
 }
 
-bool is_steam_bootstrapping(std::string &progress_line) {
-    progress_line.clear();
+std::vector<std::pair<std::string, std::string>> build_proxy_envs() {
+    std::vector<std::pair<std::string, std::string>> envs;
+    ProxyConfig p = load_proxy_config();
+    if (!p.enabled || (p.http_proxy.empty() && p.socks_proxy.empty())) return envs;
+    std::string http_val = !p.http_proxy.empty() ? p.http_proxy : p.socks_proxy;
+    std::string all_val = !p.socks_proxy.empty() ? p.socks_proxy : p.http_proxy;
+    envs.emplace_back("http_proxy", http_val);
+    envs.emplace_back("https_proxy", http_val);
+    envs.emplace_back("HTTP_PROXY", http_val);
+    envs.emplace_back("HTTPS_PROXY", http_val);
+    envs.emplace_back("all_proxy", all_val);
+    envs.emplace_back("ALL_PROXY", all_val);
+    envs.emplace_back("no_proxy", p.no_proxy);
+    envs.emplace_back("NO_PROXY", p.no_proxy);
+    return envs;
+}
+
+bool steam_running_without_proxy() {
+    ProxyConfig p = load_proxy_config();
+    if (!p.enabled || (p.http_proxy.empty() && p.socks_proxy.empty())) return false;
     std::string pid_out;
     int pid_rc = 1;
     if (!run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pid_out, pid_rc) || pid_rc != 0) {
         return false;
     }
+    std::istringstream iss(pid_out);
+    std::string pid_s;
+    while (iss >> pid_s) {
+        std::ifstream ifs("/proc/" + pid_s + "/environ", std::ios::binary);
+        if (!ifs.is_open()) continue;
+        std::string env((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        if (env.find("http_proxy=") == std::string::npos && env.find("HTTP_PROXY=") == std::string::npos &&
+            env.find("ALL_PROXY=") == std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_steam_bootstrapping(std::string &progress_line) {
+    progress_line.clear();
+    std::string upd_out;
+    int upd_rc = 1;
+    bool updating = run_argv_capture({"pgrep", "-f", "child-update-ui"}, upd_out, upd_rc) && upd_rc == 0;
+
+    std::string pid_out;
+    int pid_rc = 1;
+    bool steam_proc = run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pid_out, pid_rc) && pid_rc == 0;
+
     fs::path steamui = fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steamui.so";
     std::error_code ec;
-    if (fs::exists(steamui, ec)) {
-        return false;  // Already bootstrapped, real Steam client is running
+    if (!updating && (!steam_proc || fs::exists(steamui, ec))) {
+        return false;
     }
     std::string raw = run_cmd_capture("tail -n 3 ~/.local/share/Steam/logs/bootstrap_log.txt 2>/dev/null | tr '\\r' '\\n' | grep -v '^$' | tail -n 1");
     progress_line = raw.empty() ? "正在初始化 Steam 运行环境与下载客户端更新..." : raw;
@@ -350,34 +399,40 @@ bool is_steam_bootstrapping(std::string &progress_line) {
 }  // namespace
 
 void launch_steam_client(AppState *state) {
-    (void)state;
     if (!has_executable("steam")) {
         append_app_log("[Steam] 启动失败: 未检测到 /usr/bin/steam");
-        show_steam_alert("未检测到 Steam 客户端",
+        show_steam_alert(state, "未检测到 Steam 客户端",
                          "当前系统尚未安装 steam。请联网后在终端执行 sudo pacman -Sy steam 安装。");
         return;
+    }
+    if (steam_running_without_proxy()) {
+        append_app_log("[Steam] 检测到旧 Steam 进程未加载新代理，正在重启 Steam 以应用系统代理...");
+        run_cmd_capture("pkill -f 'ubuntu12_32/steam' 2>/dev/null; pkill -f 'steam.sh' 2>/dev/null; sleep 0.3");
     }
     std::string prog;
     if (is_steam_bootstrapping(prog)) {
         append_app_log("[Steam] 后台正在首次更新下载: " + prog);
-        show_steam_alert("Steam 正在后台首次初始化与下载更新",
-                         "当前进度: " + prog + "\n\n首次运行需要下载约 497MB 官方客户端，完成后会自动打开 Steam 窗口（无需重复点击）。可在「系统设置 → 系统日志」查看实时进度。");
+        std::string proxy_hint = load_proxy_config().enabled
+            ? ("\n当前已通过系统代理: " + load_proxy_config().http_proxy)
+            : "\n提示：若下载缓慢，可在「系统设置 → Wi-Fi 与网络」启用系统代理后重启 Steam。";
+        show_steam_alert(state, "Steam 正在后台下载客户端更新",
+                         "当前进度: " + prog + proxy_hint + "\n\n完成后会自动弹出登录窗口，请勿重复启动多个 Steam 进程。");
         return;
     }
     std::error_code ec;
     if (!fs::exists(fs::path(home_dir()) / ".local/share/Steam/ubuntu12_32/steamui.so", ec)) {
-        append_app_log("[Steam] 检测到首次运行环境，正在后台下载 Steam 官方运行时（约 497MB），请稍候...");
-        show_steam_alert("正在首次初始化 Steam",
-                         "首次启动 Steam 需要在后台联网下载约 497MB 客户端运行时（约 1~3 分钟），完成后会自动弹出登录界面。可在「系统设置 → 系统日志」查看实时下载进度。");
+        append_app_log("[Steam] 检测到首次运行环境，正在后台下载 Steam 官方运行时，请稍候...");
+        show_steam_alert(state, "正在首次初始化 Steam",
+                         "首次启动 Steam 需要在后台联网下载官方运行时与客户端更新，完成后会自动弹出登录界面。可在「系统设置 → 系统日志」查看实时进度。");
     }
     std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
-    spawn_argv_logged({"steam"}, "Steam");
+    spawn_argv_logged({"steam"}, "Steam", build_proxy_envs());
 }
 
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     if (!is_digits(appid)) return;
 
-    std::vector<std::pair<std::string, std::string>> envs;
+    std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
     if (perf.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }
@@ -389,22 +444,25 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
 }
 
 void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
-    (void)state;
     if (!has_executable("steam")) {
         append_app_log("[GamepadUI] 启动失败: 未检测到 /usr/bin/steam");
-        show_steam_alert("无法启动主机大屏模式",
+        show_steam_alert(state, "无法启动主机大屏模式",
                          "当前系统未检测到 Steam 客户端（可在终端执行 sudo pacman -Sy steam 安装，或在应用商店安装 Heroic / Lutris）。");
         return;
+    }
+    if (steam_running_without_proxy()) {
+        append_app_log("[GamepadUI] 检测到旧 Steam 进程未加载新代理，正在重启以应用系统代理...");
+        run_cmd_capture("pkill -f 'ubuntu12_32/steam' 2>/dev/null; pkill -f 'steam.sh' 2>/dev/null; sleep 0.3");
     }
     std::string prog;
     if (is_steam_bootstrapping(prog)) {
         append_app_log("[GamepadUI] 后台正在首次更新 Steam: " + prog);
-        show_steam_alert("Steam 正在后台首次初始化与下载更新",
-                         "当前进度: " + prog + "\n\n请等待首次约 497MB 客户端更新完成后，再进入主机大屏（可在「系统设置 → 系统日志」查看进度）。");
+        show_steam_alert(state, "Steam 正在后台下载更新",
+                         "当前进度: " + prog + "\n\n请等待客户端更新完成后再进入主机大屏（不要同时开启多个更新进程）。");
         return;
     }
 
-    std::vector<std::pair<std::string, std::string>> envs;
+    std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
     if (perf.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }

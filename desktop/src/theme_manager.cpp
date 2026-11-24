@@ -327,11 +327,7 @@ void sync_labwc_window_theme(bool is_light) {
     if (current == target_theme && fs::exists(user_rc, ec)) return;
 
     content.replace(open_pos + 6, close_pos - (open_pos + 6), target_theme);
-    fs::create_directories(user_dir, ec);
-    std::ofstream ofs(user_rc, std::ios::trunc);
-    if (ofs.is_open()) {
-        ofs << content;
-        ofs.close();
+    if (write_text_file(user_rc.string(), content)) {
         spawn_argv_detached({"pkill", "-HUP", "-x", "labwc"});
     }
 }
@@ -348,13 +344,8 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
         return;
     }
 
-    std::error_code ec;
-    fs::path dir = fs::path(home_dir()) / ".config/spinelos";
-    fs::create_directories(dir, ec);
-    std::ofstream ofs(dir / "theme.conf");
-    if (ofs.is_open()) {
-        ofs << theme_id << "\n";
-    }
+    fs::path theme_file = fs::path(home_dir()) / ".config/spinelos/theme.conf";
+    write_text_file(theme_file.string(), theme_id + "\n");
     ThemeSpec active = get_active_theme();
     std::fprintf(stderr, "[Theme] 切换主题 request='%s' -> active='%s' (is_light=%s)\n",
                  theme_id.c_str(), active.id.c_str(), active.is_light ? "true" : "false");

@@ -3,7 +3,9 @@
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 
+#include <signal.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
@@ -199,10 +201,22 @@ std::string detect_mem_usage(int *used_mb_out = nullptr) {
 }
 
 std::string detect_network_status() {
-    std::string net = run_cmd_capture(
-        "nmcli -t -f DEVICE,TYPE,STATE dev status 2>/dev/null | awk -F: '$3==\"connected\" {print $1\" (\"$2\")\"; exit}'"
-    );
-    return net.empty() ? "Offline" : net;
+    std::error_code ec;
+    fs::path net_dir("/sys/class/net");
+    if (!fs::is_directory(net_dir, ec)) return "Offline";
+    for (const auto &entry : fs::directory_iterator(net_dir, ec)) {
+        std::string iface = entry.path().filename().string();
+        if (iface == "lo" || iface.rfind("veth", 0) == 0 || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0) {
+            continue;
+        }
+        std::string oper = trim_copy(read_first_line((entry.path() / "operstate").string(), ""));
+        std::string carrier = trim_copy(read_first_line((entry.path() / "carrier").string(), ""));
+        if (oper == "up" || carrier == "1") {
+            bool is_wifi = fs::exists(entry.path() / "wireless", ec) || iface.rfind("wl", 0) == 0;
+            return iface + (is_wifi ? " (wifi)" : " (ethernet)");
+        }
+    }
+    return "Offline";
 }
 
 bool detect_low_fx_mode() {
@@ -336,25 +350,28 @@ void update_proxy_config(AppState *state, const std::string &payload) {
         cfg.enabled = false;
     }
 
-    std::error_code ec;
-    fs::create_directories(config_dir(), ec);
-    std::ofstream ofs(config_dir() / "proxy.conf");
-    if (ofs.is_open()) {
-        ofs << "enabled=" << (cfg.enabled ? "true" : "false") << "\n"
-            << "http_proxy=" << cfg.http_proxy << "\n"
-            << "socks_proxy=" << cfg.socks_proxy << "\n"
-            << "no_proxy=" << cfg.no_proxy << "\n";
-    }
+    std::ostringstream out;
+    out << "enabled=" << (cfg.enabled ? "true" : "false") << "\n"
+        << "http_proxy=" << cfg.http_proxy << "\n"
+        << "socks_proxy=" << cfg.socks_proxy << "\n"
+        << "no_proxy=" << cfg.no_proxy << "\n";
+    write_text_file((config_dir() / "proxy.conf").string(), out.str());
     sync_process_proxy_env();
     append_app_log(cfg.enabled
         ? ("[Proxy] 已启用系统代理: http=" + cfg.http_proxy + " socks=" + cfg.socks_proxy)
         : "[Proxy] 已关闭系统代理（直连模式）");
     if (state) {
         push_proxy_config(state);
+        std::string pg_out;
+        int pg_rc = 1;
+        bool steam_running = run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pg_out, pg_rc) && pg_rc == 0;
+        std::string ok_msg = cfg.enabled
+            ? (steam_running
+                ? "系统代理已启用！检测到 Steam 正在运行，再次点击任意 Steam 启动按钮会自动用新代理重启它。"
+                : "系统代理已启用，对新启动的 Steam / 商店 / 终端立即生效。")
+            : "已关闭代理并恢复直连。";
         eval_js(state->settings_view,
-                cfg.enabled
-                    ? "window.__spinelProxyAction && window.__spinelProxyAction(true, \"系统代理已启用，对新启动的 Steam / 商店 / 终端立即生效。\");"
-                    : "window.__spinelProxyAction && window.__spinelProxyAction(true, \"已关闭代理并恢复直连。\");");
+                "window.__spinelProxyAction && window.__spinelProxyAction(true,\"" + json_escape(ok_msg) + "\");");
     }
 }
 
@@ -398,16 +415,13 @@ void update_perf_config(AppState *state, const std::string &payload) {
         }
     }
 
-    std::error_code ec;
-    fs::create_directories(config_dir(), ec);
-    std::ofstream ofs(config_dir() / "perf.conf");
-    if (ofs.is_open()) {
-        ofs << "mangohud=" << cfg.mangohud << "\n"
-            << "fps_limit=" << cfg.fps_limit << "\n"
-            << "fsr=" << (cfg.fsr ? "true" : "false") << "\n"
-            << "gamemode=" << (cfg.gamemode ? "true" : "false") << "\n"
-            << "render_res=" << cfg.render_res << "\n";
-    }
+    std::ostringstream perf_out;
+    perf_out << "mangohud=" << cfg.mangohud << "\n"
+             << "fps_limit=" << cfg.fps_limit << "\n"
+             << "fsr=" << (cfg.fsr ? "true" : "false") << "\n"
+             << "gamemode=" << (cfg.gamemode ? "true" : "false") << "\n"
+             << "render_res=" << cfg.render_res << "\n";
+    write_text_file((config_dir() / "perf.conf").string(), perf_out.str());
     sync_mangohud_config(cfg);
     push_perf_config(state);
     native_shell_sync_perf(state);
@@ -430,13 +444,18 @@ void update_perf_config(AppState *state, const std::string &payload) {
 }
 
 TelemetrySnapshot collect_telemetry() {
+    static const std::string cached_gpu = detect_gpu_summary();
+    static const std::string cached_kernel = read_first_line("/proc/sys/kernel/osrelease", "Linux");
+    static const bool cached_live = is_live_iso_env();
+    static const bool cached_low_fx = detect_low_fx_mode();
+
     TelemetrySnapshot snap;
-    snap.gpu = detect_gpu_summary();
+    snap.gpu = cached_gpu;
     snap.mem = detect_mem_usage(&snap.mem_used_mb);
     snap.net = detect_network_status();
-    snap.kernel = read_first_line("/proc/sys/kernel/osrelease", "Linux");
-    snap.is_live = is_live_iso_env();
-    snap.low_fx = detect_low_fx_mode();
+    snap.kernel = cached_kernel;
+    snap.is_live = cached_live;
+    snap.low_fx = cached_low_fx;
     return snap;
 }
 
@@ -749,14 +768,10 @@ void apply_display_mode(AppState *state, const std::string &payload) {
     int rc = 0;
     run_argv_capture({"wlr-randr", "--output", output, "--mode", mode, "--scale", scale}, out, rc);
     if (rc == 0) {
-        std::error_code ec;
-        fs::create_directories(config_dir(), ec);
         fs::path script_path = config_dir() / "display.sh";
-        std::ofstream ofs(script_path);
-        if (ofs.is_open()) {
-            ofs << "#!/usr/bin/env bash\n"
-                << "wlr-randr --output \"" << output << "\" --mode \"" << mode << "\" --scale \"" << scale << "\"\n";
-        }
+        std::string sh_body = "#!/usr/bin/env bash\nwlr-randr --output \"" + output +
+                              "\" --mode \"" + mode + "\" --scale \"" + scale + "\"\n";
+        write_text_file(script_path.string(), sh_body);
         chmod(script_path.c_str(), 0755);
     }
 
@@ -1522,10 +1537,185 @@ void reload_desktop_portals(AppState *state) {
     if (state) {
         std::thread([state]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(600));
-            post_js_to_main(state, "window.__spinelPermsFeedback && window.__spinelPermsFeedback(true, \"已重载 Desktop Portals（文件/录屏/设备授权弹窗服务）。\");", false);
+            post_js_to_main(state, "window.__spinelPermsFeedback && window.__spinelPermsFeedback(true, \"已重载权限弹窗服务。\");", false);
             g_idle_add([](gpointer d) -> gboolean {
                 auto *st = static_cast<AppState *>(d);
                 if (!st->shutting_down.load()) push_perms_state(st);
+                return G_SOURCE_REMOVE;
+            }, state);
+        }).detach();
+    }
+}
+
+namespace {
+
+struct ProcRow {
+    int pid = 0;
+    std::string name;
+    std::string cmd;
+    double cpu_pct = 0.0;
+    long rss_mb = 0;
+    bool is_core = false;
+    bool own = false;
+};
+
+bool read_total_cpu_jiffies(unsigned long long &total_out, unsigned long long &idle_out) {
+    std::ifstream ifs("/proc/stat");
+    if (!ifs.is_open()) return false;
+    std::string tag;
+    unsigned long long u = 0, n = 0, s = 0, id = 0, io = 0, irq = 0, sirq = 0, st = 0;
+    if (!(ifs >> tag >> u >> n >> s >> id >> io >> irq >> sirq >> st) || tag != "cpu") return false;
+    idle_out = id + io;
+    total_out = u + n + s + id + io + irq + sirq + st;
+    return true;
+}
+
+}  // namespace
+
+void push_process_list(AppState *state) {
+    if (!state || !state->settings_view) return;
+    static unsigned long long prev_total = 0;
+    static unsigned long long prev_idle = 0;
+    static std::map<int, unsigned long long> prev_proc_ticks;
+
+    unsigned long long cur_total = 0, cur_idle = 0;
+    read_total_cpu_jiffies(cur_total, cur_idle);
+    unsigned long long delta_total = (prev_total > 0 && cur_total > prev_total) ? (cur_total - prev_total) : 0;
+    unsigned long long delta_idle = (prev_idle > 0 && cur_idle >= prev_idle) ? (cur_idle - prev_idle) : 0;
+    double sys_cpu = (delta_total > 0)
+        ? std::clamp(100.0 * static_cast<double>(delta_total - delta_idle) / static_cast<double>(delta_total), 0.0, 100.0)
+        : 0.0;
+    long num_cpus = std::max(1L, sysconf(_SC_NPROCESSORS_ONLN));
+    long page_kb = std::max(1L, sysconf(_SC_PAGESIZE) / 1024);
+
+    uid_t my_uid = getuid();
+    std::map<int, unsigned long long> next_ticks;
+    std::vector<ProcRow> rows;
+    int total_procs = 0;
+
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator("/proc", ec)) {
+        std::string fname = entry.path().filename().string();
+        if (fname.empty() || !std::all_of(fname.begin(), fname.end(), ::isdigit)) continue;
+        int pid = std::atoi(fname.c_str());
+        if (pid <= 0) continue;
+        ++total_procs;
+
+        std::ifstream stat_ifs(entry.path() / "stat");
+        if (!stat_ifs.is_open()) continue;
+        std::string stat_line;
+        std::getline(stat_ifs, stat_line);
+        auto lp = stat_line.find('(');
+        auto rp = stat_line.rfind(')');
+        if (lp == std::string::npos || rp == std::string::npos || rp <= lp) continue;
+
+        std::string comm = stat_line.substr(lp + 1, rp - lp - 1);
+        std::istringstream rest(stat_line.substr(rp + 2));
+        std::string state_ch;
+        long ppid = 0, pgrp = 0, sess = 0, tty = 0, tpgid = 0;
+        unsigned long flags = 0, minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0;
+        unsigned long long utime = 0, stime = 0;
+        long cutime = 0, cstime = 0, prio = 0, nicev = 0, nthreads = 0, itreal = 0;
+        unsigned long long start = 0, vsize = 0;
+        long rss_pages = 0;
+        rest >> state_ch >> ppid >> pgrp >> sess >> tty >> tpgid >> flags >> minflt >> cminflt
+             >> majflt >> cmajflt >> utime >> stime >> cutime >> cstime >> prio >> nicev
+             >> nthreads >> itreal >> start >> vsize >> rss_pages;
+
+        unsigned long long p_ticks = utime + stime;
+        next_ticks[pid] = p_ticks;
+        double cpu_pct = 0.0;
+        if (delta_total > 0) {
+            auto it = prev_proc_ticks.find(pid);
+            if (it != prev_proc_ticks.end() && p_ticks >= it->second) {
+                cpu_pct = 100.0 * static_cast<double>(p_ticks - it->second) * static_cast<double>(num_cpus) /
+                          static_cast<double>(delta_total);
+            }
+        }
+        long rss_mb = (rss_pages * page_kb) / 1024;
+        if (rss_mb < 2 && cpu_pct < 0.2) continue;  // Skip tiny idle kernel/system threads for clean UX
+
+        struct stat st_buf{};
+        bool own = (::stat(entry.path().c_str(), &st_buf) == 0 && st_buf.st_uid == my_uid);
+
+        std::string cmdline;
+        std::ifstream cmd_ifs(entry.path() / "cmdline", std::ios::binary);
+        if (cmd_ifs.is_open()) {
+            std::string raw((std::istreambuf_iterator<char>(cmd_ifs)), std::istreambuf_iterator<char>());
+            for (char &c : raw) if (c == '\0') c = ' ';
+            cmdline = trim_copy(raw);
+            if (cmdline.size() > 96) cmdline = cmdline.substr(0, 93) + "...";
+        }
+        if (cmdline.empty()) cmdline = comm;
+
+        bool is_core = (pid <= 2 || comm == "labwc" || comm == "spinel-shell" || comm == "systemd" ||
+                        comm == "dbus-daemon" || comm == "dbus-broker");
+        rows.push_back({pid, comm, cmdline, cpu_pct, rss_mb, is_core, own});
+    }
+
+    prev_total = cur_total;
+    prev_idle = cur_idle;
+    prev_proc_ticks = std::move(next_ticks);
+
+    std::sort(rows.begin(), rows.end(), [](const ProcRow &a, const ProcRow &b) {
+        if (std::abs(a.cpu_pct - b.cpu_pct) > 0.4) return a.cpu_pct > b.cpu_pct;
+        return a.rss_mb > b.rss_mb;
+    });
+    if (rows.size() > 60) rows.resize(60);
+
+    int mem_used = 0;
+    std::string mem_str = detect_mem_usage(&mem_used);
+
+    std::ostringstream js;
+    js << "window.__spinelProcessList && window.__spinelProcessList({"
+       << "\"cpu_pct\":" << static_cast<int>(sys_cpu + 0.5) << ","
+       << "\"mem\":\"" << json_escape(mem_str) << "\","
+       << "\"total_procs\":" << total_procs << ","
+       << "\"procs\":[";
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (i > 0) js << ",";
+        char cbuf[16];
+        std::snprintf(cbuf, sizeof(cbuf), "%.1f", rows[i].cpu_pct);
+        js << "{"
+           << "\"pid\":" << rows[i].pid << ","
+           << "\"name\":\"" << json_escape(rows[i].name) << "\","
+           << "\"cmd\":\"" << json_escape(rows[i].cmd) << "\","
+           << "\"cpu\":" << cbuf << ","
+           << "\"mem_mb\":" << rows[i].rss_mb << ","
+           << "\"is_core\":" << (rows[i].is_core ? "true" : "false") << ","
+           << "\"own\":" << (rows[i].own ? "true" : "false")
+           << "}";
+    }
+    js << "]});";
+    eval_js(state->settings_view, js.str());
+}
+
+void kill_process_by_pid(AppState *state, int pid, bool force) {
+    if (pid <= 1 || pid == getpid()) {
+        if (state && state->settings_view) {
+            eval_js(state->settings_view,
+                    "window.__spinelProcsFeedback && window.__spinelProcsFeedback(false, \"无法结束系统核心自身进程。\");");
+        }
+        return;
+    }
+    int sig = force ? SIGKILL : SIGTERM;
+    int rc = ::kill(static_cast<pid_t>(pid), sig);
+    bool ok = (rc == 0);
+    std::string msg = ok
+        ? ("已向进程 PID " + std::to_string(pid) + (force ? " 发送强制结束 (SIGKILL)" : " 发送结束信号 (SIGTERM)"))
+        : ("无法结束 PID " + std::to_string(pid) + "（可能需要管理员权限或进程已退出）");
+    append_app_log("[Proc] " + msg);
+    if (state && state->settings_view) {
+        eval_js(state->settings_view,
+                "window.__spinelProcsFeedback && window.__spinelProcsFeedback(" +
+                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    }
+    if (state) {
+        std::thread([state]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(180));
+            g_idle_add([](gpointer d) -> gboolean {
+                auto *st = static_cast<AppState *>(d);
+                if (!st->shutting_down.load()) push_process_list(st);
                 return G_SOURCE_REMOVE;
             }, state);
         }).detach();

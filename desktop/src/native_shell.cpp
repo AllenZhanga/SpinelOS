@@ -911,6 +911,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"蓝牙与手柄", "settings:open:bt"},
             {"显示器分辨率", "settings:open:display"},
             {"游戏性能优化", "settings:open:perf"},
+            {"进程与资源监控", "settings:open:procs"},
             {"外观主题与输入法", "settings:open:appearance"},
             {"应用权限与安全", "settings:open:perms"},
             {"系统日志与排障", "settings:open:logs"}
@@ -1015,6 +1016,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         {nullptr, ""},
         {"游戏与启动中心", "games:open"},
         {"应用商店", "store:open"},
+        {"进程与资源监控", "settings:open:procs"},
         {"权限与安全...", "settings:open:perms"},
         {"查看系统日志", "settings:open:logs"},
         {nullptr, ""},
@@ -1040,11 +1042,11 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_set_halign(right, GTK_ALIGN_END);
     gtk_widget_set_valign(right, GTK_ALIGN_CENTER);
 
-    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "games:open");
+    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "settings:open:procs");
     ns->bar_mem_lbl = gtk_label_new("--");
     gtk_widget_add_css_class(ns->bar_mem_lbl, "spinel-bar-mem");
     gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
-    gtk_widget_set_tooltip_text(mem_btn, "内存占用");
+    gtk_widget_set_tooltip_text(mem_btn, "内存占用（点击打开进程监控）");
 
     ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
     GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "游戏与启动中心", "games:open");

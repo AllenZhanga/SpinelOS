@@ -67,6 +67,32 @@ std::string read_first_line(const std::string &path, const std::string &fallback
     return line;
 }
 
+bool write_text_file(const std::string &path, const std::string &content) {
+    std::error_code ec;
+    fs::path p(path);
+    if (p.has_parent_path()) {
+        fs::create_directories(p.parent_path(), ec);
+    }
+    fs::path tmp = p.string() + ".tmp." + std::to_string(getpid());
+    {
+        std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
+        if (!ofs.is_open()) return false;
+        ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+        ofs.flush();
+        if (!ofs.good()) return false;
+    }
+    fs::rename(tmp, p, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        if (!ofs.is_open()) return false;
+        ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+        ofs.flush();
+        return ofs.good();
+    }
+    return true;
+}
+
 std::string run_cmd_capture(const char *cmd) {
     std::array<char, 512> buffer{};
     std::string result;
