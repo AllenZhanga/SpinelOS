@@ -502,8 +502,6 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         set_ime_engine(state, "rime");
     } else if (cmd == "ime:install-rime-ice") {
         install_rime_ice_dict(state);
-    } else if (cmd == "ime:toggle-zhwiki") {
-        toggle_zhwiki_dict(state);
     } else if (cmd == "ime:restart") {
         restart_fcitx5_daemon(state);
     } else if (cmd == "ime:config") {

@@ -1062,32 +1062,37 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     fs::path cui = conf_dir / "classicui.conf";
     std::string theme_name = is_light ? "SpinelLight" : "SpinelDark";
     if (!fs::exists(cui, ec) || force_overwrite) {
-        std::ofstream ofs(cui, std::ios::trunc);
-        if (ofs.is_open()) {
-            ofs << "Vertical Candidate List=False\n"
-                << "PerScreenDPI=True\n"
-                << "Font=\"Noto Sans CJK SC 11\"\n"
-                << "Theme=" << theme_name << "\n";
-        }
+        std::ostringstream out;
+        out << "Vertical Candidate List=False\n"
+            << "PerScreenDPI=True\n"
+            << "Font=\"Noto Sans CJK SC 12\"\n"
+            << "Theme=" << theme_name << "\n";
+        write_text_file(cui.string(), out.str());
         return;
     }
     std::ifstream ifs(cui);
     if (!ifs.is_open()) return;
     std::ostringstream out;
     std::string line;
-    bool replaced = false;
+    bool replaced_theme = false;
+    bool replaced_font = false;
     while (std::getline(ifs, line)) {
         if (line.rfind("Theme=", 0) == 0) {
             out << "Theme=" << theme_name << "\n";
-            replaced = true;
+            replaced_theme = true;
+        } else if (line == "Font=\"Noto Sans CJK SC 11\"") {
+            out << "Font=\"Noto Sans CJK SC 12\"\n";
+            replaced_font = true;
         } else {
             out << line << "\n";
         }
     }
     ifs.close();
-    if (!replaced) out << "Theme=" << theme_name << "\n";
-    std::ofstream ofs(cui, std::ios::trunc);
-    if (ofs.is_open()) ofs << out.str();
+    if (!replaced_theme) out << "Theme=" << theme_name << "\n";
+    if (!replaced_font && out.str().find("Font=") == std::string::npos) {
+        out << "Font=\"Noto Sans CJK SC 12\"\n";
+    }
+    write_text_file(cui.string(), out.str());
 }
 
 void stop_fcitx5_sync() {
@@ -1147,20 +1152,16 @@ void write_rime_default_custom(bool prefer_rime_ice) {
     std::error_code ec;
     fs::create_directories(rime_dir, ec);
     fs::path custom = rime_dir / "default.custom.yaml";
-    if (!prefer_rime_ice && fs::exists(custom, ec)) return;
-    std::ofstream ofs(custom, std::ios::trunc);
-    if (ofs.is_open()) {
-        ofs << "patch:\n";
-        if (prefer_rime_ice) {
-            ofs << "  schema_list:\n"
-                << "    - schema: rime_ice\n";
-        } else {
-            ofs << "  schema_list:\n"
-                << "    - schema: pinyin_simp\n"
-                << "    - schema: luna_pinyin_simp\n";
-        }
-        ofs << "  \"menu/page_size\": 7\n";
+    if (!prefer_rime_ice) {
+        fs::remove(custom, ec);
+        return;
     }
+    std::string content =
+        "patch:\n"
+        "  schema_list:\n"
+        "    - schema: rime_ice\n"
+        "  \"menu/page_size\": 7\n";
+    write_text_file(custom.string(), content);
 }
 
 std::string detect_active_ime_engine() {
@@ -1187,8 +1188,9 @@ void ensure_fcitx5_defaults(bool is_light) {
     ensure_chromium_ime_flags();
 
     std::string active_im = detect_active_ime_engine();
-    if (active_im == "none") {
-        // Stop running fcitx5 before writing profile so shutdown doesn't overwrite it with keyboard-us only
+    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    if (active_im == "none" || (active_im == "rime" && !has_ice)) {
+        // Default to built-in lightweight Chinese Pinyin unless rime-ice is installed & active
         std::string pg_out;
         int pg_rc = 1;
         bool was_running = run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) && pg_rc == 0;
@@ -1198,18 +1200,11 @@ void ensure_fcitx5_defaults(bool is_light) {
             spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
         }
     }
-    if (!fs::exists(fdir / "conf/classicui.conf", ec)) {
-        write_fcitx5_classicui(is_light, true);
-    }
+    write_fcitx5_classicui(is_light, !fs::exists(fdir / "conf/classicui.conf", ec));
     fs::path pyconf = fdir / "conf/pinyin.conf";
     if (!fs::exists(pyconf, ec)) {
-        std::ofstream ofs(pyconf);
-        if (ofs.is_open()) {
-            ofs << "PageSize=7\n"
-                << "CloudPinyinEnabled=False\n";
-        }
+        write_text_file(pyconf.string(), "PageSize=7\nCloudPinyinEnabled=False\n");
     }
-    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
     write_rime_default_custom(has_ice);
 }
 
@@ -1263,8 +1258,6 @@ void push_ime_state(AppState *state) {
                    fs::exists("/usr/share/fcitx5/addon/rime.conf");
     std::error_code ec;
     bool rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
-    bool zhwiki = fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwiki.dict", ec) ||
-                  fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwikisource.dict", ec);
     std::string pid_out;
     int pid_rc = 1;
     bool running = installed && run_argv_capture({"pgrep", "-x", "fcitx5"}, pid_out, pid_rc) && pid_rc == 0;
@@ -1290,7 +1283,6 @@ void push_ime_state(AppState *state) {
        << "\"running\":" << (running ? "true" : "false") << ","
        << "\"rime_installed\":" << (rime_ok ? "true" : "false") << ","
        << "\"rime_ice\":" << (rime_ice ? "true" : "false") << ","
-       << "\"zhwiki\":" << (zhwiki ? "true" : "false") << ","
        << "\"rss_mb\":" << rss_mb << ","
        << "\"engine\":\"" << engine << "\""
        << "});";
@@ -1320,6 +1312,13 @@ void restart_fcitx5_daemon(AppState *state) {
 }
 
 void set_ime_engine(AppState *state, const std::string &engine) {
+    if (engine == "rime") {
+        std::error_code ec;
+        if (!fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec)) {
+            install_rime_ice_dict(state);
+            return;
+        }
+    }
     std::string target = (engine == "rime") ? "rime" : "pinyin";
     // Stop fcitx5 before writing profile so exit handler doesn't clobber the new profile
     stop_fcitx5_sync();
@@ -1359,68 +1358,6 @@ void install_rime_ice_dict(AppState *state) {
             post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"雾凇拼音下载失败（网络访问 GitHub 超时），可先在「Wi-Fi / 网络」里开启代理后再试，或直接使用内置中文拼音。\");", false);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
-        g_idle_add([](gpointer d) -> gboolean {
-            auto *st = static_cast<AppState *>(d);
-            if (!st->shutting_down.load()) push_ime_state(st);
-            return G_SOURCE_REMOVE;
-        }, state);
-    }).detach();
-}
-
-void toggle_zhwiki_dict(AppState *state) {
-    if (!state) return;
-    std::error_code ec;
-    bool remove = fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwiki.dict", ec) ||
-                  fs::exists("/usr/share/fcitx5/pinyin/dictionaries/zhwikisource.dict", ec);
-    post_js_to_main(
-        state,
-        std::string("window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"") +
-            (remove ? "正在卸载 fcitx5-pinyin-zhwiki 并释放内存，若弹出密码框请授权..."
-                    : "正在安装 fcitx5-pinyin-zhwiki 维基扩展词库，若弹出密码框请授权...") +
-            "\");",
-        false);
-    std::thread([state, remove]() {
-        std::string dummy;
-        int sudo_rc = 1;
-        bool nopass = run_argv_capture({"sudo", "-n", "true"}, dummy, sudo_rc) && sudo_rc == 0;
-        std::vector<std::string> cmd = nopass
-            ? std::vector<std::string>{"sudo", "-n"}
-            : std::vector<std::string>{"pkexec"};
-        if (remove) {
-            cmd.insert(cmd.end(), {"pacman", "-Rns", "--noconfirm", "fcitx5-pinyin-zhwiki"});
-        } else {
-            ProxyConfig pc = load_proxy_config();
-            if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
-                std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
-                cmd.insert(cmd.end(), {"env", "http_proxy=" + hv, "https_proxy=" + hv});
-            }
-            cmd.insert(cmd.end(), {"pacman", "-Sy", "--noconfirm", "fcitx5-pinyin-zhwiki"});
-        }
-        std::string out;
-        int rc = 1;
-        run_argv_capture(cmd, out, rc);
-        if (rc == 0) {
-            stop_fcitx5_sync();
-            if (has_executable("fcitx5")) {
-                spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(600));
-            append_app_log(remove ? "[IME] 已卸载 fcitx5-pinyin-zhwiki，释放约 220MB 内存"
-                                  : "[IME] 已安装 fcitx5-pinyin-zhwiki 维基词库");
-            post_js_to_main(
-                state,
-                std::string("window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"") +
-                    (remove ? "已卸载维基超大词库并重启输入法，内存占用已大幅降低！"
-                            : "已安装维基扩展词库并重启输入法！") +
-                    "\");",
-                false);
-        } else {
-            append_app_log("[IME] zhwiki 词库变更失败: " + out);
-            post_js_to_main(
-                state,
-                "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"操作已取消或执行失败（请查看系统日志）。\");",
-                false);
-        }
         g_idle_add([](gpointer d) -> gboolean {
             auto *st = static_cast<AppState *>(d);
             if (!st->shutting_down.load()) push_ime_state(st);

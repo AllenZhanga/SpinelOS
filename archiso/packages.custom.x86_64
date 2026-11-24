@@ -93,11 +93,10 @@ noto-fonts
 noto-fonts-cjk
 ttf-dejavu
 
-# Input Method (Fcitx5 Wayland + Chinese Pinyin & Rime)
+# Input Method (Fcitx5 Wayland + Chinese Pinyin & optional Rime-Ice)
 fcitx5
 fcitx5-chinese-addons
 fcitx5-rime
-rime-pinyin-simp
 fcitx5-gtk
 fcitx5-qt
 fcitx5-configtool

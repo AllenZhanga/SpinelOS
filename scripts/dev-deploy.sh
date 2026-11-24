@@ -79,11 +79,13 @@ if [ "$MODE" = "full" ]; then
     zram-generator btrfs-progs snapper reflector \
     spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
     polkit-gnome xdg-desktop-portal-gtk \
-    fcitx5 fcitx5-chinese-addons fcitx5-rime rime-pinyin-simp fcitx5-gtk fcitx5-qt fcitx5-configtool
-  if pacman -Qq fcitx5-pinyin-zhwiki >/dev/null 2>&1; then
-    echo "==> Removing heavy fcitx5-pinyin-zhwiki (saves ~220 MB IME RAM; optional in Settings)..."
-    sudo pacman -Rns --noconfirm fcitx5-pinyin-zhwiki 2>/dev/null || true
-  fi
+    fcitx5 fcitx5-chinese-addons fcitx5-rime fcitx5-gtk fcitx5-qt fcitx5-configtool
+  for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp; do
+    if pacman -Qq "$legacy_ime" >/dev/null 2>&1; then
+      echo "==> Removing legacy IME dictionary package $legacy_ime..."
+      sudo pacman -Rns --noconfirm "$legacy_ime" 2>/dev/null || true
+    fi
+  done
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi

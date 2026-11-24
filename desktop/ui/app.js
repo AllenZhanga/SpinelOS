@@ -1273,24 +1273,22 @@
       if (!data.installed) chip.textContent = "未安装（需 --full 更新）";
       else {
         const engText = data.engine === "rime"
-          ? (data.rime_ice ? "Rime 雾凇拼音" : "Rime 中州韵")
+          ? "Rime 雾凇拼音"
           : (data.engine === "pinyin" ? "内置中文拼音" : "未配置中文方案");
         const rssText = (data.running && data.rss_mb > 0) ? ` · ${data.rss_mb} MB` : "";
         chip.textContent = (data.running ? "运行中 · " : "未启动 · ") + engText + rssText;
       }
     }
     document.getElementById("btn-ime-pinyin")?.classList.toggle("active", data.engine === "pinyin");
-    document.getElementById("btn-ime-rime")?.classList.toggle("active", data.engine === "rime");
+    const rimeBtn = document.getElementById("btn-ime-rime");
+    if (rimeBtn) {
+      rimeBtn.classList.toggle("active", data.engine === "rime");
+      rimeBtn.classList.toggle("hidden", !data.rime_ice);
+    }
     const iceBtn = document.getElementById("btn-ime-ice");
     if (iceBtn) {
-      iceBtn.textContent = data.rime_ice ? "更新雾凇拼音词库 (已安装)" : "安装雾凇拼音词库 (rime-ice)";
-    }
-    const zhBtn = document.getElementById("btn-ime-zhwiki");
-    if (zhBtn) {
-      zhBtn.textContent = data.zhwiki
-        ? "卸载维基词库 (释放 ~220MB 内存)"
-        : "可选: 安装维基词库 (+220MB)";
-      zhBtn.classList.toggle("danger", Boolean(data.zhwiki));
+      iceBtn.textContent = data.rime_ice ? "更新雾凇拼音词库" : "安装并启用雾凇拼音 (rime-ice)";
+      iceBtn.classList.toggle("primary", !data.rime_ice);
     }
   };
 

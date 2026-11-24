@@ -75,7 +75,6 @@ void sync_terminal_theme(bool is_light);
 void push_ime_state(AppState *state);
 void set_ime_engine(AppState *state, const std::string &engine);
 void install_rime_ice_dict(AppState *state);
-void toggle_zhwiki_dict(AppState *state);
 void restart_fcitx5_daemon(AppState *state);
 
 void push_perms_state(AppState *state);
