@@ -1,6 +1,7 @@
 #include "theme_manager.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "system_control.hpp"
 
 #include <cctype>
 #include <cstdlib>
@@ -321,6 +322,8 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
     if (ofs.is_open()) {
         ofs << theme_id << "\n";
     }
+    ThemeSpec active = get_active_theme();
+    sync_fcitx5_theme(active.is_light);
     push_theme_state(state);
     native_shell_sync_theme(state);
 }

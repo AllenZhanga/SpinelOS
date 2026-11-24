@@ -982,3 +982,213 @@ void open_native_log_window(AppState *state, const std::string &banner) {
     refresh_native_log_view(ctx);
     gtk_window_present(ctx->win);
 }
+
+namespace {
+
+void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
+    fs::path conf_dir = fs::path(home_dir()) / ".config/fcitx5/conf";
+    std::error_code ec;
+    fs::create_directories(conf_dir, ec);
+    fs::path cui = conf_dir / "classicui.conf";
+    std::string theme_name = is_light ? "SpinelLight" : "SpinelDark";
+    if (!fs::exists(cui, ec) || force_overwrite) {
+        std::ofstream ofs(cui, std::ios::trunc);
+        if (ofs.is_open()) {
+            ofs << "Vertical Candidate List=False\n"
+                << "PerScreenDPI=True\n"
+                << "Font=\"Noto Sans CJK SC 11\"\n"
+                << "Theme=" << theme_name << "\n";
+        }
+        return;
+    }
+    std::ifstream ifs(cui);
+    if (!ifs.is_open()) return;
+    std::ostringstream out;
+    std::string line;
+    bool replaced = false;
+    while (std::getline(ifs, line)) {
+        if (line.rfind("Theme=", 0) == 0) {
+            out << "Theme=" << theme_name << "\n";
+            replaced = true;
+        } else {
+            out << line << "\n";
+        }
+    }
+    ifs.close();
+    if (!replaced) out << "Theme=" << theme_name << "\n";
+    std::ofstream ofs(cui, std::ios::trunc);
+    if (ofs.is_open()) ofs << out.str();
+}
+
+void write_fcitx5_profile(const std::string &chinese_engine) {
+    fs::path prof = fs::path(home_dir()) / ".config/fcitx5/profile";
+    std::error_code ec;
+    fs::create_directories(prof.parent_path(), ec);
+    std::string engine = (chinese_engine == "rime") ? "rime" : "pinyin";
+    std::ofstream ofs(prof, std::ios::trunc);
+    if (ofs.is_open()) {
+        ofs << "[Groups/0]\n"
+            << "Name=默认\n"
+            << "Default Layout=us\n"
+            << "DefaultIM=" << engine << "\n\n"
+            << "[Groups/0/Items/0]\n"
+            << "Name=keyboard-us\n"
+            << "Layout=\n\n"
+            << "[Groups/0/Items/1]\n"
+            << "Name=" << engine << "\n"
+            << "Layout=\n\n"
+            << "[GroupOrder]\n"
+            << "0=默认\n";
+    }
+}
+
+void write_rime_default_custom(bool prefer_rime_ice) {
+    fs::path rime_dir = fs::path(home_dir()) / ".local/share/fcitx5/rime";
+    std::error_code ec;
+    fs::create_directories(rime_dir, ec);
+    fs::path custom = rime_dir / "default.custom.yaml";
+    if (!prefer_rime_ice && fs::exists(custom, ec)) return;
+    std::ofstream ofs(custom, std::ios::trunc);
+    if (ofs.is_open()) {
+        ofs << "patch:\n";
+        if (prefer_rime_ice) {
+            ofs << "  schema_list:\n"
+                << "    - schema: rime_ice\n";
+        } else {
+            ofs << "  schema_list:\n"
+                << "    - schema: pinyin_simp\n"
+                << "    - schema: luna_pinyin_simp\n";
+        }
+        ofs << "  \"menu/page_size\": 7\n";
+    }
+}
+
+std::string detect_active_ime_engine() {
+    fs::path prof = fs::path(home_dir()) / ".config/fcitx5/profile";
+    std::ifstream ifs(prof);
+    if (!ifs.is_open()) return "pinyin";
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    if (content.find("Name=rime") != std::string::npos || content.find("DefaultIM=rime") != std::string::npos) {
+        return "rime";
+    }
+    return "pinyin";
+}
+
+}  // namespace
+
+void ensure_fcitx5_defaults(bool is_light) {
+    std::error_code ec;
+    fs::path fdir = fs::path(home_dir()) / ".config/fcitx5";
+    fs::create_directories(fdir / "conf", ec);
+
+    if (!fs::exists(fdir / "profile", ec)) {
+        write_fcitx5_profile("pinyin");
+    }
+    if (!fs::exists(fdir / "conf/classicui.conf", ec)) {
+        write_fcitx5_classicui(is_light, true);
+    }
+    fs::path pyconf = fdir / "conf/pinyin.conf";
+    if (!fs::exists(pyconf, ec)) {
+        std::ofstream ofs(pyconf);
+        if (ofs.is_open()) {
+            ofs << "PageSize=7\n"
+                << "CloudPinyinEnabled=False\n";
+        }
+    }
+    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    write_rime_default_custom(has_ice);
+}
+
+void sync_fcitx5_theme(bool is_light) {
+    write_fcitx5_classicui(is_light, false);
+    if (has_executable("fcitx5-remote")) {
+        spawn_argv_detached({"fcitx5-remote", "-r"});
+    }
+}
+
+void push_ime_state(AppState *state) {
+    if (!state || !state->settings_view) return;
+    bool installed = has_executable("fcitx5");
+    bool rime_ok = has_executable("fcitx5-rime") ||
+                   fs::exists("/usr/lib/fcitx5/librime.so") ||
+                   fs::exists("/usr/share/fcitx5/addon/rime.conf");
+    std::error_code ec;
+    bool rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    std::string pid_out;
+    int pid_rc = 1;
+    bool running = installed && run_argv_capture({"pgrep", "-x", "fcitx5"}, pid_out, pid_rc) && pid_rc == 0;
+    std::string engine = detect_active_ime_engine();
+
+    std::ostringstream js;
+    js << "window.__spinelImeState && window.__spinelImeState({"
+       << "\"installed\":" << (installed ? "true" : "false") << ","
+       << "\"running\":" << (running ? "true" : "false") << ","
+       << "\"rime_installed\":" << (rime_ok ? "true" : "false") << ","
+       << "\"rime_ice\":" << (rime_ice ? "true" : "false") << ","
+       << "\"engine\":\"" << engine << "\""
+       << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void restart_fcitx5_daemon(AppState *state) {
+    if (!has_executable("fcitx5")) {
+        if (state && state->settings_view) {
+            eval_js(state->settings_view,
+                    "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"尚未安装 Fcitx5，请先运行 ./scripts/dev-deploy.sh --full 安装输入法组件。\");");
+        }
+        return;
+    }
+    spawn_argv_detached({"sh", "-c", "pkill -x fcitx5 2>/dev/null || true; sleep 0.2; nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+    append_app_log("[IME] 已重启 Fcitx5 输入法服务");
+    if (state) {
+        std::thread([state]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"Fcitx5 输入法服务已重启，按 Ctrl+Space 或 Shift 即可切换中英文。\");", false);
+        }).detach();
+    }
+}
+
+void set_ime_engine(AppState *state, const std::string &engine) {
+    std::string target = (engine == "rime") ? "rime" : "pinyin";
+    write_fcitx5_profile(target);
+    append_app_log("[IME] 切换中文输入法方案为: " + target);
+    restart_fcitx5_daemon(state);
+    if (state && state->settings_view) {
+        push_ime_state(state);
+    }
+}
+
+void install_rime_ice_dict(AppState *state) {
+    if (!state) return;
+    post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"正在下载雾凇拼音 (rime-ice) 词库并切换为 Rime，请稍候...\");", false);
+    std::thread([state]() {
+        fs::path rime_dir = fs::path(home_dir()) / ".local/share/fcitx5/rime";
+        std::error_code ec;
+        fs::create_directories(rime_dir, ec);
+        std::string cmd =
+            "tmp=$(mktemp -d); "
+            "if curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/iDvel/rime-ice/archive/refs/heads/main.tar.gz -o \"$tmp/ice.tar.gz\" && "
+            "tar -xzf \"$tmp/ice.tar.gz\" -C \"$tmp\" && "
+            "cp -a \"$tmp/rime-ice-main/.\" \"" + rime_dir.string() + "/\"; then "
+            "rm -rf \"$tmp\"; exit 0; else rm -rf \"$tmp\"; exit 1; fi";
+        std::string out;
+        int rc = 1;
+        run_argv_capture({"bash", "-c", cmd}, out, rc);
+        if (rc == 0) {
+            write_rime_default_custom(true);
+            write_fcitx5_profile("rime");
+            spawn_argv_detached({"sh", "-c", "pkill -x fcitx5 2>/dev/null || true; sleep 0.2; nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+            append_app_log("[IME] 雾凇拼音 (rime-ice) 下载安装成功并已激活 Rime");
+            post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"雾凇拼音 (rime-ice) 安装完成！已自动切换为 Rime 并重启输入法，按 Ctrl+Space 即可输入。\");", false);
+        } else {
+            append_app_log("[IME] 雾凇拼音下载失败 (code=" + std::to_string(rc) + "): " + out);
+            post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"雾凇拼音下载失败（网络访问 GitHub 超时），可先在「Wi-Fi / 网络」里开启代理后再试，或直接使用内置中文拼音。\");", false);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        g_idle_add([](gpointer d) -> gboolean {
+            auto *st = static_cast<AppState *>(d);
+            if (!st->shutting_down.load()) push_ime_state(st);
+            return G_SOURCE_REMOVE;
+        }, state);
+    }).detach();
+}

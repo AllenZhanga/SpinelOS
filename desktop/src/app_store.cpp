@@ -379,7 +379,7 @@ void launch_store_app(AppState *state, const std::string &app_id) {
         return;
     }
     if (app_id == "chromium") {
-        spawn_argv_logged({"chromium", "--ozone-platform-hint=auto"}, "Store:" + app_id);
+        spawn_argv_logged({"chromium", "--ozone-platform-hint=auto", "--enable-wayland-ime"}, "Store:" + app_id);
     } else if (app_id == "obs") {
         spawn_argv_logged({"obs"}, "Store:" + app_id);
     } else {

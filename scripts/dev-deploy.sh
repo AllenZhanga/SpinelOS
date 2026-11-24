@@ -75,15 +75,17 @@ sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, labwc/foot config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober
+    flatpak spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober \
+    fcitx5 fcitx5-chinese-addons fcitx5-pinyin-zhwiki fcitx5-rime rime-pinyin-simp fcitx5-gtk fcitx5-qt fcitx5-configtool
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /usr/share/themes/SpinelDark
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /usr/share/themes/SpinelDark /usr/share/fcitx5/themes
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/foot/. /etc/xdg/foot/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
+  sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
   sudo install -Dm755 /tmp/spinel-dev/spinel-install /usr/local/bin/spinel-install
 fi
@@ -93,6 +95,9 @@ export XDG_RUNTIME_DIR="/run/user/${UID_NUM}"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 export GDK_BACKEND=wayland
 export GTK_THEME=Adwaita
+export XMODIFIERS=@im=fcitx
+export QT_IM_MODULE=fcitx
+export SDL_IM_MODULE=fcitx
 
 WAYLAND_SOCK="$(ls "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n1 || true)"
 if [ -z "$WAYLAND_SOCK" ]; then
@@ -123,6 +128,11 @@ if [ "$MODE" = "full" ]; then
     pkill -x spice-vdagent 2>/dev/null || true
     nohup spice-vdagent >/dev/null 2>&1 </dev/null &
   fi
+  if command -v fcitx5 >/dev/null 2>&1; then
+    pkill -x fcitx5 2>/dev/null || true
+    sleep 0.2
+    nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &
+  fi
 fi
 
 pkill -x spinel-shell 2>/dev/null || true
@@ -149,6 +159,8 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/foot/" "${DEV_HOST}:/tmp/spinel-dev/foot/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/fcitx5/themes/" "${DEV_HOST}:/tmp/spinel-dev/fcitx5-themes/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \

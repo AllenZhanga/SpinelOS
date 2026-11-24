@@ -62,3 +62,10 @@ void apply_display_mode(AppState *state, const std::string &payload);
 void push_system_logs(AppState *state, const std::string &source);
 void clear_system_logs(AppState *state, const std::string &source);
 void open_native_log_window(AppState *state, const std::string &banner = "");
+
+void ensure_fcitx5_defaults(bool is_light);
+void sync_fcitx5_theme(bool is_light);
+void push_ime_state(AppState *state);
+void set_ime_engine(AppState *state, const std::string &engine);
+void install_rime_ice_dict(AppState *state);
+void restart_fcitx5_daemon(AppState *state);

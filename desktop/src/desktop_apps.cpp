@@ -237,9 +237,10 @@ void launch_desktop_app_id(const std::string &desktop_id) {
                 args.insert(args.begin(), "-e");
                 args.insert(args.begin(), "foot");
             }
-            // Prefer Wayland ozone for Chromium if launched without flag
-            if (args[0].find("chromium") != std::string::npos) {
+            // Prefer Wayland ozone & IME for Chromium if launched without flag
+            if (args[0].find("chromium") != std::string::npos || args[0].find("chrome") != std::string::npos) {
                 args.push_back("--ozone-platform-hint=auto");
+                args.push_back("--enable-wayland-ime");
             }
             spawn_argv_logged(args, "App:" + app.id);
             return;

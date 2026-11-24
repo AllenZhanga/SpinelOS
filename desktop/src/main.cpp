@@ -292,9 +292,9 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         std::string tmp_out;
         int rc = 1;
         if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"google-chrome-stable", "--ozone-platform-hint=auto"});
+            spawn_argv_detached({"google-chrome-stable", "--ozone-platform-hint=auto", "--enable-wayland-ime"});
         } else if (run_argv_capture({"which", "chromium"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"chromium", "--ozone-platform-hint=auto"});
+            spawn_argv_detached({"chromium", "--ozone-platform-hint=auto", "--enable-wayland-ime"});
         } else if (run_argv_capture({"which", "firefox"}, tmp_out, rc) && rc == 0) {
             spawn_argv_detached({"firefox"});
         } else {
@@ -451,6 +451,18 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         clear_system_logs(state, cmd.substr(20));
     } else if (cmd == "installer:scan-disks") {
         push_installer_env(state);
+    } else if (cmd == "ime:status") {
+        push_ime_state(state);
+    } else if (cmd == "ime:mode:pinyin") {
+        set_ime_engine(state, "pinyin");
+    } else if (cmd == "ime:mode:rime") {
+        set_ime_engine(state, "rime");
+    } else if (cmd == "ime:install-rime-ice") {
+        install_rime_ice_dict(state);
+    } else if (cmd == "ime:restart") {
+        restart_fcitx5_daemon(state);
+    } else if (cmd == "ime:config") {
+        spawn_argv_logged({"fcitx5-configtool"}, "IME-Config");
     } else if (cmd.rfind("installer:start\n", 0) == 0) {
         start_disk_install(state, cmd);
     }
@@ -469,6 +481,7 @@ int main(int argc, char **argv) {
     }
 
     sync_process_proxy_env();
+    ensure_fcitx5_defaults(get_active_theme().is_light);
 
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);

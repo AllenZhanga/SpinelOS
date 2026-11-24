@@ -8,6 +8,9 @@ export GTK_THEME=Adwaita
 export QT_QPA_PLATFORM=wayland
 export SDL_VIDEODRIVER=wayland,x11
 export MOZ_ENABLE_WAYLAND=1
+export XMODIFIERS=@im=fcitx
+export QT_IM_MODULE=fcitx
+export SDL_IM_MODULE=fcitx
 
 # Ensure runtime dir & session D-Bus exist
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then

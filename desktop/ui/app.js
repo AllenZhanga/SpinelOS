@@ -925,9 +925,30 @@
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
     else if (target === "perf") sendCommand("perf:get");
-    else if (target === "appearance") sendCommand("theme:refresh");
+    else if (target === "appearance") {
+      sendCommand("theme:refresh");
+      sendCommand("ime:status");
+    }
     else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
   }
+
+  window.__spinelImeState = (data) => {
+    if (!data) return;
+    const chip = document.getElementById("ime-status-chip");
+    if (chip) {
+      if (!data.installed) chip.textContent = "未安装（需 --full 更新）";
+      else chip.textContent = (data.running ? "运行中 · " : "未启动 · ") +
+        (data.engine === "rime" ? (data.rime_ice ? "Rime 雾凇拼音" : "Rime 中州韵") : "内置中文拼音");
+    }
+    document.getElementById("btn-ime-pinyin")?.classList.toggle("active", data.engine !== "rime");
+    document.getElementById("btn-ime-rime")?.classList.toggle("active", data.engine === "rime");
+    const iceBtn = document.getElementById("btn-ime-ice");
+    if (iceBtn) {
+      iceBtn.textContent = data.rime_ice ? "更新雾凇拼音词库 (已安装)" : "安装雾凇拼音词库 (rime-ice)";
+    }
+  };
+
+  window.__spinelImeFeedback = (ok, msg) => showFeedback("ime-feedback", msg || "", !ok);
 
   window.__spinelLogsData = (data) => {
     if (!data) return;
