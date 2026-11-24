@@ -28,4 +28,9 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service 2>/dev/null || true
 fi
 
+# Bridge host <-> VM clipboard when running under SPICE/UTM/QEMU
+if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev/null 2>&1; then
+  spice-vdagent >/dev/null 2>&1 || true
+fi
+
 exec labwc

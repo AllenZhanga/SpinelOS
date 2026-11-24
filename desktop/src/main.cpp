@@ -48,7 +48,15 @@ void set_control_center_visible(AppState *state, bool visible) {
         : "window.__spinelCcOpen && window.__spinelCcOpen(false);");
 }
 
-WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark) {
+gboolean on_suppress_context_menu(WebKitWebView *,
+                                    WebKitContextMenu *,
+                                    GdkEvent *,
+                                    WebKitHitTestResult *,
+                                    gpointer) {
+    return TRUE;
+}
+
+WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark, bool allow_native_menu = true) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
     GdkRGBA bg = opaque_dark ? GdkRGBA{0.031, 0.043, 0.071, 1.0} : GdkRGBA{0.0, 0.0, 0.0, 0.0};
@@ -64,6 +72,10 @@ WebKitWebView *create_configured_webview(AppState *state, bool opaque_dark) {
     WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(web);
     g_signal_connect(ucm, "script-message-received::sysbridge", G_CALLBACK(on_script_message), state);
     webkit_user_content_manager_register_script_message_handler(ucm, "sysbridge", nullptr);
+
+    if (!allow_native_menu) {
+        g_signal_connect(web, "context-menu", G_CALLBACK(on_suppress_context_menu), nullptr);
+    }
 
     return web;
 }
@@ -173,6 +185,22 @@ void handle_command(AppState *state, const std::string &cmd) {
     } else if (cmd == "launch:files") {
         set_control_center_visible(state, false);
         spawn_argv_detached({"thunar"});
+    } else if (cmd == "desktop:open-folder") {
+        std::error_code ec;
+        fs::path desk = fs::path(home_dir()) / "Desktop";
+        fs::create_directories(desk, ec);
+        spawn_argv_detached({"thunar", desk.string()});
+    } else if (cmd == "desktop:new-folder") {
+        std::error_code ec;
+        fs::path desk = fs::path(home_dir()) / "Desktop";
+        fs::create_directories(desk, ec);
+        fs::path target = desk / "新建文件夹";
+        int idx = 2;
+        while (fs::exists(target, ec) && idx < 100) {
+            target = desk / ("新建文件夹 " + std::to_string(idx++));
+        }
+        fs::create_directory(target, ec);
+        spawn_argv_detached({"thunar", desk.string()});
     } else if (cmd == "launch:browser") {
         set_control_center_visible(state, false);
         std::string tmp_out;
@@ -328,7 +356,7 @@ GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
     gtk_layer_auto_exclusive_zone_enable(win);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
-    state->bar_view = create_configured_webview(state, false);
+    state->bar_view = create_configured_webview(state, false, false);
     gtk_widget_set_size_request(GTK_WIDGET(state->bar_view), -1, 28);
     gtk_window_set_child(win, GTK_WIDGET(state->bar_view));
 
@@ -350,7 +378,7 @@ GtkWindow *create_desktop_layer(GtkApplication *app, AppState *state) {
     gtk_layer_set_exclusive_zone(win, -1);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
 
-    state->desktop_view = create_configured_webview(state, true);
+    state->desktop_view = create_configured_webview(state, true, false);
     gtk_window_set_child(win, GTK_WIDGET(state->desktop_view));
 
     webkit_web_view_load_uri(state->desktop_view, resolve_ui_uri("?mode=desktop").c_str());
@@ -371,7 +399,7 @@ GtkWindow *create_dock_layer(GtkApplication *app, AppState *state) {
     gtk_layer_set_exclusive_zone(win, 74);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
-    state->dock_view = create_configured_webview(state, false);
+    state->dock_view = create_configured_webview(state, false, false);
     gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 124);
     gtk_window_set_child(win, GTK_WIDGET(state->dock_view));
 
@@ -395,7 +423,7 @@ GtkWindow *create_control_center_layer(GtkApplication *app, AppState *state) {
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
     g_signal_connect(win, "close-request", G_CALLBACK(on_hide_window_instead_of_destroy), nullptr);
 
-    state->cc_view = create_configured_webview(state, false);
+    state->cc_view = create_configured_webview(state, false, false);
     gtk_widget_set_size_request(GTK_WIDGET(state->cc_view), 356, 466);
     gtk_window_set_child(win, GTK_WIDGET(state->cc_view));
 

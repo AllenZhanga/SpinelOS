@@ -68,15 +68,19 @@ sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 
 if [ "$MODE" = "full" ]; then
-  echo "==> Updating SpinelDark theme, labwc config & desktop packages..."
-  sudo mkdir -p /etc/xdg/labwc /usr/share/themes/SpinelDark
+  echo "==> Updating SpinelDark theme, labwc/foot config & desktop packages..."
+  sudo pacman -Syu --noconfirm --needed \
+    flatpak spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober
+  if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then
+    sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
+  fi
+
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/foot /usr/share/themes/SpinelDark
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
+  sudo cp -a /tmp/spinel-dev/foot/. /etc/xdg/foot/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
   sudo install -Dm755 /tmp/spinel-dev/spinel-install /usr/local/bin/spinel-install
-
-  sudo pacman -Syu --noconfirm --needed \
-    flatpak thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober
 fi
 
 UID_NUM="$(id -u)"
@@ -100,6 +104,10 @@ fi
 
 if [ "$MODE" = "full" ]; then
   pkill -HUP -x labwc 2>/dev/null || true
+  if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev/null 2>&1; then
+    pkill -x spice-vdagent 2>/dev/null || true
+    nohup spice-vdagent >/dev/null 2>&1 </dev/null &
+  fi
 fi
 
 pkill -x spinel-shell 2>/dev/null || true
@@ -121,6 +129,8 @@ rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.
 if [[ "${MODE}" == "full" ]]; then
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/etc/xdg/foot/" "${DEV_HOST}:/tmp/spinel-dev/foot/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
   rsync -avz -e "${SSH_CMD}" \

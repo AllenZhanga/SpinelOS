@@ -75,51 +75,19 @@
 
     <div class="desktop-layout">
       <section id="desktop-shortcuts" class="shortcut-grid" aria-label="桌面快捷方式"></section>
-
-      <aside class="desktop-widget glass" id="desktop-widget">
-        <div class="widget-head">
-          <span class="badge">SpinelOS</span>
-          <span id="desktop-mode-chip" class="status-chip">硬件状态</span>
-        </div>
-        <div class="widget-metrics">
-          <div class="metric">
-            <span class="label">GPU</span>
-            <strong id="desk-gpu">扫描中...</strong>
-          </div>
-          <div class="metric">
-            <span class="label">内存</span>
-            <strong id="desk-mem">-- / -- MB</strong>
-          </div>
-          <div class="metric">
-            <span class="label">网络</span>
-            <strong id="desk-net">检测中...</strong>
-          </div>
-          <div class="metric">
-            <span class="label">内核</span>
-            <strong id="desk-kernel">--</strong>
-          </div>
-          <div class="metric">
-            <span class="label">手柄</span>
-            <strong id="desk-gamepad">未连接</strong>
-          </div>
-        </div>
-        <div class="widget-actions">
-          <button class="btn small primary" data-cmd="games:open">游戏中心</button>
-          <button class="btn small" data-cmd="settings:open:display">设置</button>
-          <button class="btn small hidden" id="btn-desk-install" data-cmd="installer:open">安装系统</button>
-        </div>
-      </aside>
     </div>
 
     <div id="desktop-ctx-menu" class="ctx-menu glass hidden">
-      <button data-cmd="games:open">打开游戏与应用中心</button>
-      <button data-cmd="store:open">打开应用商店</button>
-      <button data-cmd="launch:files">打开文件管理器</button>
+      <button data-cmd="desktop:new-folder">新建文件夹</button>
+      <button data-cmd="desktop:open-folder">在文件管理器中打开桌面</button>
       <button data-cmd="launch:terminal">打开终端 (Foot)</button>
       <hr />
-      <button data-cmd="settings:open:appearance">更换桌面壁纸与外观</button>
-      <button data-cmd="settings:open:display">显示器与刷新率设置</button>
-      <button data-cmd="telemetry:refresh">刷新桌面状态</button>
+      <button data-cmd="store:open">打开应用商店</button>
+      <button data-cmd="games:open">打开游戏中心</button>
+      <hr />
+      <button data-cmd="settings:open:appearance">更换壁纸与外观...</button>
+      <button data-cmd="settings:open:display">显示器与缩放设置...</button>
+      <button data-cmd="telemetry:refresh">刷新桌面</button>
     </div>
   </main>
 

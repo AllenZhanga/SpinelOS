@@ -1185,17 +1185,58 @@
 
   /* ---------------- 7. Events, Context Menu & Gamepad ---------------- */
   if (mode === "desktop") {
-    const canvas = document.getElementById("desktop-canvas");
     const menu = document.getElementById("desktop-ctx-menu");
-    canvas?.addEventListener("contextmenu", (ev) => {
-      ev.preventDefault();
+    const hideMenu = () => menu?.classList.add("hidden");
+    const showMenu = (x, y) => {
       if (!menu) return;
-      menu.style.left = `${Math.min(ev.clientX, window.innerWidth - 220)}px`;
-      menu.style.top = `${Math.min(ev.clientY, window.innerHeight - 260)}px`;
       menu.classList.remove("hidden");
+      const rect = menu.getBoundingClientRect();
+      const mw = rect.width || 210;
+      const mh = rect.height || 260;
+      menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - mw - 12))}px`;
+      menu.style.top = `${Math.max(36, Math.min(y, window.innerHeight - mh - 86))}px`;
+    };
+    document.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      showMenu(ev.clientX, ev.clientY);
     });
-    document.addEventListener("click", () => menu?.classList.add("hidden"));
+    document.addEventListener("click", (ev) => {
+      if (!ev.target.closest("#desktop-ctx-menu")) hideMenu();
+    });
+    window.addEventListener("blur", hideMenu);
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") hideMenu();
+    });
   }
+
+  // Allow macOS-style Cmd (Meta) clipboard shortcuts alongside Ctrl inside SpinelOS shell inputs/logs
+  document.addEventListener("keydown", (ev) => {
+    if (!ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const key = ev.key.toLowerCase();
+    const active = document.activeElement;
+    const isEditable = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+    if (key === "a" && isEditable) {
+      ev.preventDefault();
+      active.select();
+    } else if (key === "c") {
+      const sel = isEditable
+        ? active.value.slice(active.selectionStart || 0, active.selectionEnd || 0)
+        : (window.getSelection()?.toString() || "");
+      if (sel) {
+        ev.preventDefault();
+        navigator.clipboard?.writeText(sel).catch(() => {});
+      }
+    } else if (key === "v" && isEditable) {
+      ev.preventDefault();
+      navigator.clipboard?.readText().then((txt) => {
+        if (!txt) return;
+        const start = active.selectionStart ?? active.value.length;
+        const end = active.selectionEnd ?? active.value.length;
+        active.setRangeText(txt, start, end, "end");
+        active.dispatchEvent(new Event("input", { bubbles: true }));
+      }).catch(() => {});
+    }
+  });
 
   document.getElementById("game-search-input")?.addEventListener("input", renderSteamGames);
   document.getElementById("store-search-input")?.addEventListener("input", renderStoreApps);
@@ -1230,6 +1271,7 @@
     const target = ev.target.closest("[data-cmd]");
     if (!target) return;
     ev.stopPropagation();
+    document.getElementById("desktop-ctx-menu")?.classList.add("hidden");
     const cmd = target.getAttribute("data-cmd");
 
     if (cmd === "installer:mode:disk") setInstallMode("disk");

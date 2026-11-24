@@ -38,6 +38,7 @@ labwc
 xorg-xwayland
 wlr-randr
 wl-clipboard
+spice-vdagent
 gtk4
 gtk4-layer-shell
 webkitgtk-6.0
