@@ -109,6 +109,7 @@ void open_installer_window(AppState *state) {
 void push_all_telemetry(AppState *state) {
     push_telemetry_to_view(state->bar_view);
     push_telemetry_to_view(state->desktop_view);
+    push_telemetry_to_view(state->dock_view);
     if (state->games_win && gtk_widget_get_visible(GTK_WIDGET(state->games_win))) {
         push_telemetry_to_view(state->games_view);
     }
@@ -158,10 +159,10 @@ void handle_command(AppState *state, const std::string &cmd) {
         uint64_t wid = std::strtoull(cmd.substr(13).c_str(), nullptr, 10);
         if (wid > 0) close_tracked_window(wid);
     } else if (cmd.rfind("dock:resize:", 0) == 0) {
-        int w = std::clamp(std::atoi(cmd.substr(12).c_str()), 360, 1400);
+        int w = std::clamp(std::atoi(cmd.substr(12).c_str()), 380, 1600);
         if (state->dock_window && state->dock_view) {
-            gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), w, 78);
-            gtk_window_set_default_size(state->dock_window, w, 78);
+            gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), w, 112);
+            gtk_window_set_default_size(state->dock_window, w, 112);
         }
     } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
         set_wallpaper_pref(state, cmd.substr(14));
@@ -229,6 +230,7 @@ void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer use
 GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelTopBar");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
     gtk_window_set_default_size(win, -1, 36);
 
     gtk_layer_init_for_window(win);
@@ -271,18 +273,19 @@ GtkWindow *create_desktop_layer(GtkApplication *app, AppState *state) {
 GtkWindow *create_dock_layer(GtkApplication *app, AppState *state) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelDock");
-    gtk_window_set_default_size(win, 580, 78);
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 580, 112);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-dock");
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_TOP);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, 10);
-    gtk_layer_set_exclusive_zone(win, 86);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, 6);
+    gtk_layer_set_exclusive_zone(win, 74);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
     state->dock_view = create_configured_webview(state, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 78);
+    gtk_widget_set_size_request(GTK_WIDGET(state->dock_view), 580, 112);
     gtk_window_set_child(win, GTK_WIDGET(state->dock_view));
 
     webkit_web_view_load_uri(state->dock_view, resolve_ui_uri("?mode=dock").c_str());
@@ -293,6 +296,21 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
     g_app = app;
     ensure_steam_play_preconfig();
+
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(
+        css,
+        "window.spinel-transparent, window.spinel-transparent.background {\n"
+        "  background-color: transparent;\n"
+        "  background-image: none;\n"
+        "  box-shadow: none;\n"
+        "  border: none;\n"
+        "}\n");
+    if (GdkDisplay *display = gdk_display_get_default()) {
+        gtk_style_context_add_provider_for_display(
+            display, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
+    }
+    g_object_unref(css);
 
     GtkWindow *desktop = create_desktop_layer(app, state);
     GtkWindow *bar = create_top_bar(app, state);

@@ -68,25 +68,142 @@
     el.textContent = msg;
   }
 
-  /* ---------------- Inline macOS-style Gradient Icons ---------------- */
+  /* ---------------- Inline macOS-style Squircle Icons ---------------- */
+  let svgIconSeq = 0;
+
   function makeSvgIcon(kind) {
-    const presets = {
-      games: ["#6366f1", "#38bdf8", `<path d="M10 15h4m-2-2v4m7-2h.01M21 15h.01M7 10h10a5 5 0 0 1 5 5v2a3 3 0 0 1-5 2.2L15 17H9l-2 2.2A3 3 0 0 1 2 17v-2a5 5 0 0 1 5-5z" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/>`],
-      steam: ["#1e3a8a", "#0ea5e9", `<circle cx="15" cy="9" r="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M5 17l5.5 2a3 3 0 0 0 3.8-1.8L16 12" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/>`],
-      gamepad: ["#7c3aed", "#ec4899", `<rect x="4" y="6" width="16" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M9 12h6M12 9v6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`],
-      browser: ["#0284c7", "#22d3ee", `<circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M5 12h14M12 5a10 10 0 0 1 0 14M12 5a10 10 0 0 0 0 14" fill="none" stroke="#fff" stroke-width="1.4"/>`],
-      files: ["#2563eb", "#60a5fa", `<path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="#fff" stroke-width="1.8"/>`],
-      terminal: ["#1e293b", "#475569", `<path d="M6 8l4 4-4 4m5 0h7" stroke="#38bdf8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`],
-      settings: ["#334155", "#64748b", `<circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M12 4v2m0 12v2m8-8h-2M6 12H4m13.7-5.7-1.4 1.4M7.7 16.3l-1.4 1.4m0-11.4 1.4 1.4m8.6 8.6 1.4 1.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`],
-      installer: ["#059669", "#10b981", `<path d="M12 4v10m0 0-4-4m4 4 4-4M5 18h14" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`],
-      app: ["#3b82f6", "#8b5cf6", `<rect x="6" y="6" width="12" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.8"/>`]
+    const uid = `sp${++svgIconSeq}`;
+    const bgDefs = {
+      games: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="52%" stop-color="#6366f1"/>
+          <stop offset="100%" stop-color="#4338ca"/>
+        </linearGradient>`,
+      steam: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#17305c"/>
+          <stop offset="55%" stop-color="#145388"/>
+          <stop offset="100%" stop-color="#1b8dd8"/>
+        </linearGradient>`,
+      gamepad: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f43f5e"/>
+          <stop offset="52%" stop-color="#a855f7"/>
+          <stop offset="100%" stop-color="#6366f1"/>
+        </linearGradient>`,
+      browser: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#e2e8f0"/>
+        </linearGradient>
+        <radialGradient id="${uid}_dial" cx="50%" cy="45%" r="55%">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="65%" stop-color="#0284c7"/>
+          <stop offset="100%" stop-color="#1d4ed8"/>
+        </radialGradient>`,
+      files: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#7dd3fc"/>
+          <stop offset="100%" stop-color="#38bdf8"/>
+        </linearGradient>
+        <linearGradient id="${uid}_face" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2563eb"/>
+          <stop offset="100%" stop-color="#1d4ed8"/>
+        </linearGradient>`,
+      terminal: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#e2e8f0"/>
+          <stop offset="100%" stop-color="#94a3b8"/>
+        </linearGradient>
+        <linearGradient id="${uid}_scr" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1e2430"/>
+          <stop offset="100%" stop-color="#0b0f17"/>
+        </linearGradient>`,
+      settings: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#e5e7eb"/>
+          <stop offset="100%" stop-color="#9ca3af"/>
+        </linearGradient>
+        <linearGradient id="${uid}_gear" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#64748b"/>
+          <stop offset="100%" stop-color="#334155"/>
+        </linearGradient>`,
+      installer: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#34d399"/>
+          <stop offset="100%" stop-color="#059669"/>
+        </linearGradient>`,
+      app: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#60a5fa"/>
+          <stop offset="100%" stop-color="#7c3aed"/>
+        </linearGradient>`
     };
-    const [c1, c2, shape] = presets[kind] || presets.app;
+
+    const art = {
+      games: `
+        <path d="M21 23c-4.5 0-8 3.2-9 7.8l-1.4 8.2a4.6 4.6 0 0 0 8.1 3.7l3.2-3.4h20.2l3.2 3.4a4.6 4.6 0 0 0 8.1-3.7L52 30.8C51 26.2 47.5 23 43 23H21z" fill="rgba(255,255,255,0.95)"/>
+        <path d="M21 29v7m-3.5-3.5h7" stroke="#4f46e5" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="42.5" cy="30" r="2" fill="#38bdf8"/>
+        <circle cx="46.5" cy="34" r="2" fill="#6366f1"/>
+        <circle cx="38.5" cy="34" r="2" fill="#818cf8"/>
+        <circle cx="42.5" cy="38" r="2" fill="#ec4899"/>`,
+      steam: `
+        <circle cx="39.5" cy="24.5" r="9.5" fill="none" stroke="rgba(255,255,255,0.96)" stroke-width="3.6"/>
+        <circle cx="39.5" cy="24.5" r="4.2" fill="#ffffff"/>
+        <circle cx="23.5" cy="43.5" r="7" fill="none" stroke="rgba(255,255,255,0.96)" stroke-width="3.4"/>
+        <circle cx="23.5" cy="43.5" r="3.4" fill="#ffffff"/>
+        <path d="M12 37.5l10.8 4.4M29 41l10-12.5" stroke="#ffffff" stroke-width="5.2" stroke-linecap="round"/>`,
+      gamepad: `
+        <rect x="13" y="16" width="38" height="32" rx="10" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.9)" stroke-width="2.4"/>
+        <path d="M24 27v10m-5-5h10" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="41.5" cy="29.5" r="2.2" fill="#ffffff"/>
+        <circle cx="45" cy="34.5" r="2.2" fill="#fde047"/>`,
+      browser: `
+        <circle cx="32" cy="32" r="23" fill="url(#${uid}_dial)"/>
+        <circle cx="32" cy="32" r="21" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+        <polygon points="32,32 45,19 36,36" fill="#ef4444"/>
+        <polygon points="32,32 19,45 28,28" fill="#ffffff"/>
+        <circle cx="32" cy="32" r="2.6" fill="#e2e8f0"/>`,
+      files: `
+        <path d="M4 18a14 14 0 0 1 14-14h15.5c-2.5 8-3.5 18-3.5 28h7.5c0 9-3 18-6 28H18A14 14 0 0 1 4 46V18z" fill="url(#${uid}_face)"/>
+        <path d="M33.5 4c-2.5 8-3.5 18-3.5 28h7.5c0 9-3 18-6 28" fill="none" stroke="rgba(15,23,42,0.22)" stroke-width="1.8"/>
+        <path d="M21 21v7M43 21v7" stroke="#0f172a" stroke-width="3.4" stroke-linecap="round"/>
+        <path d="M18.5 41.5c4.5 5.2 22.5 5.2 27 0" fill="none" stroke="#0f172a" stroke-width="3.2" stroke-linecap="round"/>`,
+      terminal: `
+        <rect x="6" y="7" width="52" height="50" rx="11" fill="url(#${uid}_scr)"/>
+        <path d="M16 23l9 7-9 7" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M29 37h13" stroke="#38bdf8" stroke-width="3.6" stroke-linecap="round"/>`,
+      settings: `
+        <circle cx="32" cy="32" r="19" fill="url(#${uid}_gear)" stroke="#475569" stroke-width="1.5"/>
+        <circle cx="32" cy="32" r="14.5" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="2.5" stroke-dasharray="4.2 3.2"/>
+        <circle cx="32" cy="32" r="7.5" fill="#cbd5e1" stroke="#334155" stroke-width="2.2"/>
+        <circle cx="32" cy="32" r="3" fill="#334155"/>`,
+      installer: `
+        <rect x="14" y="15" width="36" height="34" rx="8" fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.9)" stroke-width="2.4"/>
+        <path d="M32 22v16m0 0-6.5-6.5M32 38l6.5-6.5M22 43h20" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`,
+      app: `
+        <rect x="16" y="16" width="32" height="32" rx="9" fill="rgba(255,255,255,0.22)" stroke="rgba(255,255,255,0.92)" stroke-width="2.6"/>
+        <circle cx="32" cy="32" r="6" fill="#ffffff"/>`
+    };
+
+    const defs = bgDefs[kind] || bgDefs.app;
+    const body = art[kind] || art.app;
     return `
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <defs><linearGradient id="g_${kind}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs>
-        <rect width="24" height="24" rx="6" fill="url(#g_${kind})"/>
-        ${shape}
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          ${defs}
+          <linearGradient id="${uid}_sheen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.28"/>
+            <stop offset="45%" stop-color="#ffffff" stop-opacity="0.04"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.14"/>
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#${uid}_bg)"/>
+        ${body}
+        <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#${uid}_sheen)"/>
+        <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="13.8" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.2"/>
       </svg>
     `;
   }
@@ -202,22 +319,40 @@
     pinnedEl.innerHTML = "";
     const matchedIds = new Set();
 
-    pinned.forEach((p) => {
-      const win = findMatchingWindow(p.match);
-      if (win) matchedIds.add(win.id);
-
+    const createDockItem = (label, cmd, kind, win, closable) => {
       const btn = document.createElement("button");
       btn.className = "dock-item" + (win && win.activated && !win.minimized ? " active" : "") + (win && win.minimized ? " minimized" : "");
-      btn.title = win ? `${p.title} (${win.title})` : p.title;
-      btn.innerHTML = makeSvgIcon(p.kind);
-      btn.setAttribute("data-cmd", win ? `window:toggle:${win.id}` : p.cmd);
+      btn.setAttribute("data-cmd", cmd);
+      btn.setAttribute("aria-label", label);
 
+      const tip = document.createElement("span");
+      tip.className = "dock-tooltip";
+      tip.textContent = label;
+
+      const iconWrap = document.createElement("span");
+      iconWrap.className = "dock-icon";
+      iconWrap.innerHTML = makeSvgIcon(kind);
+
+      btn.append(tip, iconWrap);
       if (win) {
         const dot = document.createElement("span");
         dot.className = "dock-dot";
         btn.appendChild(dot);
       }
-      pinnedEl.appendChild(btn);
+      if (closable && win) {
+        btn.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          sendCommand(`window:close:${win.id}`);
+        });
+      }
+      return btn;
+    };
+
+    pinned.forEach((p) => {
+      const win = findMatchingWindow(p.match);
+      if (win) matchedIds.add(win.id);
+      const label = win ? `${p.title}` : p.title;
+      pinnedEl.appendChild(createDockItem(label, win ? `window:toggle:${win.id}` : p.cmd, p.kind, win, false));
     });
 
     const extraWins = trackedWindows.filter((w) => !matchedIds.has(w.id));
@@ -225,24 +360,13 @@
     if (dividerEl) dividerEl.classList.toggle("hidden", extraWins.length === 0);
 
     extraWins.forEach((w) => {
-      const btn = document.createElement("button");
-      btn.className = "dock-item" + (w.activated && !w.minimized ? " active" : "") + (w.minimized ? " minimized" : "");
-      btn.title = w.title || w.app_id || "应用窗口";
-      btn.innerHTML = makeSvgIcon(matchAppKind(`${w.app_id} ${w.title}`));
-      btn.setAttribute("data-cmd", `window:toggle:${w.id}`);
-      btn.addEventListener("contextmenu", (ev) => {
-        ev.preventDefault();
-        sendCommand(`window:close:${w.id}`);
-      });
-
-      const dot = document.createElement("span");
-      dot.className = "dock-dot";
-      btn.appendChild(dot);
-      runningEl.appendChild(btn);
+      const label = w.title || w.app_id || "应用窗口";
+      const kind = matchAppKind(`${w.app_id} ${w.title}`);
+      runningEl.appendChild(createDockItem(label, `window:toggle:${w.id}`, kind, w, true));
     });
 
     const totalItems = pinned.length + extraWins.length;
-    const width = Math.max(400, totalItems * 56 + (extraWins.length > 0 ? 44 : 28));
+    const width = Math.max(460, totalItems * 58 + (extraWins.length > 0 ? 48 : 32) + 84);
     sendCommand(`dock:resize:${width}`);
   }
 
