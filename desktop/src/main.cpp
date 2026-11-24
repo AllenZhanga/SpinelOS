@@ -292,9 +292,9 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         std::string tmp_out;
         int rc = 1;
         if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"google-chrome-stable", "--ozone-platform-hint=auto", "--enable-wayland-ime"});
+            spawn_argv_detached({"google-chrome-stable", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
         } else if (run_argv_capture({"which", "chromium"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"chromium", "--ozone-platform-hint=auto", "--enable-wayland-ime"});
+            spawn_argv_detached({"chromium", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
         } else if (run_argv_capture({"which", "firefox"}, tmp_out, rc) && rc == 0) {
             spawn_argv_detached({"firefox"});
         } else {

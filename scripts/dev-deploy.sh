@@ -128,16 +128,21 @@ if [ "$MODE" = "full" ]; then
     pkill -x spice-vdagent 2>/dev/null || true
     nohup spice-vdagent >/dev/null 2>&1 </dev/null &
   fi
-  if command -v fcitx5 >/dev/null 2>&1; then
-    pkill -x fcitx5 2>/dev/null || true
-    sleep 0.2
-    nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &
-  fi
+fi
+
+if command -v fcitx5 >/dev/null 2>&1; then
+  pkill -x fcitx5 2>/dev/null || true
+  sleep 0.2
 fi
 
 pkill -x spinel-shell 2>/dev/null || true
 sleep 0.3
 nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
+
+if command -v fcitx5 >/dev/null 2>&1; then
+  sleep 0.4
+  nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &
+fi
 echo "Done! spinel-shell restarted on ${WAYLAND_DISPLAY}."
 EOF
 chmod +x "${APPLY_SCRIPT}"

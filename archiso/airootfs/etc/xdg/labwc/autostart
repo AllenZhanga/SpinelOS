@@ -6,7 +6,7 @@ fi
 # Start our custom C++20 + GTK4/WebKitGTK6 Wayland Desktop Shell (with persistent startup log)
 /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 &
 
-# Start Fcitx5 Wayland input method daemon if installed
+# Start Fcitx5 Wayland input method daemon after spinel-shell initializes profile defaults
 if command -v fcitx5 >/dev/null 2>&1; then
-  fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 &
+  (sleep 0.8; exec fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1) &
 fi

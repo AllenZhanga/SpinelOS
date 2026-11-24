@@ -1020,6 +1020,21 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     if (ofs.is_open()) ofs << out.str();
 }
 
+void stop_fcitx5_sync() {
+    if (!has_executable("pkill")) return;
+    std::string out;
+    int rc = 0;
+    run_argv_capture({"pkill", "-x", "fcitx5"}, out, rc);
+    for (int i = 0; i < 15; ++i) {
+        std::string pg_out;
+        int pg_rc = 1;
+        if (!run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) || pg_rc != 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+}
+
 void write_fcitx5_profile(const std::string &chinese_engine) {
     fs::path prof = fs::path(home_dir()) / ".config/fcitx5/profile";
     std::error_code ec;
@@ -1028,7 +1043,7 @@ void write_fcitx5_profile(const std::string &chinese_engine) {
     std::ofstream ofs(prof, std::ios::trunc);
     if (ofs.is_open()) {
         ofs << "[Groups/0]\n"
-            << "Name=默认\n"
+            << "Name=Default\n"
             << "Default Layout=us\n"
             << "DefaultIM=" << engine << "\n\n"
             << "[Groups/0/Items/0]\n"
@@ -1038,7 +1053,22 @@ void write_fcitx5_profile(const std::string &chinese_engine) {
             << "Name=" << engine << "\n"
             << "Layout=\n\n"
             << "[GroupOrder]\n"
-            << "0=默认\n";
+            << "0=Default\n";
+    }
+}
+
+void ensure_chromium_ime_flags() {
+    std::error_code ec;
+    fs::path cfg_dir = fs::path(home_dir()) / ".config";
+    fs::create_directories(cfg_dir, ec);
+    fs::path flags = cfg_dir / "chromium-flags.conf";
+    if (!fs::exists(flags, ec)) {
+        std::ofstream ofs(flags, std::ios::trunc);
+        if (ofs.is_open()) {
+            ofs << "--ozone-platform=wayland\n"
+                << "--enable-wayland-ime\n"
+                << "--wayland-text-input-version=3\n";
+        }
     }
 }
 
@@ -1066,12 +1096,15 @@ void write_rime_default_custom(bool prefer_rime_ice) {
 std::string detect_active_ime_engine() {
     fs::path prof = fs::path(home_dir()) / ".config/fcitx5/profile";
     std::ifstream ifs(prof);
-    if (!ifs.is_open()) return "pinyin";
+    if (!ifs.is_open()) return "none";
     std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     if (content.find("Name=rime") != std::string::npos || content.find("DefaultIM=rime") != std::string::npos) {
         return "rime";
     }
-    return "pinyin";
+    if (content.find("Name=pinyin") != std::string::npos || content.find("DefaultIM=pinyin") != std::string::npos) {
+        return "pinyin";
+    }
+    return "none";
 }
 
 }  // namespace
@@ -1081,8 +1114,19 @@ void ensure_fcitx5_defaults(bool is_light) {
     fs::path fdir = fs::path(home_dir()) / ".config/fcitx5";
     fs::create_directories(fdir / "conf", ec);
 
-    if (!fs::exists(fdir / "profile", ec)) {
+    ensure_chromium_ime_flags();
+
+    std::string active_im = detect_active_ime_engine();
+    if (active_im == "none") {
+        // Stop running fcitx5 before writing profile so shutdown doesn't overwrite it with keyboard-us only
+        std::string pg_out;
+        int pg_rc = 1;
+        bool was_running = run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) && pg_rc == 0;
+        if (was_running) stop_fcitx5_sync();
         write_fcitx5_profile("pinyin");
+        if (was_running && has_executable("fcitx5")) {
+            spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+        }
     }
     if (!fs::exists(fdir / "conf/classicui.conf", ec)) {
         write_fcitx5_classicui(is_light, true);
@@ -1138,7 +1182,11 @@ void restart_fcitx5_daemon(AppState *state) {
         }
         return;
     }
-    spawn_argv_detached({"sh", "-c", "pkill -x fcitx5 2>/dev/null || true; sleep 0.2; nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+    stop_fcitx5_sync();
+    if (detect_active_ime_engine() == "none") {
+        write_fcitx5_profile("pinyin");
+    }
+    spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
     append_app_log("[IME] 已重启 Fcitx5 输入法服务");
     if (state) {
         std::thread([state]() {
@@ -1150,6 +1198,8 @@ void restart_fcitx5_daemon(AppState *state) {
 
 void set_ime_engine(AppState *state, const std::string &engine) {
     std::string target = (engine == "rime") ? "rime" : "pinyin";
+    // Stop fcitx5 before writing profile so exit handler doesn't clobber the new profile
+    stop_fcitx5_sync();
     write_fcitx5_profile(target);
     append_app_log("[IME] 切换中文输入法方案为: " + target);
     restart_fcitx5_daemon(state);
@@ -1175,9 +1225,10 @@ void install_rime_ice_dict(AppState *state) {
         int rc = 1;
         run_argv_capture({"bash", "-c", cmd}, out, rc);
         if (rc == 0) {
+            stop_fcitx5_sync();
             write_rime_default_custom(true);
             write_fcitx5_profile("rime");
-            spawn_argv_detached({"sh", "-c", "pkill -x fcitx5 2>/dev/null || true; sleep 0.2; nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
+            spawn_argv_detached({"sh", "-c", "nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &"});
             append_app_log("[IME] 雾凇拼音 (rime-ice) 下载安装成功并已激活 Rime");
             post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"雾凇拼音 (rime-ice) 安装完成！已自动切换为 Rime 并重启输入法，按 Ctrl+Space 即可输入。\");", false);
         } else {
