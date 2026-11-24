@@ -102,6 +102,16 @@ elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; t
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
 fi
 
+LABWC_PID="$(pgrep -x labwc | head -n1 || true)"
+if [ -n "${LABWC_PID}" ] && [ -r "/proc/${LABWC_PID}/environ" ]; then
+  if tr '\0' '\n' < "/proc/${LABWC_PID}/environ" | grep -qx "WLR_RENDERER=pixman"; then
+    export WLR_RENDERER=pixman
+    export GSK_RENDERER=cairo
+    export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    export LIBGL_ALWAYS_SOFTWARE=1
+  fi
+fi
+
 if [ "$MODE" = "full" ]; then
   pkill -HUP -x labwc 2>/dev/null || true
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev/null 2>&1; then

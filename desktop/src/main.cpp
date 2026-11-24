@@ -12,6 +12,7 @@
 #include <webkit/webkit.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -39,6 +40,15 @@ std::string resolve_ui_uri(const std::string &page_query) {
 
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data);
 
+void on_webview_load_failed(WebKitWebView *, WebKitLoadEvent, gchar *uri, GError *err, gpointer) {
+    std::fprintf(stderr, "[spinel-shell] WebKit load-failed (%s): %s\n",
+                 uri ? uri : "", err ? err->message : "unknown");
+}
+
+void on_web_process_terminated(WebKitWebView *, WebKitWebProcessTerminationReason reason, gpointer) {
+    std::fprintf(stderr, "[spinel-shell] WebKitWebProcess terminated (reason=%d)\n", static_cast<int>(reason));
+}
+
 WebKitWebView *create_configured_webview(AppState *state) {
     WebKitWebView *web = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
@@ -48,13 +58,24 @@ WebKitWebView *create_configured_webview(AppState *state) {
     WebKitSettings *settings = webkit_web_view_get_settings(web);
     webkit_settings_set_enable_javascript(settings, TRUE);
     webkit_settings_set_allow_file_access_from_file_urls(settings, TRUE);
+
+    const char *wlr_renderer = std::getenv("WLR_RENDERER");
+    const char *no_dmabuf = std::getenv("WEBKIT_DISABLE_DMABUF_RENDERER");
+    bool sw_mode = collect_telemetry().low_fx ||
+                   (wlr_renderer && std::string(wlr_renderer) == "pixman") ||
+                   (no_dmabuf && std::string(no_dmabuf) == "1");
     webkit_settings_set_hardware_acceleration_policy(
-        settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS
+        settings,
+        sw_mode ? WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER
+                : WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS
     );
 
     WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(web);
     g_signal_connect(ucm, "script-message-received::sysbridge", G_CALLBACK(on_script_message), state);
     webkit_user_content_manager_register_script_message_handler(ucm, "sysbridge", nullptr);
+
+    g_signal_connect(web, "load-failed", G_CALLBACK(on_webview_load_failed), nullptr);
+    g_signal_connect(web, "web-process-terminated", G_CALLBACK(on_web_process_terminated), nullptr);
 
     return web;
 }
@@ -99,6 +120,7 @@ void ensure_app_window(AppState *state,
         WebKitWebView *view = create_configured_webview(state);
         gtk_window_set_child(win, GTK_WIDGET(view));
         std::string uri = resolve_ui_uri(query);
+        std::fprintf(stderr, "[spinel-shell] Opening app window: %s -> %s\n", title, uri.c_str());
         webkit_web_view_load_uri(view, uri.c_str());
 
         *win_slot = win;
@@ -345,6 +367,15 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
 }
 
 int main(int argc, char **argv) {
+    const char *wlr = std::getenv("WLR_RENDERER");
+    if (wlr && std::string(wlr) == "pixman") {
+        setenv("GSK_RENDERER", "cairo", 0);
+        setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+        setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1", 0);
+    } else if (collect_telemetry().low_fx) {
+        setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+    }
+
     AppState state;
     GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &state);

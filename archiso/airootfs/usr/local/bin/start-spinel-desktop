@@ -37,6 +37,8 @@ if [ "${IS_VM}" -eq 1 ]; then
   case "${DRM_DRIVER}" in
     hyperv_drm|bochs-drm|cirrus|simple-framebuffer|ast)
       export WLR_RENDERER=pixman
+      export GSK_RENDERER=cairo
+      export WEBKIT_DISABLE_COMPOSITING_MODE=1
       export LIBGL_ALWAYS_SOFTWARE=1
       ;;
   esac
@@ -65,6 +67,8 @@ if [ "${RC}" -ne 0 ] && [ $((END_TS - START_TS)) -lt 5 ] && [ "${WLR_RENDERER:-}
   echo "[SpinelOS] Hardware renderer failed (rc=${RC}), retrying with software Pixman..." >>"${LOG_FILE}"
   export WLR_RENDERER=pixman
   export WLR_NO_HARDWARE_CURSORS=1
+  export GSK_RENDERER=cairo
+  export WEBKIT_DISABLE_COMPOSITING_MODE=1
   export LIBGL_ALWAYS_SOFTWARE=1
   set +e
   labwc >>"${LOG_FILE}" 2>&1
