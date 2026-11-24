@@ -51,6 +51,7 @@ add_executable(spinel-shell
     src/system_control.cpp
     src/installer.cpp
     src/desktop_apps.cpp
+    src/app_store.cpp
     src/window_tracker.cpp
     "${TOPLEVEL_HDR}"
     "${TOPLEVEL_SRC}"

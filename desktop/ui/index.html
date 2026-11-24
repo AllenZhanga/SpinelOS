@@ -18,6 +18,7 @@
       </button>
       <span id="bar-active-app" class="active-app-name">访达</span>
       <button class="menu-link" data-cmd="games:open">游戏库</button>
+      <button class="menu-link" data-cmd="store:open">应用商店</button>
       <button class="menu-link" data-cmd="launch:steam">Steam</button>
       <button class="menu-link" data-cmd="launch:steam-gamepadui">主机大屏</button>
       <button class="menu-link" data-cmd="settings:open:appearance">外观</button>
@@ -112,8 +113,8 @@
 
     <div id="desktop-ctx-menu" class="ctx-menu glass hidden">
       <button data-cmd="games:open">打开游戏与应用中心</button>
+      <button data-cmd="store:open">打开应用商店</button>
       <button data-cmd="launch:files">打开文件管理器</button>
-      <button data-cmd="launch:browser">打开 Chromium 浏览器</button>
       <button data-cmd="launch:terminal">打开终端 (Foot)</button>
       <hr />
       <button data-cmd="settings:open:appearance">更换桌面壁纸与外观</button>
@@ -324,6 +325,7 @@
             <span class="card-tag">LAUNCHPAD</span>
             <h3>全部桌面应用程序</h3>
           </div>
+          <button class="btn small primary" data-cmd="store:open">前往应用商店下载</button>
         </div>
         <div id="launchpad-app-grid" class="launchpad-grid"></div>
       </section>
@@ -557,6 +559,63 @@
           <button class="btn primary hidden" id="btn-inst-reboot" data-cmd="power:reboot">立即重启电脑</button>
         </div>
       </footer>
+    </div>
+  </section>
+
+  <!-- 7. SpinelOS App Store (?mode=store) -->
+  <section id="app-store" class="app-window hidden">
+    <header class="win-toolbar">
+      <div>
+        <span class="badge">SpinelOS App Store</span>
+        <h2>应用商店</h2>
+      </div>
+      <div class="tab-bar" id="store-cat-tabs">
+        <button class="tab-btn active" data-store-cat="all">全部</button>
+        <button class="tab-btn" data-store-cat="浏览器">浏览器</button>
+        <button class="tab-btn" data-store-cat="游戏平台">游戏工具</button>
+        <button class="tab-btn" data-store-cat="社交与影音">社交影音</button>
+        <button class="tab-btn" data-store-cat="实用工具">实用工具</button>
+      </div>
+    </header>
+
+    <div class="app-scroll">
+      <div class="store-top-bar glass">
+        <div class="store-top-left">
+          <input type="text" id="store-search-input" class="search-input" placeholder="搜索应用商店（如 Chrome、Firefox、Heroic、Discord）..." />
+          <button class="btn small" data-cmd="store:refresh">刷新状态</button>
+        </div>
+        <div class="store-custom-install">
+          <select id="store-custom-backend">
+            <option value="pacman">Pacman 包</option>
+            <option value="flatpak">Flatpak ID</option>
+          </select>
+          <input type="text" id="store-custom-pkg" placeholder="输入自定义包名或 ID..." />
+          <button class="btn small primary" id="btn-store-custom" data-cmd="store:custom-install">下载安装</button>
+        </div>
+      </div>
+
+      <div id="store-pass-box" class="glass sub-panel hidden">
+        <div class="sub-panel-head">
+          <strong id="store-pass-title">需要管理员密码安装系统软件包</strong>
+          <button class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
+        </div>
+        <div class="inline-row">
+          <input type="password" id="store-pass-input" placeholder="请输入当前用户（gamer）密码..." />
+          <button class="btn small primary" data-cmd="store:pass-confirm">确认并开始安装</button>
+        </div>
+      </div>
+
+      <div id="store-app-grid" class="store-grid">
+        <div class="lib-empty">正在读取本地已安装状态与应用商店目录...</div>
+      </div>
+
+      <div id="store-log-wrap" class="glass store-log-card hidden">
+        <div class="sub-panel-head">
+          <strong id="store-log-title">下载与安装输出</strong>
+          <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+        </div>
+        <pre id="store-log-box" class="log-box"></pre>
+      </div>
     </div>
   </section>
 

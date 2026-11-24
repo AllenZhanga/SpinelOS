@@ -46,8 +46,8 @@ xdg-desktop-portal-wlr
 polkit
 foot
 
-# Desktop Apps (Browser, File Manager, Editor, Viewer)
-chromium
+# Desktop Apps (App Store + File Manager, Editor, Viewer; browsers via App Store)
+flatpak
 thunar
 thunar-archive-plugin
 file-roller

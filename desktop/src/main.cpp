@@ -1,4 +1,5 @@
 #include "app_state.hpp"
+#include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "installer.hpp"
@@ -121,6 +122,13 @@ void open_installer_window(AppState *state) {
     push_installer_env(state);
 }
 
+void open_store_window(AppState *state) {
+    ensure_app_window(state, &state->store_win, &state->store_view,
+                      "SpinelOS 应用商店", "?mode=store", 1020, 680);
+    push_desktop_apps(state);
+    push_store_catalog(state);
+}
+
 void push_all_telemetry(AppState *state) {
     push_telemetry_to_view(state->bar_view);
     push_telemetry_to_view(state->desktop_view);
@@ -130,6 +138,9 @@ void push_all_telemetry(AppState *state) {
     }
     if (state->games_win && gtk_widget_get_visible(GTK_WIDGET(state->games_win))) {
         push_telemetry_to_view(state->games_view);
+    }
+    if (state->store_win && gtk_widget_get_visible(GTK_WIDGET(state->store_win))) {
+        push_telemetry_to_view(state->store_view);
     }
     if (state->settings_win && gtk_widget_get_visible(GTK_WIDGET(state->settings_win))) {
         push_telemetry_to_view(state->settings_view);
@@ -164,13 +175,35 @@ void handle_command(AppState *state, const std::string &cmd) {
         spawn_argv_detached({"thunar"});
     } else if (cmd == "launch:browser") {
         set_control_center_visible(state, false);
-        spawn_argv_detached({"chromium", "--ozone-platform-hint=auto"});
+        std::string tmp_out;
+        int rc = 1;
+        if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
+            spawn_argv_detached({"google-chrome-stable", "--ozone-platform-hint=auto"});
+        } else if (run_argv_capture({"which", "chromium"}, tmp_out, rc) && rc == 0) {
+            spawn_argv_detached({"chromium", "--ozone-platform-hint=auto"});
+        } else if (run_argv_capture({"which", "firefox"}, tmp_out, rc) && rc == 0) {
+            spawn_argv_detached({"firefox"});
+        } else {
+            open_store_window(state);
+        }
     } else if (cmd.rfind("app:launch:", 0) == 0) {
         set_control_center_visible(state, false);
         launch_desktop_app_id(cmd.substr(11));
     } else if (cmd == "games:open") {
         set_control_center_visible(state, false);
         open_games_window(state);
+    } else if (cmd == "store:open") {
+        set_control_center_visible(state, false);
+        open_store_window(state);
+    } else if (cmd == "store:refresh") {
+        push_store_catalog(state);
+    } else if (cmd.rfind("store:install\n", 0) == 0) {
+        start_store_action(state, "install", cmd);
+    } else if (cmd.rfind("store:remove\n", 0) == 0) {
+        start_store_action(state, "remove", cmd);
+    } else if (cmd.rfind("store:launch:", 0) == 0) {
+        set_control_center_visible(state, false);
+        launch_store_app(state, cmd.substr(13));
     } else if (cmd == "installer:open") {
         set_control_center_visible(state, false);
         open_installer_window(state);
@@ -413,6 +446,9 @@ int main(int argc, char **argv) {
     shutdown_window_tracker();
     if (state.install_thread.joinable()) {
         state.install_thread.join();
+    }
+    if (state.store_thread.joinable()) {
+        state.store_thread.join();
     }
     g_object_unref(app);
     return status;

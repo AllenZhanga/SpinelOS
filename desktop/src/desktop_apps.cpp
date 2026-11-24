@@ -32,10 +32,18 @@ std::string resolve_icon_uri(const std::string &icon) {
     }
 
     fs::path local_icons = fs::path(home_dir()) / ".local/share/icons/hicolor";
+    fs::path flatpak_user_icons = fs::path(home_dir()) / ".local/share/flatpak/exports/share/icons/hicolor";
+    fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
     const std::vector<fs::path> search_dirs = {
         local_icons / "scalable/apps",
         local_icons / "256x256/apps",
         local_icons / "128x128/apps",
+        flatpak_user_icons / "scalable/apps",
+        flatpak_user_icons / "256x256/apps",
+        flatpak_user_icons / "128x128/apps",
+        flatpak_sys_icons / "scalable/apps",
+        flatpak_sys_icons / "256x256/apps",
+        flatpak_sys_icons / "128x128/apps",
         "/usr/share/icons/hicolor/scalable/apps",
         "/usr/share/icons/hicolor/512x512/apps",
         "/usr/share/icons/hicolor/256x256/apps",
@@ -74,7 +82,7 @@ std::vector<std::string> split_exec_args(const std::string &exec_line) {
             in_double = !in_double;
         } else if (std::isspace(static_cast<unsigned char>(c)) && !in_single && !in_double) {
             if (!cur.empty()) {
-                if (!(cur.size() == 2 && cur[0] == '%')) {
+                if (!(cur.size() == 2 && cur[0] == '%') && cur.rfind("@@", 0) != 0) {
                     args.push_back(std::move(cur));
                 }
                 cur.clear();
@@ -83,7 +91,7 @@ std::vector<std::string> split_exec_args(const std::string &exec_line) {
             cur += c;
         }
     }
-    if (!cur.empty() && !(cur.size() == 2 && cur[0] == '%')) {
+    if (!cur.empty() && !(cur.size() == 2 && cur[0] == '%') && cur.rfind("@@", 0) != 0) {
         args.push_back(std::move(cur));
     }
     return args;
@@ -144,6 +152,8 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
 std::vector<DesktopApp> scan_all_apps() {
     std::vector<fs::path> dirs = {
         fs::path(home_dir()) / ".local/share/applications",
+        fs::path(home_dir()) / ".local/share/flatpak/exports/share/applications",
+        fs::path("/var/lib/flatpak/exports/share/applications"),
         fs::path("/usr/local/share/applications"),
         fs::path("/usr/share/applications")
     };
@@ -193,6 +203,7 @@ void push_desktop_apps(AppState *state) {
     eval_js(state->desktop_view, script);
     eval_js(state->games_view, script);
     eval_js(state->dock_view, script);
+    eval_js(state->store_view, script);
 }
 
 void launch_desktop_app_id(const std::string &desktop_id) {

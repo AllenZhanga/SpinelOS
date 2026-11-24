@@ -28,10 +28,15 @@ struct AppState {
     GtkWindow *installer_win = nullptr;
     WebKitWebView *installer_view = nullptr;
 
+    GtkWindow *store_win = nullptr;
+    WebKitWebView *store_view = nullptr;
+
     std::atomic<bool> install_running{false};
+    std::atomic<bool> store_busy{false};
     std::atomic<bool> shutting_down{false};
     std::atomic<pid_t> install_pid{-1};
     std::thread install_thread;
+    std::thread store_thread;
 
     std::atomic<bool> bt_busy{false};
     std::atomic<bool> wifi_busy{false};

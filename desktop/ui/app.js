@@ -9,6 +9,7 @@
     dock: "dock-shell",
     cc: "cc-shell",
     games: "app-games",
+    store: "app-store",
     settings: "app-settings",
     installer: "app-installer"
   };
@@ -81,6 +82,12 @@
           <stop offset="52%" stop-color="#6366f1"/>
           <stop offset="100%" stop-color="#4338ca"/>
         </linearGradient>`,
+      store: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="50%" stop-color="#0ea5e9"/>
+          <stop offset="100%" stop-color="#1d4ed8"/>
+        </linearGradient>`,
       steam: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#17305c"/>
@@ -150,6 +157,11 @@
         <circle cx="46.5" cy="34" r="2" fill="#6366f1"/>
         <circle cx="38.5" cy="34" r="2" fill="#818cf8"/>
         <circle cx="42.5" cy="38" r="2" fill="#ec4899"/>`,
+      store: `
+        <path d="M32 16L20 44" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+        <path d="M32 16L44 44" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+        <path d="M17 37.5h30" stroke="#ffffff" stroke-width="4.6" stroke-linecap="round"/>
+        <circle cx="45" cy="44" r="2.2" fill="#bae6fd"/>`,
       steam: `
         <circle cx="39.5" cy="24.5" r="9.5" fill="none" stroke="rgba(255,255,255,0.96)" stroke-width="3.6"/>
         <circle cx="39.5" cy="24.5" r="4.2" fill="#ffffff"/>
@@ -213,9 +225,10 @@
     const s = (appIdOrTitle || "").toLowerCase();
     if (s.includes("steam")) return "steam";
     if (s.includes("gamescope")) return "gamepad";
-    if (s.includes("chromium") || s.includes("firefox") || s.includes("browser")) return "browser";
+    if (s.includes("chromium") || s.includes("chrome") || s.includes("firefox") || s.includes("browser")) return "browser";
     if (s.includes("thunar") || s.includes("files")) return "files";
     if (s.includes("foot") || s.includes("terminal")) return "terminal";
+    if (s.includes("应用商店") || s.includes("app-store")) return "store";
     if (s.includes("游戏与启动中心") || s.includes("app-games")) return "games";
     if (s.includes("系统设置") || s.includes("settings")) return "settings";
     if (s.includes("安装") || s.includes("installer")) return "installer";
@@ -262,9 +275,9 @@
 
     const baseShortcuts = [
       { label: "游戏中心", cmd: "games:open", kind: "games", appKeys: [] },
+      { label: "应用商店", cmd: "store:open", kind: "store", appKeys: [] },
       { label: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"] },
       { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [] },
-      { label: "Chromium", cmd: "launch:browser", kind: "browser", appKeys: ["chromium", "google-chrome", "firefox"] },
       { label: "文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"] },
       { label: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["foot"] },
       { label: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [] }
@@ -272,6 +285,19 @@
     if (isLiveEnv) {
       baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer", appKeys: [] });
     }
+
+    // Also automatically surface Store-installed apps (browsers, Heroic, Lutris, Discord, OBS, etc.) on Desktop
+    const storeFeaturedIds = ["com.google.chrome", "chromium", "firefox", "com.heroicgameslauncher.hgl", "lutris", "discord", "com.obsproject.studio"];
+    desktopApps.forEach((app) => {
+      if (storeFeaturedIds.includes(app.id.toLowerCase())) {
+        baseShortcuts.push({
+          label: app.name,
+          cmd: `app:launch:${app.id}`,
+          kind: matchAppKind(app.id),
+          appKeys: [app.id]
+        });
+      }
+    });
 
     baseShortcuts.forEach((sc) => {
       const btn = document.createElement("button");
@@ -330,9 +356,9 @@
 
     const pinned = [
       { title: "游戏与应用中心", cmd: "games:open", kind: "games", appKeys: [], match: ["游戏与启动中心"] },
+      { title: "应用商店", cmd: "store:open", kind: "store", appKeys: [], match: ["spinelos 应用商店"] },
       { title: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"], match: ["steam"] },
       { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [], match: ["gamescope"] },
-      { title: "Chromium", cmd: "launch:browser", kind: "browser", appKeys: ["chromium", "google-chrome", "firefox"], match: ["chromium"] },
       { title: "Thunar 文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"], match: ["thunar"] },
       { title: "Foot 终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["foot"], match: ["foot"] },
       { title: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [], match: ["spinelos 系统设置"] }
@@ -1005,6 +1031,158 @@
     }
   };
 
+  /* ---------------- 6.5. SpinelOS App Store ---------------- */
+  let storeState = { flatpak_ready: true, sudo_nopass: false, busy: false, apps: [] };
+  let storeCategory = "all";
+  let pendingStoreOp = null;
+
+  function renderStoreApps() {
+    const grid = document.getElementById("store-app-grid");
+    if (!grid) return;
+    const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
+    const list = (storeState.apps || []).filter((app) => {
+      const catMatch = storeCategory === "all" ||
+        app.category === storeCategory ||
+        (storeCategory === "游戏平台" && (app.category === "游戏平台" || app.category === "游戏工具")) ||
+        (storeCategory === "社交与影音" && (app.category === "社交语音" || app.category === "直播录屏" || app.category === "影音播放"));
+      if (!catMatch) return false;
+      if (!query) return true;
+      return `${app.name} ${app.pkg} ${app.summary} ${app.category}`.toLowerCase().includes(query);
+    });
+
+    grid.innerHTML = "";
+    if (list.length === 0) {
+      grid.innerHTML = `<div class="lib-empty">没有匹配的应用。你也可以在右上角直接输入 Pacman 包名或 Flatpak ID 安装。</div>`;
+      return;
+    }
+
+    list.forEach((app) => {
+      const card = document.createElement("article");
+      card.className = "store-card glass";
+
+      const head = document.createElement("div");
+      head.className = "store-card-head";
+      const iconWrap = document.createElement("div");
+      iconWrap.className = "store-card-icon";
+      fillIconContainer(iconWrap, findAppIconUri([app.pkg, app.id, app.name]), matchAppKind(`${app.id} ${app.pkg}`), app.name);
+
+      const info = document.createElement("div");
+      info.className = "store-card-info";
+      const titleRow = document.createElement("div");
+      titleRow.className = "store-card-title-row";
+      const title = document.createElement("strong");
+      title.textContent = app.name;
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = app.badge;
+      titleRow.append(title, tag);
+
+      const sub = document.createElement("p");
+      sub.className = "store-card-sub";
+      sub.textContent = app.summary;
+      info.append(titleRow, sub);
+      head.append(iconWrap, info);
+
+      const foot = document.createElement("div");
+      foot.className = "store-card-foot";
+      const pkgLabel = document.createElement("span");
+      pkgLabel.className = "store-card-pkg";
+      pkgLabel.textContent = app.pkg;
+
+      const actions = document.createElement("div");
+      actions.className = "footer-actions";
+      if (app.installed) {
+        const launchBtn = document.createElement("button");
+        launchBtn.className = "btn primary small";
+        launchBtn.textContent = "打开";
+        launchBtn.setAttribute("data-cmd", `store:launch:${app.id}`);
+        const rmBtn = document.createElement("button");
+        rmBtn.className = "btn small danger";
+        rmBtn.textContent = "卸载";
+        rmBtn.disabled = storeState.busy;
+        rmBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          requestStoreOp("remove", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
+        });
+        actions.append(launchBtn, rmBtn);
+      } else {
+        const instBtn = document.createElement("button");
+        instBtn.className = "btn primary small";
+        instBtn.textContent = storeState.busy ? "处理中..." : "下载安装";
+        instBtn.disabled = storeState.busy;
+        instBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          requestStoreOp("install", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
+        });
+        actions.append(instBtn);
+      }
+
+      foot.append(pkgLabel, actions);
+      card.append(head, foot);
+      grid.appendChild(card);
+    });
+  }
+
+  function executeStoreOp(action, op, password = "") {
+    const logWrap = document.getElementById("store-log-wrap");
+    const logBox = document.getElementById("store-log-box");
+    const logTitle = document.getElementById("store-log-title");
+    if (logWrap) logWrap.classList.remove("hidden");
+    if (logBox) logBox.textContent = "";
+    if (logTitle) logTitle.textContent = `${action === "install" ? "正在下载安装" : "正在卸载"}: ${op.name || op.pkg}`;
+    storeState.busy = true;
+    renderStoreApps();
+    sendCommand([
+      `store:${action}`,
+      `id=${op.id || ""}`,
+      `backend=${op.backend}`,
+      `pkg=${op.pkg}`,
+      `password=${password}`
+    ].join("\n"));
+  }
+
+  function requestStoreOp(action, op) {
+    if (storeState.busy) return;
+    if (op.backend === "pacman" && !storeState.sudo_nopass) {
+      pendingStoreOp = { action, op };
+      const box = document.getElementById("store-pass-box");
+      const title = document.getElementById("store-pass-title");
+      const input = document.getElementById("store-pass-input");
+      if (title) title.textContent = `${action === "install" ? "安装" : "卸载"}系统软件 ${op.pkg} 需要管理员密码`;
+      if (input) input.value = "";
+      box?.classList.remove("hidden");
+      input?.focus();
+      return;
+    }
+    executeStoreOp(action, op, "");
+  }
+
+  window.__spinelStoreData = (data) => {
+    storeState = { ...storeState, ...data };
+    renderStoreApps();
+  };
+
+  window.__spinelStoreLog = (line) => {
+    const logWrap = document.getElementById("store-log-wrap");
+    const logBox = document.getElementById("store-log-box");
+    if (logWrap) logWrap.classList.remove("hidden");
+    if (logBox) {
+      logBox.textContent += `${line}\n`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+  };
+
+  window.__spinelStoreDone = (ok, targetId, action) => {
+    storeState.busy = false;
+    const logTitle = document.getElementById("store-log-title");
+    if (logTitle) {
+      logTitle.textContent = ok
+        ? `${action === "install" ? "安装完成" : "卸载完成"}: ${targetId}`
+        : `操作未完成: ${targetId}（请查看下方输出）`;
+    }
+    renderStoreApps();
+  };
+
   /* ---------------- 7. Events, Context Menu & Gamepad ---------------- */
   if (mode === "desktop") {
     const canvas = document.getElementById("desktop-canvas");
@@ -1020,8 +1198,26 @@
   }
 
   document.getElementById("game-search-input")?.addEventListener("input", renderSteamGames);
+  document.getElementById("store-search-input")?.addEventListener("input", renderStoreApps);
+  document.getElementById("store-pass-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      document.querySelector('[data-cmd="store:pass-confirm"]')?.click();
+    }
+  });
 
   document.addEventListener("click", (ev) => {
+    const storeCatTarget = ev.target.closest("[data-store-cat]");
+    if (storeCatTarget) {
+      ev.stopPropagation();
+      storeCategory = storeCatTarget.getAttribute("data-store-cat") || "all";
+      document.querySelectorAll("[data-store-cat]").forEach((btn) => {
+        btn.classList.toggle("active", btn === storeCatTarget);
+      });
+      renderStoreApps();
+      return;
+    }
+
     const perfTarget = ev.target.closest("[data-perf-key]");
     if (perfTarget) {
       ev.stopPropagation();
@@ -1070,6 +1266,23 @@
       const order = ["off", "compact", "full"];
       const next = order[(order.indexOf(perfState.mangohud) + 1) % order.length];
       sendPerfUpdate({ mangohud: next });
+    } else if (cmd === "store:custom-install") {
+      const backend = document.getElementById("store-custom-backend")?.value || "pacman";
+      const pkg = (document.getElementById("store-custom-pkg")?.value || "").trim();
+      if (pkg) requestStoreOp("install", { id: "", name: pkg, backend, pkg });
+    } else if (cmd === "store:pass-cancel") {
+      pendingStoreOp = null;
+      document.getElementById("store-pass-box")?.classList.add("hidden");
+    } else if (cmd === "store:pass-confirm") {
+      const pwd = document.getElementById("store-pass-input")?.value || "";
+      document.getElementById("store-pass-box")?.classList.add("hidden");
+      if (pendingStoreOp && pwd) {
+        const cur = pendingStoreOp;
+        pendingStoreOp = null;
+        executeStoreOp(cur.action, cur.op, pwd);
+      }
+    } else if (cmd === "store:log-hide") {
+      document.getElementById("store-log-wrap")?.classList.add("hidden");
     } else if (cmd === "perf:copy") {
       const str = buildLaunchOptionString(perfState);
       navigator.clipboard?.writeText(str).then(() => {
@@ -1082,7 +1295,7 @@
   });
 
   function initGamepadNavigation() {
-    if ((mode !== "desktop" && mode !== "games" && mode !== "settings" && mode !== "installer") ||
+    if ((mode !== "desktop" && mode !== "games" && mode !== "store" && mode !== "settings" && mode !== "installer") ||
         typeof navigator.getGamepads !== "function") {
       return;
     }

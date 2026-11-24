@@ -24,7 +24,7 @@ Usage: ./scripts/dev-deploy.sh [user@ip] [-p port] [--ui-only | --full]
 Fast hot-deploy to a running SpinelOS VM or PC:
   (default)   Incremental C++20 build + UI sync + live restart spinel-shell
   --ui-only   Sync desktop/ui/ only + live restart spinel-shell (~1s)
-  --full      Upgrade OS packages (Chromium/Thunar/etc.), labwc SpinelDark theme, scripts + spinel-shell
+  --full      Upgrade OS packages (Flatpak/Thunar/etc.), labwc SpinelDark theme, scripts + spinel-shell
 EOF
       exit 0
       ;;
@@ -76,7 +76,7 @@ if [ "$MODE" = "full" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-install /usr/local/bin/spinel-install
 
   sudo pacman -Syu --noconfirm --needed \
-    chromium thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober
+    flatpak thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard os-prober
 fi
 
 UID_NUM="$(id -u)"
