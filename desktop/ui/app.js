@@ -375,7 +375,7 @@
     const activeAppEl = document.getElementById("bar-active-app");
     if (activeAppEl) {
       const activeWin = trackedWindows.find((w) => w.activated) || trackedWindows[0];
-      activeAppEl.textContent = activeWin ? (activeWin.title || activeWin.app_id || "应用") : "访达 · 桌面";
+      activeAppEl.textContent = activeWin ? (activeWin.title || activeWin.app_id || "应用") : "访达";
     }
     renderDock();
   };
@@ -1155,15 +1155,24 @@
     if (!el) return;
     const now = new Date();
     const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const m = now.getMonth() + 1;
+    const d = now.getDate();
     const hh = String(now.getHours()).padStart(2, "0");
     const mm = String(now.getMinutes()).padStart(2, "0");
-    el.textContent = `${days[now.getDay()]} ${hh}:${mm}`;
+    el.textContent = `${m}月${d}日 ${days[now.getDay()]} ${hh}:${mm}`;
   }
 
   window.__spinelUpdateTelemetry = (data) => {
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.textContent = val; };
-    set("bar-net", `网络: ${data.net}`);
-    set("bar-mem", `内存: ${data.mem}`);
+    const barNetEl = document.getElementById("bar-net");
+    if (barNetEl && data.net) barNetEl.title = `网络: ${data.net}`;
+    const barMemBtn = document.getElementById("bar-mem");
+    if (barMemBtn && data.mem) barMemBtn.title = `内存占用: ${data.mem}`;
+    const barMemText = document.getElementById("bar-mem-text");
+    if (barMemText && data.mem) {
+      const match = String(data.mem).match(/^(\d+)\s*\/\s*(\d+)/);
+      barMemText.textContent = match ? `${match[1]}M` : data.mem;
+    }
     set("desk-gpu", data.gpu);
     set("desk-mem", data.mem);
     set("desk-net", data.net);

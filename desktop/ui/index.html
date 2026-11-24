@@ -10,24 +10,77 @@
   <!-- 1. macOS-style Top Menu Bar (?mode=bar) -->
   <header id="top-bar" class="hidden">
     <div class="bar-left">
-      <button class="brand-pill" data-cmd="games:open" title="打开游戏与应用中心">
-        <span class="crystal-gem"></span>
-        <span>SpinelOS</span>
+      <button class="bar-brand-btn" data-cmd="games:open" title="SpinelOS 游戏与应用中心" aria-label="SpinelOS 菜单">
+        <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M9 1.5L15.5 6.5L9 16.5L2.5 6.5L9 1.5Z" fill="currentColor" fill-opacity="0.95"/>
+          <path d="M2.5 6.5H15.5M9 1.5L6.2 6.5L9 16.5L11.8 6.5L9 1.5Z" stroke="rgba(15,23,42,0.35)" stroke-width="0.9" stroke-linejoin="round"/>
+        </svg>
       </button>
-      <span id="bar-active-app" class="active-app-name">访达 · 桌面</span>
+      <span id="bar-active-app" class="active-app-name">访达</span>
       <button class="menu-link" data-cmd="games:open">游戏库</button>
       <button class="menu-link" data-cmd="launch:steam">Steam</button>
       <button class="menu-link" data-cmd="launch:steam-gamepadui">主机大屏</button>
       <button class="menu-link" data-cmd="settings:open:appearance">外观</button>
     </div>
     <div class="bar-right">
-      <span id="bar-net" class="status-chip clickable" data-cmd="settings:open:wifi">网络: 检测中</span>
-      <span id="bar-bt" class="status-chip clickable" data-cmd="settings:open:bt">蓝牙</span>
-      <span id="bar-mem" class="status-chip">内存: --</span>
-      <button class="icon-btn" title="音量-" data-cmd="system:audio-down">Vol-</button>
-      <button class="icon-btn" title="音量+" data-cmd="system:audio-up">Vol+</button>
-      <button class="icon-btn" title="重启" data-cmd="power:reboot">重启</button>
-      <button class="icon-btn danger-text" title="关机" data-cmd="power:shutdown">关机</button>
+      <button id="bar-mem" class="bar-stat-btn" data-cmd="games:open" title="内存占用: 检测中">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true">
+          <rect x="2" y="4" width="12" height="8" rx="1.6"/>
+          <path d="M5 7v2M8 7v2M11 7v2" stroke-linecap="round"/>
+        </svg>
+        <span id="bar-mem-text">--</span>
+      </button>
+      <button class="bar-icon-btn" title="降低音量 (-5%)" data-cmd="system:audio-down" aria-label="降低音量">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.5 6.2H5L8.2 3.4V12.6L5 9.8H2.5V6.2Z" fill="currentColor" stroke="none"/>
+          <path d="M10.5 8H13.8"/>
+        </svg>
+      </button>
+      <button class="bar-icon-btn" title="提高音量 (+5%)" data-cmd="system:audio-up" aria-label="提高音量">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.5 6.2H5L8.2 3.4V12.6L5 9.8H2.5V6.2Z" fill="currentColor" stroke="none"/>
+          <path d="M10.6 5.4A3.6 3.6 0 0 1 10.6 10.6M12.5 3.8A5.8 5.8 0 0 1 12.5 12.2"/>
+        </svg>
+      </button>
+      <button id="bar-bt" class="bar-icon-btn" title="蓝牙与手柄设置" data-cmd="settings:open:bt" aria-label="蓝牙">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 4.8L11.2 10.5L8 13.5V2.5L11.2 5.5L5 11.2"/>
+        </svg>
+      </button>
+      <button id="bar-net" class="bar-icon-btn" title="网络: 检测中" data-cmd="settings:open:wifi" aria-label="网络">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+          <path d="M2 6.2A8.8 8.8 0 0 1 14 6.2"/>
+          <path d="M4.4 8.7A5.4 5.4 0 0 1 11.6 8.7"/>
+          <path d="M6.8 11.1A2 2 0 0 1 9.2 11.1"/>
+          <circle cx="8" cy="13" r="0.9" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="bar-icon-btn" title="搜索游戏与应用" data-cmd="games:open" aria-label="搜索">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.3"/>
+          <path d="M10.4 10.4L13.5 13.5"/>
+        </svg>
+      </button>
+      <button class="bar-icon-btn" title="控制中心与系统设置" data-cmd="settings:open:display" aria-label="控制中心">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+          <rect x="2.2" y="3" width="11.6" height="4.2" rx="2.1"/>
+          <circle cx="11.5" cy="5.1" r="1.4" fill="currentColor" stroke="none"/>
+          <rect x="2.2" y="8.8" width="11.6" height="4.2" rx="2.1"/>
+          <circle cx="4.5" cy="10.9" r="1.4" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="bar-icon-btn" title="重启系统" data-cmd="power:reboot" aria-label="重启">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M13 8A5 5 0 1 1 11.4 4.4"/>
+          <path d="M13 2.5V5.3H10.2"/>
+        </svg>
+      </button>
+      <button class="bar-icon-btn danger-hover" title="关机" data-cmd="power:shutdown" aria-label="关机">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" aria-hidden="true">
+          <path d="M8 2.4V7.2"/>
+          <path d="M4.6 4.4A5 5 0 1 0 11.4 4.4"/>
+        </svg>
+      </button>
       <span id="bar-clock" class="clock">--:--</span>
     </div>
   </header>

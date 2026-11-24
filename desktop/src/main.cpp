@@ -231,7 +231,7 @@ GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelTopBar");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, -1, 36);
+    gtk_window_set_default_size(win, -1, 28);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-bar");
@@ -243,7 +243,7 @@ GtkWindow *create_top_bar(GtkApplication *app, AppState *state) {
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
     state->bar_view = create_configured_webview(state, false);
-    gtk_widget_set_size_request(GTK_WIDGET(state->bar_view), -1, 36);
+    gtk_widget_set_size_request(GTK_WIDGET(state->bar_view), -1, 28);
     gtk_window_set_child(win, GTK_WIDGET(state->bar_view));
 
     webkit_web_view_load_uri(state->bar_view, resolve_ui_uri("?mode=bar").c_str());
