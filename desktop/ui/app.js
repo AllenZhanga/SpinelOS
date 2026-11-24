@@ -787,7 +787,7 @@
   let activeLogSource = "apps";
 
   function switchSettingsTab(tab) {
-    const tabs = ["wifi", "bt", "display", "appearance", "logs"];
+    const tabs = ["wifi", "bt", "display", "perf", "appearance", "logs"];
     const target = tabs.includes(tab) ? tab : "wifi";
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
@@ -799,6 +799,7 @@
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
+    else if (target === "perf") sendCommand("perf:get");
     else if (target === "appearance") sendCommand("theme:refresh");
     else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
   }

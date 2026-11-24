@@ -860,7 +860,8 @@ body.low-fx .lg-orb {
 
 .app-scroll {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   padding: 20px 24px;
   overflow-y: auto;
   display: flex;
@@ -1728,17 +1729,38 @@ body.low-fx .glass {
 }
 
 /* Light Theme Adjustments (tahoe-light & custom is_light=true themes) */
-body.theme-light .btn {
-  background: rgba(15, 23, 42, 0.06);
+body.theme-light .btn:not(.primary):not(.glow):not(.danger) {
+  background: rgba(15, 23, 42, 0.065);
+  border-color: rgba(15, 23, 42, 0.16);
+  color: #0f172a;
 }
 
-body.theme-light .btn:hover {
-  background: rgba(15, 23, 42, 0.11);
+body.theme-light .btn:not(.primary):not(.glow):not(.danger):hover {
+  background: rgba(15, 23, 42, 0.12);
 }
 
-body.theme-light .btn.primary,
-body.theme-light .btn.glow {
+body.theme-light .btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
   color: #ffffff;
+}
+
+body.theme-light .btn.glow {
+  background: linear-gradient(135deg, var(--accent-2), #7c3aed);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+body.theme-light .btn.danger {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.36);
+  color: #be123c;
+}
+
+body.theme-light .btn.ghost {
+  background: transparent;
+  border-color: rgba(15, 23, 42, 0.16);
+  color: #334155;
 }
 
 body.theme-light .tab-bar,
@@ -1747,19 +1769,35 @@ body.theme-light .disk-item,
 body.theme-light .wp-card,
 body.theme-light .launchpad-item,
 body.theme-light .part-section {
-  background: rgba(15, 23, 42, 0.035);
+  background: rgba(15, 23, 42, 0.045);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+body.theme-light .tab-btn,
+body.theme-light .pill-btn {
+  color: #334155;
 }
 
 body.theme-light .tab-btn.active,
 body.theme-light .pill-btn.active,
 body.theme-light .disk-item.selected,
 body.theme-light .wp-card.active {
-  background: rgba(2, 132, 199, 0.14);
+  background: rgba(2, 132, 199, 0.15);
+  border-color: rgba(2, 132, 199, 0.45);
+  color: #0369a1;
 }
 
 body.theme-light .tag,
+body.theme-light .status-chip,
 body.theme-light .progress-track {
   background: rgba(15, 23, 42, 0.08);
+  color: #1e293b;
+}
+
+body.theme-light .badge {
+  color: #0369a1;
+  background: rgba(2, 132, 199, 0.12);
+  border-color: rgba(2, 132, 199, 0.28);
 }
 
 body.theme-light .feedback-banner {

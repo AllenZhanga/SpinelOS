@@ -233,6 +233,7 @@ void push_perf_config(AppState *state) {
        << "});";
     std::string script = js.str();
     eval_js(state->games_view, script);
+    eval_js(state->settings_view, script);
     eval_js(state->desktop_view, script);
     eval_js(state->bar_view, script);
     eval_js(state->cc_view, script);

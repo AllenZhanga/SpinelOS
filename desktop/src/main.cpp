@@ -324,7 +324,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         open_installer_window(state);
     } else if (cmd.rfind("settings:open:", 0) == 0) {
         std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "appearance" || tab == "logs") {
+        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "perf" || tab == "appearance" || tab == "logs") {
             native_shell_set_cc_visible(state, false);
             open_settings_window(state, tab);
         }
