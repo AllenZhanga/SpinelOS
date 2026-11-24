@@ -67,15 +67,20 @@ MODE="$1"
 sudo -v
 
 if [ "$MODE" != "ui" ]; then
+  if ! pacman -Qq vte4 >/dev/null 2>&1; then
+    echo "==> Installing vte4 runtime for Spinel Terminal..."
+    sudo pacman -Sy --noconfirm --needed vte4
+  fi
   sudo install -Dm755 /tmp/spinel-dev/spinel-shell /usr/local/bin/spinel-shell
+  sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
 fi
 sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 
 if [ "$MODE" = "full" ]; then
-  echo "==> Updating SpinelDark theme, labwc/ptyxis config & desktop packages..."
+  echo "==> Updating SpinelDark theme, labwc/terminal config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak ptyxis mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+    flatpak vte4 mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
     spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
@@ -211,6 +216,7 @@ SSH_CMD="ssh -p ${DEV_PORT} -o ControlMaster=auto -o ControlPath=${CTL_SOCK} -o 
 ssh "${SSH_OPTS[@]}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
 if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
 fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
 rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.sh"

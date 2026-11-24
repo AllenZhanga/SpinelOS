@@ -104,7 +104,11 @@ std::vector<std::string> split_exec_args(const std::string &exec_line) {
 
 bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
     if (is_terminal) return true;
-    if ((id == "foot" || id == "org.codeberg.dnkl.foot") && has_executable("ptyxis")) return true;
+    if ((id == "foot" || id == "org.codeberg.dnkl.foot" ||
+         id == "ptyxis" || id == "org.gnome.Ptyxis" || id == "app.devsuite.Ptyxis") &&
+        has_executable("spinel-terminal")) {
+        return true;
+    }
     static const std::set<std::string> hidden_ids = {
         "footclient",
         "foot-server",
@@ -276,7 +280,10 @@ void launch_desktop_app_id(const std::string &desktop_id) {
             auto args = split_exec_args(app.exec);
             if (args.empty()) return;
             if (app.terminal) {
-                if (has_executable("ptyxis")) {
+                if (has_executable("spinel-terminal")) {
+                    args.insert(args.begin(), "--");
+                    args.insert(args.begin(), "spinel-terminal");
+                } else if (has_executable("ptyxis")) {
                     args.insert(args.begin(), "--");
                     args.insert(args.begin(), "ptyxis");
                 } else {

@@ -352,7 +352,7 @@
     if (s.includes("gimp")) return "gimp";
     if (s.includes("browser")) return "browser";
     if (s.includes("thunar") || s.includes("files") || s.includes("文件管理")) return "files";
-    if (s.includes("ptyxis") || s.includes("foot") || s.includes("terminal") || s.includes("终端")) return "terminal";
+    if (s.includes("spinel-terminal") || s.includes("ptyxis") || s.includes("foot") || s.includes("terminal") || s.includes("终端")) return "terminal";
     if (s.includes("fcitx") || s.includes("输入法")) return "ime";
     if (s.includes("应用商店") || s.includes("app-store")) return "store";
     if (s.includes("游戏与启动中心") || s.includes("app-games")) return "games";
@@ -405,7 +405,7 @@
       { label: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"] },
       { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [] },
       { label: "文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"] },
-      { label: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["org.gnome.ptyxis", "ptyxis", "foot"] },
+      { label: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["org.spinelos.terminal", "org.gnome.ptyxis", "ptyxis", "foot"] },
       { label: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [] }
     ];
     if (isLiveEnv) {
@@ -646,7 +646,7 @@
       { title: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"], match: ["steam"] },
       { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [], match: ["gamescope"] },
       { title: "Thunar 文件管理", cmd: "launch:files", kind: "files", appKeys: ["thunar", "org.xfce.thunar"], match: ["thunar"] },
-      { title: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["org.gnome.ptyxis", "ptyxis", "foot"], match: ["ptyxis", "foot"] },
+      { title: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["org.spinelos.terminal", "org.gnome.ptyxis", "ptyxis", "foot"], match: ["spinel-terminal", "org.spinelos.terminal", "spinel 终端", "ptyxis", "foot"] },
       { title: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [], match: ["spinelos 系统设置"] }
     ];
     if (isLiveEnv) {

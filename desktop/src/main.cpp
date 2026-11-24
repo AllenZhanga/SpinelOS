@@ -269,7 +269,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_steam_library(state);
     } else if (cmd == "launch:terminal") {
         native_shell_set_cc_visible(state, false);
-        spawn_argv_logged({has_executable("ptyxis") ? "ptyxis" : "foot"}, "Terminal");
+        std::string term_bin = has_executable("spinel-terminal")
+            ? "spinel-terminal"
+            : (has_executable("ptyxis") ? "ptyxis" : "foot");
+        spawn_argv_logged({term_bin}, "Terminal");
     } else if (cmd == "launch:files") {
         native_shell_set_cc_visible(state, false);
         spawn_argv_logged({"thunar"}, "Files");

@@ -42,8 +42,9 @@ if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
     "${PROFILE_DIR}/airootfs/etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf"
 fi
 
-# Install compiled desktop shell binary and HTML/CSS/JS UI assets
+# Install compiled desktop shell, first-party terminal & HTML/CSS/JS UI assets
 install -Dm755 "${BUILD_DIR}/spinel-shell" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-shell"
+install -Dm755 "${BUILD_DIR}/spinel-terminal" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-terminal"
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui"
 cp -a "${WORKSPACE}/desktop/ui/." "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui/"
 

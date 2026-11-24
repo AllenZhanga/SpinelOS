@@ -14,6 +14,7 @@ RUN printf 'Server = https://mirrors.aliyun.com/archlinux/$repo/os/$arch\nServer
         gtk4 \
         webkitgtk-6.0 \
         gtk4-layer-shell \
+        vte4 \
         wlr-protocols \
         git \
     && pacman -Scc --noconfirm

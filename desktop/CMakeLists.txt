@@ -9,6 +9,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
 pkg_check_modules(WEBKIT6 REQUIRED IMPORTED_TARGET webkitgtk-6.0)
 pkg_check_modules(LAYER_SHELL REQUIRED IMPORTED_TARGET gtk4-layer-shell-0)
+pkg_check_modules(VTE4 REQUIRED IMPORTED_TARGET vte-2.91-gtk4)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
 
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
@@ -76,5 +77,19 @@ target_compile_options(spinel-shell PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
-install(TARGETS spinel-shell DESTINATION bin)
+add_executable(spinel-terminal
+    src/spinel_terminal.cpp
+    src/common.cpp
+)
+
+target_link_libraries(spinel-terminal PRIVATE
+    PkgConfig::GTK4
+    PkgConfig::VTE4
+)
+
+target_compile_options(spinel-terminal PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
+)
+
+install(TARGETS spinel-shell spinel-terminal DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)

@@ -48,7 +48,7 @@ xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
 polkit
 polkit-gnome
-ptyxis
+vte4
 mako
 libnotify
 swaylock

@@ -2391,7 +2391,7 @@ bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
         << "  <keyboard>\n"
         << "    <default />\n"
         << "    <keybind key=\"" << sc.open_terminal << "\">\n"
-        << "      <action name=\"Execute\" command=\"ptyxis\" />\n"
+        << "      <action name=\"Execute\" command=\"spinel-terminal\" />\n"
         << "    </keybind>\n"
         << "    <keybind key=\"" << sc.screenshot_full << "\">\n"
         << "      <action name=\"Execute\" command=\"spinel-screenshot full\" />\n"
