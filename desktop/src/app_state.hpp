@@ -47,10 +47,21 @@ struct AppState {
     std::atomic<bool> wifi_busy{false};
 };
 
+inline void on_eval_js_done(GObject *source, GAsyncResult *res, gpointer) {
+    GError *err = nullptr;
+    if (!source || !WEBKIT_IS_WEB_VIEW(source)) return;
+    JSCValue *val = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(source), res, &err);
+    if (val) g_object_unref(val);
+    if (err) g_error_free(err);
+    if (GTK_IS_WIDGET(source) && gtk_widget_get_realized(GTK_WIDGET(source))) {
+        gtk_widget_queue_draw(GTK_WIDGET(source));
+    }
+}
+
 inline void eval_js(WebKitWebView *view, const std::string &script) {
     if (!view) return;
     webkit_web_view_evaluate_javascript(
-        view, script.c_str(), -1, nullptr, nullptr, nullptr, nullptr, nullptr
+        view, script.c_str(), -1, nullptr, nullptr, nullptr, on_eval_js_done, nullptr
     );
 }
 

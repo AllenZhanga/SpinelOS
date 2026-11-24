@@ -450,18 +450,15 @@
 
   function forceSoftwareRepaint() {
     if (!activeRootEl) return;
-    // WebKitGTK software/non-composited mode may defer :root CSS var repaints until next layout/compositor pass
     document.documentElement.dataset.theme = activeThemeId;
-    activeRootEl.style.opacity = "0.999";
+    // Flush style + layout synchronously without creating an opacity/compositing layer (which blanks WebKitGTK Cairo mode)
+    void document.documentElement.offsetHeight;
     void activeRootEl.offsetHeight;
-    window.requestAnimationFrame(() => {
-      if (activeRootEl) activeRootEl.style.opacity = "";
-    });
   }
 
   function applyUiTheme(t) {
     if (!t) return;
-    activeThemeId = t.id || "crystal-aurora";
+    activeThemeId = t.id || "tahoe-light";
     const root = document.documentElement.style;
     const setVar = (k, v) => { if (v) root.setProperty(k, v); };
     setVar("--bg", t.ui_bg);
@@ -475,8 +472,13 @@
     setVar("--muted", t.ui_muted);
     setVar("--accent", t.ui_accent);
     setVar("--accent-2", t.ui_accent2);
+    if (t.ui_bg && mode !== "desktop" && mode !== "bar" && mode !== "cc") {
+      document.body.style.background = t.ui_bg;
+    }
     if (activeRootEl && t.ui_win_bg) {
       activeRootEl.style.background = t.ui_win_bg;
+      const toolbar = activeRootEl.querySelector(".win-toolbar");
+      if (toolbar && t.ui_toolbar_bg) toolbar.style.background = t.ui_toolbar_bg;
     }
     document.body.classList.toggle("theme-light", Boolean(t.is_light));
     forceSoftwareRepaint();

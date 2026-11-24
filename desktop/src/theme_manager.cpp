@@ -343,17 +343,18 @@ void push_theme_state(AppState *state) {
     }
     js << "]});";
     std::string script = js.str();
-    eval_js(state->games_view, script);
-    eval_js(state->store_view, script);
-    eval_js(state->settings_view, script);
-    eval_js(state->installer_view, script);
-    auto queue_view = [](WebKitWebView *v) {
-        if (v) gtk_widget_queue_draw(GTK_WIDGET(v));
+    const GdkRGBA bg = active.is_light
+        ? GdkRGBA{0.96f, 0.965f, 0.98f, 1.0f}
+        : GdkRGBA{0.031f, 0.043f, 0.071f, 1.0f};
+    auto sync_view = [&](WebKitWebView *v) {
+        if (!v) return;
+        webkit_web_view_set_background_color(v, &bg);
+        eval_js(v, script);
     };
-    queue_view(state->games_view);
-    queue_view(state->store_view);
-    queue_view(state->settings_view);
-    queue_view(state->installer_view);
+    sync_view(state->games_view);
+    sync_view(state->store_view);
+    sync_view(state->settings_view);
+    sync_view(state->installer_view);
 }
 
 void export_custom_theme_template() {
