@@ -6,6 +6,7 @@
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
+#include "theme_manager.hpp"
 #include "window_tracker.hpp"
 
 #include <gtk/gtk.h>
@@ -133,6 +134,7 @@ void ensure_app_window(AppState *state,
 void open_games_window(AppState *state) {
     ensure_app_window(state, &state->games_win, &state->games_view,
                       "SpinelOS 游戏与启动中心", "?mode=games", 1040, 680);
+    push_theme_state(state);
     push_perf_config(state);
     push_steam_library(state);
     push_desktop_apps(state);
@@ -145,18 +147,21 @@ void open_settings_window(AppState *state, const std::string &tab) {
     if (existed) {
         eval_js(state->settings_view, "window.__spinelOpenSettings && window.__spinelOpenSettings('" + tab + "');");
     }
+    push_theme_state(state);
     push_wallpaper_pref(state);
 }
 
 void open_installer_window(AppState *state) {
     ensure_app_window(state, &state->installer_win, &state->installer_view,
                       "安装 SpinelOS 到硬盘", "?mode=installer", 860, 660);
+    push_theme_state(state);
     push_installer_env(state);
 }
 
 void open_store_window(AppState *state) {
     ensure_app_window(state, &state->store_win, &state->store_view,
                       "SpinelOS 应用商店", "?mode=store", 1020, 680);
+    push_theme_state(state);
     push_desktop_apps(state);
     push_store_catalog(state);
 }
@@ -303,7 +308,18 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         uint64_t wid = std::strtoull(cmd.substr(13).c_str(), nullptr, 10);
         if (wid > 0) close_tracked_window(wid);
     } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
-        set_wallpaper_pref(state, cmd.substr(14));
+        std::string wp = cmd.substr(14);
+        if (wp == "crystal-blue") wp = "crystal-aurora";
+        else if (wp == "obsidian-purple") wp = "obsidian-neon";
+        else if (wp == "emerald-aurora") wp = "emerald-nordic";
+        set_active_theme(state, wp);
+    } else if (cmd.rfind("theme:set:", 0) == 0) {
+        set_active_theme(state, cmd.substr(10));
+    } else if (cmd == "theme:refresh") {
+        push_theme_state(state);
+        native_shell_sync_theme(state);
+    } else if (cmd == "theme:export") {
+        export_custom_theme_template();
     } else if (cmd == "system:audio-down") {
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"});
     } else if (cmd == "system:audio-up") {
@@ -314,6 +330,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         spawn_argv_detached({"systemctl", "poweroff"});
     } else if (cmd == "telemetry:refresh") {
         push_all_telemetry(state);
+        push_theme_state(state);
         push_perf_config(state);
         push_steam_library(state);
         push_desktop_apps(state);

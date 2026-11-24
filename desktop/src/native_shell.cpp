@@ -3,6 +3,7 @@
 #include "desktop_apps.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
+#include "theme_manager.hpp"
 #include "window_tracker.hpp"
 
 #include <cairo.h>
@@ -90,6 +91,8 @@ struct NativeShellState {
     bool cc_updating_sliders = false;
 
     // Cached states
+    ThemeSpec theme;
+    GtkCssProvider *css_provider = nullptr;
     TelemetrySnapshot telemetry;
     std::vector<DesktopAppInfo> desktop_apps;
     std::map<std::string, cairo_surface_t *> surface_cache;
@@ -225,6 +228,40 @@ void set_rgb_hex(cairo_pattern_t *pat, double offset, uint32_t hex, double alpha
     double g = ((hex >> 8) & 0xFF) / 255.0;
     double b = (hex & 0xFF) / 255.0;
     cairo_pattern_add_color_stop_rgba(pat, offset, r, g, b, alpha);
+}
+
+void parse_css_rgba(const std::string &css, double &r, double &g, double &b, double &a) {
+    r = 0.1; g = 0.14; b = 0.22; a = 0.85;
+    std::string s = trim_copy(css);
+    if (!s.empty() && s.front() == '#' && s.size() >= 7) {
+        unsigned long hex = std::strtoul(s.substr(1, 6).c_str(), nullptr, 16);
+        r = ((hex >> 16) & 0xFF) / 255.0;
+        g = ((hex >> 8) & 0xFF) / 255.0;
+        b = (hex & 0xFF) / 255.0;
+        a = 1.0;
+        return;
+    }
+    if (s.rfind("rgba(", 0) == 0 || s.rfind("rgb(", 0) == 0) {
+        auto lp = s.find('(');
+        auto rp = s.rfind(')');
+        if (lp != std::string::npos && rp != std::string::npos && rp > lp) {
+            double vals[4]{20, 28, 44, 0.85};
+            int idx = 0;
+            const char *p = s.c_str() + lp + 1;
+            while (*p && idx < 4) {
+                while (*p == ' ' || *p == ',') ++p;
+                if (!*p || *p == ')') break;
+                char *endp = nullptr;
+                vals[idx++] = std::strtod(p, &endp);
+                if (endp == p) break;
+                p = endp;
+            }
+            r = std::clamp(vals[0] / 255.0, 0.0, 1.0);
+            g = std::clamp(vals[1] / 255.0, 0.0, 1.0);
+            b = std::clamp(vals[2] / 255.0, 0.0, 1.0);
+            a = (idx >= 4) ? std::clamp(vals[3], 0.0, 1.0) : 1.0;
+        }
+    }
 }
 
 void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std::string &kind) {
@@ -493,7 +530,9 @@ GtkWidget *make_cmd_button(AppState *state, const char *label, const char *css_c
 
 /* ==================== Native Monochrome Vector Glyphs (Bar & CC) ==================== */
 
-void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer) {
+void draw_gem_glyph(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer) {
+    GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+    gtk_widget_get_color(GTK_WIDGET(da), &fg);
     double s = std::min(w, h) / 18.0;
     cairo_save(cr);
     cairo_translate(cr, (w - 18.0 * s) * 0.5, (h - 18.0 * s) * 0.5);
@@ -503,9 +542,9 @@ void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer) {
     cairo_line_to(cr, 9, 16.2);
     cairo_line_to(cr, 2.5, 6.5);
     cairo_close_path(cr);
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.94);
+    cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, fg.alpha);
     cairo_fill_preserve(cr);
-    cairo_set_source_rgba(cr, 0.08, 0.12, 0.22, 0.35);
+    cairo_set_source_rgba(cr, 0.08, 0.12, 0.22, 0.25);
     cairo_set_line_width(cr, 0.9);
     cairo_stroke(cr);
     cairo_restore(cr);
@@ -513,12 +552,12 @@ void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer) {
 
 enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings };
 
-void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind) {
+void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
     cairo_save(cr);
     cairo_translate(cr, (w - 16.0 * s) * 0.5, (h - 16.0 * s) * 0.5);
     cairo_scale(cr, s, s);
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.94);
+    cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, fg.alpha);
     cairo_set_line_width(cr, 1.45);
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
@@ -615,9 +654,11 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind) {
     cairo_restore(cr);
 }
 
-void draw_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer data) {
+void draw_glyph_cb(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer data) {
     BarGlyph kind = static_cast<BarGlyph>(reinterpret_cast<intptr_t>(data));
-    draw_monochrome_glyph(cr, w, h, kind);
+    GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+    gtk_widget_get_color(GTK_WIDGET(da), &fg);
+    draw_monochrome_glyph(cr, w, h, kind, fg);
 }
 
 GtkWidget *make_glyph_icon_btn(AppState *state, BarGlyph kind, const char *tooltip, const char *cmd, const char *extra_cls = nullptr) {
@@ -735,34 +776,24 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
 void draw_desktop_wallpaper(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
-    const std::string &wp = ns->wallpaper;
-
-    uint32_t c0 = 0x070B14, c1 = 0x0D1A33, c2 = 0x091020;
-    uint32_t g1 = 0x38BDF8, g2 = 0x6366F1;
-    if (wp == "obsidian-purple") {
-        c0 = 0x090612; c1 = 0x1C1030; c2 = 0x0A0914;
-        g1 = 0xA855F7; g2 = 0xEC4899;
-    } else if (wp == "emerald-aurora") {
-        c0 = 0x05110E; c1 = 0x0B2421; c2 = 0x071219;
-        g1 = 0x10B981; g2 = 0x0EA5E9;
-    } else if (wp == "amber-dusk") {
-        c0 = 0x120B08; c1 = 0x261611; c2 = 0x0D0A14;
-        g1 = 0xF59E0B; g2 = 0xF43F5E;
-    }
+    const ThemeSpec &t = ns->theme;
 
     cairo_pattern_t *base = cairo_pattern_create_linear(0, 0, w, h);
-    set_rgb_hex(base, 0.0, c0);
-    set_rgb_hex(base, 0.52, c1);
-    set_rgb_hex(base, 1.0, c2);
+    set_rgb_hex(base, 0.0, t.wp_c0);
+    set_rgb_hex(base, 0.52, t.wp_c1);
+    set_rgb_hex(base, 1.0, t.wp_c2);
     cairo_rectangle(cr, 0, 0, w, h);
     cairo_set_source(cr, base);
     cairo_fill(cr);
     cairo_pattern_destroy(base);
 
+    double glow_a1 = t.is_light ? 0.22 : 0.26;
+    double glow_a2 = t.is_light ? 0.18 : 0.24;
+
     double r1 = std::max(w, h) * 0.48;
     cairo_pattern_t *rad1 = cairo_pattern_create_radial(w * 0.22, h * 0.22, 0, w * 0.22, h * 0.22, r1);
-    set_rgb_hex(rad1, 0.0, g1, 0.26);
-    set_rgb_hex(rad1, 1.0, g1, 0.0);
+    set_rgb_hex(rad1, 0.0, t.wp_glow1, glow_a1);
+    set_rgb_hex(rad1, 1.0, t.wp_glow1, 0.0);
     cairo_rectangle(cr, 0, 0, w, h);
     cairo_set_source(cr, rad1);
     cairo_fill(cr);
@@ -770,8 +801,8 @@ void draw_desktop_wallpaper(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointe
 
     double r2 = std::max(w, h) * 0.50;
     cairo_pattern_t *rad2 = cairo_pattern_create_radial(w * 0.80, h * 0.78, 0, w * 0.80, h * 0.78, r2);
-    set_rgb_hex(rad2, 0.0, g2, 0.24);
-    set_rgb_hex(rad2, 1.0, g2, 0.0);
+    set_rgb_hex(rad2, 0.0, t.wp_glow2, glow_a2);
+    set_rgb_hex(rad2, 1.0, t.wp_glow2, 0.0);
     cairo_rectangle(cr, 0, 0, w, h);
     cairo_set_source(cr, rad2);
     cairo_fill(cr);
@@ -1082,13 +1113,18 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
 
     // Soft glass shadow
     cairo_rounded_rect(cr, pill_x, pill_y + 3.0, pill_w, pill_h, pill_rad);
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.36);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, ns->theme.is_light ? 0.16 : 0.36);
     cairo_fill(cr);
 
-    // Translucent frosted macOS glass body
+    // Translucent frosted macOS glass body driven by active ThemeSpec
+    double tr, tg, tb, ta, br, bg, bb, ba, rr, rg, rb, ra;
+    parse_css_rgba(ns->theme.dock_top, tr, tg, tb, ta);
+    parse_css_rgba(ns->theme.dock_bot, br, bg, bb, ba);
+    parse_css_rgba(ns->theme.dock_border, rr, rg, rb, ra);
+
     cairo_pattern_t *glass = cairo_pattern_create_linear(0, pill_y, 0, pill_y + pill_h);
-    cairo_pattern_add_color_stop_rgba(glass, 0.0, 0.28, 0.34, 0.48, 0.62);
-    cairo_pattern_add_color_stop_rgba(glass, 1.0, 0.14, 0.19, 0.30, 0.68);
+    cairo_pattern_add_color_stop_rgba(glass, 0.0, tr, tg, tb, ta);
+    cairo_pattern_add_color_stop_rgba(glass, 1.0, br, bg, bb, ba);
     cairo_rounded_rect(cr, pill_x, pill_y, pill_w, pill_h, pill_rad);
     cairo_set_source(cr, glass);
     cairo_fill(cr);
@@ -1096,7 +1132,7 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
 
     // Outer glass rim + top specular edge
     cairo_rounded_rect(cr, pill_x + 0.5, pill_y + 0.5, pill_w - 1.0, pill_h - 1.0, pill_rad - 0.5);
-    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.28);
+    cairo_set_source_rgba(cr, rr, rg, rb, ra);
     cairo_set_line_width(cr, 1.0);
     cairo_stroke(cr);
 
@@ -1107,7 +1143,8 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
         double dx = (centers[p - 1] + centers[p]) * 0.5;
         cairo_move_to(cr, dx, pill_y + 13.0);
         cairo_line_to(cr, dx, pill_y + pill_h - 15.0);
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.24);
+        if (ns->theme.is_light) cairo_set_source_rgba(cr, 0.06, 0.09, 0.16, 0.22);
+        else cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.24);
         cairo_set_line_width(cr, 1.0);
         cairo_stroke(cr);
     }
@@ -1128,7 +1165,9 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
             double dot_y = pill_y + pill_h - 5.2;
             cairo_arc(cr, cx, dot_y, dot_r, 0, 2 * M_PI);
             if (item->minimized) {
-                cairo_set_source_rgba(cr, 0.65, 0.72, 0.82, 0.75);
+                cairo_set_source_rgba(cr, 0.55, 0.62, 0.72, 0.72);
+            } else if (ns->theme.is_light) {
+                cairo_set_source_rgba(cr, 0.06, 0.09, 0.16, 0.88);
             } else {
                 cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
             }
@@ -1155,17 +1194,21 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
             double tip_y = std::max(4.0, base_bottom_y - hitem->anim_lift - hitem->anim_size - tip_h - 10.0);
 
             cairo_rounded_rect(cr, tip_x, tip_y + 2.0, tip_w, tip_h, 8.0);
-            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.35);
+            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, ns->theme.is_light ? 0.14 : 0.35);
             cairo_fill(cr);
 
+            double tbg_r, tbg_g, tbg_b, tbg_a, tfg_r, tfg_g, tfg_b, tfg_a;
+            parse_css_rgba(ns->theme.dock_tip_bg, tbg_r, tbg_g, tbg_b, tbg_a);
+            parse_css_rgba(ns->theme.dock_tip_fg, tfg_r, tfg_g, tfg_b, tfg_a);
+
             cairo_rounded_rect(cr, tip_x, tip_y, tip_w, tip_h, 8.0);
-            cairo_set_source_rgba(cr, 0.09, 0.12, 0.19, 0.94);
+            cairo_set_source_rgba(cr, tbg_r, tbg_g, tbg_b, tbg_a);
             cairo_fill_preserve(cr);
-            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.24);
+            cairo_set_source_rgba(cr, rr, rg, rb, ra);
             cairo_set_line_width(cr, 1.0);
             cairo_stroke(cr);
 
-            draw_pango_text(cr, hitem->label, tip_x + pad_x, tip_y + pad_y, 12.0, false, 1, 1, 1, 0.98);
+            draw_pango_text(cr, hitem->label, tip_x + pad_x, tip_y + pad_y, 12.0, false, tfg_r, tfg_g, tfg_b, tfg_a);
         }
     }
 }
@@ -1618,10 +1661,22 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     ns->cc_win = win;
 }
 
-void load_native_css() {
-    GtkCssProvider *css = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(
-        css,
+void apply_native_css(NativeShellState *ns) {
+    if (!ns) return;
+    const ThemeSpec &t = ns->theme;
+    const char *hover_bg = t.is_light ? "rgba(15, 23, 42, 0.10)" : "rgba(255, 255, 255, 0.18)";
+    const char *open_bg = t.is_light ? "rgba(15, 23, 42, 0.16)" : "rgba(255, 255, 255, 0.28)";
+    const char *sc_hover = t.is_light ? "rgba(255, 255, 255, 0.45)" : "rgba(255, 255, 255, 0.12)";
+    const char *sc_lbl_shadow = t.is_light ? "0 1px 2px rgba(255, 255, 255, 0.75)" : "0 1px 3px rgba(0, 0, 0, 0.85)";
+    const char *cc_sub_fg = t.is_light ? "rgba(15, 23, 42, 0.72)" : "rgba(255, 255, 255, 0.78)";
+    const char *cc_chip_bg = t.is_light ? "rgba(15, 23, 42, 0.08)" : "rgba(255, 255, 255, 0.16)";
+    const char *cc_chip_hover = t.is_light ? "rgba(15, 23, 42, 0.15)" : "rgba(255, 255, 255, 0.28)";
+    const char *trough_bg = t.is_light ? "rgba(15, 23, 42, 0.14)" : "rgba(255, 255, 255, 0.22)";
+    const char *fill_bg = t.is_light ? t.cc_accent.c_str() : "rgba(255, 255, 255, 0.90)";
+
+    std::string css_str;
+    css_str.reserve(4096);
+    css_str +=
         "window.spinel-transparent, window.spinel-transparent.background {\n"
         "  background-color: transparent;\n"
         "  background-image: none;\n"
@@ -1629,12 +1684,13 @@ void load_native_css() {
         "  border: none;\n"
         "}\n"
         ".spinel-topbar {\n"
-        "  background-color: rgba(14, 20, 36, 0.70);\n"
-        "  border-bottom: 1px solid rgba(255, 255, 255, 0.10);\n"
+        "  background-color: " + t.bar_bg + ";\n"
+        "  border-bottom: 1px solid " + t.bar_border + ";\n"
+        "  color: " + t.bar_fg + ";\n"
         "  padding: 0 12px;\n"
         "}\n"
         ".spinel-bar-active {\n"
-        "  color: #ffffff;\n"
+        "  color: " + t.bar_fg + ";\n"
         "  font-weight: 700;\n"
         "  font-size: 12.5px;\n"
         "  padding: 0 8px 0 4px;\n"
@@ -1644,7 +1700,7 @@ void load_native_css() {
         "  background-image: none;\n"
         "  border: none;\n"
         "  box-shadow: none;\n"
-        "  color: rgba(255, 255, 255, 0.92);\n"
+        "  color: " + t.bar_fg + ";\n"
         "  font-size: 12px;\n"
         "  font-weight: 500;\n"
         "  padding: 2px 8px;\n"
@@ -1652,27 +1708,16 @@ void load_native_css() {
         "  min-width: 20px;\n"
         "  border-radius: 5px;\n"
         "}\n"
-        ".spinel-bar-icon-btn {\n"
-        "  padding: 2px 6px;\n"
-        "}\n"
-        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover {\n"
-        "  background-color: rgba(255, 255, 255, 0.18);\n"
-        "  color: #ffffff;\n"
-        "}\n"
-        ".spinel-bar-icon-btn.cc-open {\n"
-        "  background-color: rgba(255, 255, 255, 0.28);\n"
-        "}\n"
-        ".spinel-bar-icon-btn.danger-hover:hover {\n"
-        "  background-color: rgba(244, 63, 94, 0.34);\n"
-        "}\n"
+        ".spinel-bar-icon-btn { padding: 2px 6px; }\n"
+        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-bar-icon-btn.cc-open { background-color: " + std::string(open_bg) + "; }\n"
+        ".spinel-bar-icon-btn.danger-hover:hover { background-color: rgba(244, 63, 94, 0.34); }\n"
         ".spinel-bar-mem, .spinel-bar-clock {\n"
-        "  color: rgba(255, 255, 255, 0.94);\n"
+        "  color: " + t.bar_fg + ";\n"
         "  font-size: 12px;\n"
         "  font-weight: 500;\n"
         "}\n"
-        ".spinel-bar-clock {\n"
-        "  padding-left: 6px;\n"
-        "}\n"
+        ".spinel-bar-clock { padding-left: 6px; }\n"
         ".spinel-shortcut-btn {\n"
         "  background: transparent;\n"
         "  background-image: none;\n"
@@ -1682,134 +1727,97 @@ void load_native_css() {
         "  padding: 5px 4px;\n"
         "}\n"
         ".spinel-shortcut-btn:hover {\n"
-        "  background-color: rgba(255, 255, 255, 0.12);\n"
-        "  border-color: rgba(255, 255, 255, 0.18);\n"
+        "  background-color: " + std::string(sc_hover) + ";\n"
+        "  border-color: " + t.bar_border + ";\n"
         "}\n"
         ".spinel-shortcut-label {\n"
-        "  color: #f8fafc;\n"
+        "  color: " + t.bar_fg + ";\n"
         "  font-size: 11.5px;\n"
-        "  font-weight: 500;\n"
-        "  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);\n"
+        "  font-weight: 600;\n"
+        "  text-shadow: " + std::string(sc_lbl_shadow) + ";\n"
         "}\n"
         ".spinel-ctx-popover contents {\n"
-        "  background-color: rgba(16, 23, 40, 0.95);\n"
+        "  background-color: " + t.popover_bg + ";\n"
         "  background-image: none;\n"
-        "  border: 1px solid rgba(255, 255, 255, 0.22);\n"
+        "  border: 1px solid " + t.cc_border + ";\n"
         "  border-radius: 12px;\n"
         "  padding: 6px;\n"
-        "  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.52);\n"
+        "  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);\n"
         "}\n"
         ".spinel-ctx-item {\n"
         "  background: transparent;\n"
         "  background-image: none;\n"
         "  border: none;\n"
         "  box-shadow: none;\n"
-        "  color: #eef2ff;\n"
+        "  color: " + t.bar_fg + ";\n"
         "  font-size: 12.5px;\n"
         "  min-width: 190px;\n"
         "  padding: 6px 10px;\n"
         "  border-radius: 8px;\n"
         "}\n"
-        ".spinel-ctx-item:hover {\n"
-        "  background-color: rgba(56, 189, 248, 0.28);\n"
-        "}\n"
+        ".spinel-ctx-item:hover { background-color: " + std::string(hover_bg) + "; }\n"
         ".spinel-cc-pill, .spinel-cc-card, .spinel-cc-orb {\n"
-        "  background-image: linear-gradient(155deg, rgba(64, 76, 102, 0.92), rgba(36, 45, 66, 0.95));\n"
-        "  border: 1px solid rgba(255, 255, 255, 0.34);\n"
-        "  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40), 0 10px 24px rgba(0, 0, 0, 0.34);\n"
-        "  color: #ffffff;\n"
+        "  background-image: linear-gradient(155deg, " + t.cc_top + ", " + t.cc_bot + ");\n"
+        "  border: 1px solid " + t.cc_border + ";\n"
+        "  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 10px 24px rgba(0, 0, 0, 0.24);\n"
+        "  color: " + t.bar_fg + ";\n"
         "}\n"
-        ".spinel-cc-pill {\n"
-        "  border-radius: 999px;\n"
-        "  padding: 7px 11px 7px 8px;\n"
-        "}\n"
-        ".spinel-cc-pill:hover, .spinel-cc-orb:hover {\n"
-        "  background-image: linear-gradient(155deg, rgba(78, 92, 122, 0.95), rgba(44, 55, 80, 0.96));\n"
-        "}\n"
-        ".spinel-cc-card {\n"
-        "  border-radius: 20px;\n"
-        "  padding: 12px 13px;\n"
-        "}\n"
-        ".spinel-cc-orb {\n"
-        "  border-radius: 999px;\n"
-        "  padding: 0;\n"
-        "  font-size: 11px;\n"
-        "  font-weight: 800;\n"
-        "}\n"
+        ".spinel-cc-pill { border-radius: 999px; padding: 7px 11px 7px 8px; }\n"
+        ".spinel-cc-pill:hover, .spinel-cc-orb:hover { filter: brightness(1.06); }\n"
+        ".spinel-cc-card { border-radius: 20px; padding: 12px 13px; }\n"
+        ".spinel-cc-orb { border-radius: 999px; padding: 0; font-size: 11px; font-weight: 800; }\n"
         ".spinel-cc-orb.active {\n"
-        "  background-image: linear-gradient(145deg, rgba(56, 189, 248, 0.72), rgba(37, 99, 235, 0.72));\n"
-        "  border-color: rgba(186, 230, 253, 0.75);\n"
+        "  background-image: none;\n"
+        "  background-color: " + t.cc_accent + ";\n"
+        "  color: #ffffff;\n"
         "}\n"
         ".spinel-cc-orb.danger-orb:hover {\n"
         "  background-image: linear-gradient(145deg, rgba(244, 63, 94, 0.65), rgba(190, 18, 60, 0.70));\n"
+        "  color: #ffffff;\n"
         "}\n"
         ".spinel-cc-circle {\n"
         "  border-radius: 999px;\n"
-        "  background-color: rgba(255, 255, 255, 0.18);\n"
+        "  background-color: " + std::string(cc_chip_bg) + ";\n"
+        "  color: " + t.bar_fg + ";\n"
         "}\n"
-        ".spinel-cc-circle.active-blue {\n"
-        "  background-color: #0a84ff;\n"
-        "}\n"
-        ".spinel-cc-circle.active-indigo {\n"
-        "  background-color: #6366f1;\n"
-        "}\n"
-        ".spinel-cc-title {\n"
-        "  font-size: 12.5px;\n"
-        "  font-weight: 600;\n"
+        ".spinel-cc-circle.active-blue, .spinel-cc-circle.active-indigo {\n"
+        "  background-color: " + t.cc_accent + ";\n"
         "  color: #ffffff;\n"
         "}\n"
-        ".spinel-cc-sub {\n"
-        "  font-size: 10.5px;\n"
-        "  color: rgba(255, 255, 255, 0.76);\n"
-        "}\n"
-        ".spinel-cc-chev {\n"
-        "  font-size: 15px;\n"
-        "  color: rgba(255, 255, 255, 0.65);\n"
-        "}\n"
+        ".spinel-cc-title { font-size: 12.5px; font-weight: 600; color: " + t.bar_fg + "; }\n"
+        ".spinel-cc-sub { font-size: 10.5px; color: " + std::string(cc_sub_fg) + "; }\n"
+        ".spinel-cc-chev { font-size: 15px; color: " + std::string(cc_sub_fg) + "; }\n"
         ".spinel-cc-badge {\n"
-        "  font-size: 10px;\n"
-        "  font-weight: 600;\n"
-        "  padding: 2px 7px;\n"
-        "  border-radius: 999px;\n"
-        "  background-color: rgba(255, 255, 255, 0.16);\n"
-        "  color: #ffffff;\n"
+        "  font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;\n"
+        "  background-color: " + std::string(cc_chip_bg) + "; color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-cc-chip-btn {\n"
-        "  background-color: rgba(255, 255, 255, 0.16);\n"
+        "  background-color: " + std::string(cc_chip_bg) + ";\n"
         "  background-image: none;\n"
-        "  border: 1px solid rgba(255, 255, 255, 0.22);\n"
-        "  border-radius: 999px;\n"
-        "  color: #ffffff;\n"
-        "  font-size: 11px;\n"
-        "  font-weight: 600;\n"
-        "  padding: 4px 2px;\n"
-        "  min-height: 24px;\n"
+        "  border: 1px solid " + t.bar_border + ";\n"
+        "  border-radius: 999px; color: " + t.bar_fg + ";\n"
+        "  font-size: 11px; font-weight: 600; padding: 4px 2px; min-height: 24px;\n"
         "}\n"
-        ".spinel-cc-chip-btn:hover {\n"
-        "  background-color: rgba(255, 255, 255, 0.28);\n"
-        "}\n"
-        ".spinel-cc-scale trough {\n"
-        "  min-height: 14px;\n"
-        "  border-radius: 999px;\n"
-        "  background-color: rgba(255, 255, 255, 0.22);\n"
-        "}\n"
-        ".spinel-cc-scale highlight {\n"
-        "  min-height: 14px;\n"
-        "  border-radius: 999px;\n"
-        "  background-color: rgba(255, 255, 255, 0.90);\n"
-        "}\n"
-        ".spinel-cc-scale slider {\n"
-        "  min-width: 16px;\n"
-        "  min-height: 16px;\n"
-        "  border-radius: 999px;\n"
-        "  background-color: #ffffff;\n"
-        "  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);\n"
-        "}\n");
-    if (GdkDisplay *display = gdk_display_get_default()) {
-        gtk_style_context_add_provider_for_display(
-            display, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
+        ".spinel-cc-chip-btn:hover { background-color: " + std::string(cc_chip_hover) + "; }\n"
+        ".spinel-cc-scale trough { min-height: 14px; border-radius: 999px; background-color: " + std::string(trough_bg) + "; }\n"
+        ".spinel-cc-scale highlight { min-height: 14px; border-radius: 999px; background-color: " + std::string(fill_bg) + "; }\n"
+        ".spinel-cc-scale slider { min-width: 16px; min-height: 16px; border-radius: 999px; background-color: #ffffff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }\n";
+
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return;
+    if (ns->css_provider) {
+        gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
+        g_object_unref(ns->css_provider);
+        ns->css_provider = nullptr;
     }
-    g_object_unref(css);
+    ns->css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(ns->css_provider, css_str.c_str());
+    gtk_style_context_add_provider_for_display(
+        display, GTK_STYLE_PROVIDER(ns->css_provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    if (GtkSettings *gs = gtk_settings_get_default()) {
+        g_object_set(gs, "gtk-application-prefer-dark-theme", t.is_light ? FALSE : TRUE, nullptr);
+    }
 }
 
 }  // namespace
@@ -1820,7 +1828,8 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     ns->app_state = state;
     state->native = ns;
 
-    load_native_css();
+    ns->theme = get_active_theme();
+    apply_native_css(ns);
     ns->telemetry = collect_telemetry();
     ns->desktop_apps = list_desktop_apps();
 
@@ -1838,6 +1847,12 @@ void shutdown_native_shell(AppState *state) {
     NativeShellState *ns = state->native;
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
     if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
+    if (ns->css_provider) {
+        if (GdkDisplay *display = gdk_display_get_default()) {
+            gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
+        }
+        g_object_unref(ns->css_provider);
+    }
     for (auto &kv : ns->surface_cache) {
         if (kv.second) cairo_surface_destroy(kv.second);
     }
@@ -1901,12 +1916,27 @@ void native_shell_sync_desktop(AppState *state) {
     rebuild_desktop_shortcuts(state->native);
 }
 
-void native_shell_sync_wallpaper(AppState *state) {
-    if (!state || !state->native) return;
-    state->native->wallpaper = get_wallpaper_pref();
-    if (state->native->desktop_bg_da) {
-        gtk_widget_queue_draw(state->native->desktop_bg_da);
+void queue_draw_tree(GtkWidget *w) {
+    if (!w) return;
+    if (GTK_IS_DRAWING_AREA(w)) gtk_widget_queue_draw(w);
+    for (GtkWidget *c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        queue_draw_tree(c);
     }
+}
+
+void native_shell_sync_theme(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    ns->theme = get_active_theme();
+    apply_native_css(ns);
+    if (ns->desktop_bg_da) gtk_widget_queue_draw(ns->desktop_bg_da);
+    if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
+    if (ns->bar_win) queue_draw_tree(GTK_WIDGET(ns->bar_win));
+    if (ns->cc_win) queue_draw_tree(GTK_WIDGET(ns->cc_win));
+}
+
+void native_shell_sync_wallpaper(AppState *state) {
+    native_shell_sync_theme(state);
 }
 
 void native_shell_sync_perf(AppState *state) {

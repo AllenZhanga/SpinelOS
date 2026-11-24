@@ -328,16 +328,152 @@
     });
   }
 
-  window.__spinelWallpaper = (wp) => {
-    const canvas = document.getElementById("desktop-canvas");
-    if (canvas) {
-      canvas.classList.remove("wp-crystal-blue", "wp-obsidian-purple", "wp-emerald-aurora", "wp-amber-dusk");
-      canvas.classList.add(`wp-${wp}`);
-    }
-    document.querySelectorAll("#wallpaper-grid .wp-card").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-cmd") === `wallpaper:set:${wp}`);
+  let activeThemeId = "crystal-aurora";
+
+  function applyUiTheme(t) {
+    if (!t) return;
+    activeThemeId = t.id || "crystal-aurora";
+    const root = document.documentElement.style;
+    const setVar = (k, v) => { if (v) root.setProperty(k, v); };
+    setVar("--bg", t.ui_bg);
+    setVar("--win-bg", t.ui_win_bg);
+    setVar("--toolbar-bg", t.ui_toolbar_bg);
+    setVar("--surface", t.ui_surface);
+    setVar("--card-bg", t.ui_card);
+    setVar("--input-bg", t.ui_input_bg);
+    setVar("--border", t.ui_border);
+    setVar("--text", t.ui_text);
+    setVar("--muted", t.ui_muted);
+    setVar("--accent", t.ui_accent);
+    setVar("--accent-2", t.ui_accent2);
+    document.body.classList.toggle("theme-light", Boolean(t.is_light));
+  }
+
+  window.__spinelThemeData = (data) => {
+    if (!data) return;
+    if (data.active) applyUiTheme(data.active);
+    const grid = document.getElementById("theme-grid");
+    if (!grid || !Array.isArray(data.themes)) return;
+    grid.innerHTML = "";
+    data.themes.forEach((t) => {
+      const btn = document.createElement("button");
+      btn.className = "wp-card" + (t.id === activeThemeId ? " active" : "");
+      btn.setAttribute("data-cmd", `theme:set:${t.id}`);
+
+      const swatch = document.createElement("div");
+      swatch.className = "wp-swatch";
+      swatch.style.background = `radial-gradient(circle at 22% 22%, ${t.wp_glow1 || t.ui_accent}, transparent 58%), radial-gradient(circle at 78% 76%, ${t.wp_glow2 || t.ui_accent2}, transparent 60%), linear-gradient(135deg, ${t.wp_c0 || t.ui_bg}, ${t.wp_c1 || t.ui_bg})`;
+
+      const meta = document.createElement("div");
+      meta.className = "theme-card-meta";
+      const title = document.createElement("strong");
+      title.textContent = (t.name || t.id) + (t.id === activeThemeId ? " · 当前" : "");
+      const sub = document.createElement("small");
+      sub.textContent = t.subtitle || (t.builtin ? "内置风格" : "自定义扩展 (.theme)");
+      meta.append(title, sub);
+
+      btn.append(swatch, meta);
+      grid.appendChild(btn);
     });
   };
+
+  window.__spinelWallpaper = () => {};
+
+  /* Custom in-DOM Select Dropdown (avoids oversized/invisible WebKitGTK6 native popup) */
+  let openSelectMenu = null;
+  let openSelectOwner = null;
+
+  function closeCustomSelectMenu() {
+    if (openSelectMenu) {
+      openSelectMenu.remove();
+      openSelectMenu = null;
+      openSelectOwner = null;
+    }
+  }
+
+  document.addEventListener("pointerdown", (ev) => {
+    if (!openSelectMenu) return;
+    if (openSelectMenu.contains(ev.target)) return;
+    if (openSelectOwner && openSelectOwner.contains(ev.target)) return;
+    closeCustomSelectMenu();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeCustomSelectMenu();
+  });
+  window.addEventListener("resize", closeCustomSelectMenu);
+
+  function enhanceSelect(sel) {
+    if (!sel || sel.dataset.spEnhanced === "1") return;
+    sel.dataset.spEnhanced = "1";
+
+    const wrap = document.createElement("div");
+    wrap.className = "sp-select";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sp-select-btn";
+
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.append(btn, sel);
+    sel.classList.add("sp-native-hidden");
+
+    const syncLabel = () => {
+      const opt = sel.options[sel.selectedIndex] || sel.options[0];
+      btn.textContent = opt ? opt.textContent : "请选择";
+    };
+    syncLabel();
+
+    sel.addEventListener("change", syncLabel);
+    const observer = new MutationObserver(syncLabel);
+    observer.observe(sel, { childList: true, subtree: true, attributes: true });
+
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (openSelectOwner === wrap) {
+        closeCustomSelectMenu();
+        return;
+      }
+      closeCustomSelectMenu();
+
+      const rect = btn.getBoundingClientRect();
+      const menu = document.createElement("div");
+      menu.className = "sp-select-menu";
+      const minW = Math.max(rect.width, 150);
+      menu.style.minWidth = `${minW}px`;
+      menu.style.maxWidth = `${Math.min(window.innerWidth - 20, Math.max(rect.width + 64, 280))}px`;
+
+      Array.from(sel.options).forEach((opt, idx) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "sp-select-item" + (idx === sel.selectedIndex ? " active" : "");
+        item.textContent = opt.textContent;
+        item.disabled = opt.disabled;
+        item.addEventListener("click", (cev) => {
+          cev.stopPropagation();
+          sel.selectedIndex = idx;
+          syncLabel();
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          closeCustomSelectMenu();
+        });
+        menu.appendChild(item);
+      });
+
+      document.body.appendChild(menu);
+      const mh = Math.min(menu.scrollHeight || 200, 230);
+      const top = rect.bottom + 4 + mh <= window.innerHeight - 8
+        ? rect.bottom + 4
+        : Math.max(8, rect.top - mh - 4);
+      const left = Math.min(rect.left, Math.max(8, window.innerWidth - minW - 12));
+      menu.style.top = `${top}px`;
+      menu.style.left = `${left}px`;
+
+      openSelectMenu = menu;
+      openSelectOwner = wrap;
+    });
+  }
+
+  function syncAllCustomSelects() {
+    document.querySelectorAll("select").forEach((sel) => enhanceSelect(sel));
+  }
 
   /* ---------------- 2. macOS Floating Dock & Window Sync ---------------- */
   function findMatchingWindow(matcher) {
@@ -641,6 +777,7 @@
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
+    else if (target === "appearance") sendCommand("theme:refresh");
   }
 
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
@@ -819,6 +956,8 @@
       controls.append(modeSel, scaleSel, applyBtn);
       item.append(left, controls);
       listEl.appendChild(item);
+      enhanceSelect(modeSel);
+      enhanceSelect(scaleSel);
     });
   };
 
@@ -953,6 +1092,7 @@
         });
       }
     }
+    syncAllCustomSelects();
 
     if (disks.length === 0) {
       listEl.innerHTML = `<div class="disk-empty">未检测到可用磁盘设备</div>`;
@@ -1365,7 +1505,7 @@
     });
 
     function getFocusables() {
-      return Array.from(activeRootEl.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled)")).filter((el) => {
+      return Array.from(activeRootEl.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled):not(.sp-native-hidden)")).filter((el) => {
         if (el.closest(".hidden")) return false;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
@@ -1549,6 +1689,7 @@
     }
   };
 
+  syncAllCustomSelects();
   if (mode === "settings") switchSettingsTab(initialTab);
   if (mode === "desktop") renderDesktopShortcuts();
   if (mode === "dock") renderDock();

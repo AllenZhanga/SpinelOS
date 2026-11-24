@@ -373,31 +373,23 @@
 
     <div id="tab-appearance" class="win-body hidden">
       <div class="inst-section">
-        <h3>桌面壁纸主题</h3>
-        <div class="wallpaper-grid" id="wallpaper-grid">
-          <button class="wp-card" data-cmd="wallpaper:set:crystal-blue">
-            <span class="wp-swatch wp-crystal-blue"></span>
-            <strong>尖晶石深蓝</strong>
-          </button>
-          <button class="wp-card" data-cmd="wallpaper:set:obsidian-purple">
-            <span class="wp-swatch wp-obsidian-purple"></span>
-            <strong>黑曜星云紫</strong>
-          </button>
-          <button class="wp-card" data-cmd="wallpaper:set:emerald-aurora">
-            <span class="wp-swatch wp-emerald-aurora"></span>
-            <strong>极光翠绿</strong>
-          </button>
-          <button class="wp-card" data-cmd="wallpaper:set:amber-dusk">
-            <span class="wp-swatch wp-amber-dusk"></span>
-            <strong>赤铁暮光</strong>
-          </button>
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>统一 UI 风格与主题管理</h3>
+            <p class="muted-hint">同步切换桌面壁纸、顶栏、Dock、控制中心与全部窗口界面风格。</p>
+          </div>
+          <div class="footer-actions">
+            <button class="btn small" data-cmd="theme:refresh">刷新主题</button>
+            <button class="btn small primary" data-cmd="theme:export">扩展主题模板 (.theme)</button>
+          </div>
         </div>
+        <div class="wallpaper-grid" id="theme-grid"></div>
       </div>
 
       <div class="inst-section">
         <h3>关于 SpinelOS</h3>
         <div class="about-box glass">
-          <div><strong>系统版本：</strong>SpinelOS Gaming Linux (Wayland + labwc + WebKitGTK6)</div>
+          <div><strong>系统版本：</strong>SpinelOS Gaming Linux (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
           <div><strong>当前模式：</strong><span id="about-mode">--</span></div>
           <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
