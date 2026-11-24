@@ -1,0 +1,42 @@
+# SpinelDark — macOS-inspired dark window decoration for labwc
+border.width: 1
+padding.width: 10
+padding.height: 8
+
+window.titlebar.padding.width: 10
+window.titlebar.padding.height: 7
+window.label.text.justify: center
+
+window.active.title.bg: flat solid
+window.active.title.bg.color: #161d2e
+window.inactive.title.bg: flat solid
+window.inactive.title.bg.color: #101522
+
+window.active.label.bg: parentrelative
+window.active.label.text.color: #eef2ff
+window.inactive.label.bg: parentrelative
+window.inactive.label.text.color: #64748b
+
+window.active.border.color: #2b3854
+window.inactive.border.color: #1c2438
+
+window.active.button.unpressed.bg: parentrelative
+window.active.button.hover.bg: parentrelative
+window.inactive.button.unpressed.bg: parentrelative
+window.inactive.button.hover.bg: parentrelative
+
+window.button.width: 14
+window.button.height: 14
+window.button.spacing: 8
+window.button.hover.bg.corner-radius: 50
+
+window.active.shadow.size: 36
+window.active.shadow.color: #00000090
+window.inactive.shadow.size: 20
+window.inactive.shadow.color: #00000050
+
+osd.bg: flat solid
+osd.bg.color: #101626
+osd.border.color: #38bdf8
+osd.border.width: 1
+osd.label.text.color: #eef2ff

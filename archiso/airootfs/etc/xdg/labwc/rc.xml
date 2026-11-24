@@ -8,8 +8,11 @@
 
   <theme>
     <name>SpinelDark</name>
-    <cornerRadius>10</cornerRadius>
+    <cornerRadius>12</cornerRadius>
     <dropShadows>yes</dropShadows>
+    <titlebar>
+      <layout>close,iconify,max:</layout>
+    </titlebar>
   </theme>
 
   <keyboard>

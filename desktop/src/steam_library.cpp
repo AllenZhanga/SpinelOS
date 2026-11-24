@@ -241,7 +241,7 @@ void ensure_steam_play_preconfig() {
 }
 
 void push_steam_library(AppState *state) {
-    if (!state || !state->hub_view) return;
+    if (!state) return;
 
     auto roots = discover_steam_roots();
     auto libs = discover_library_folders(roots);
@@ -282,7 +282,9 @@ void push_steam_library(AppState *state) {
            << "}";
     }
     js << "]);";
-    eval_js(state->hub_view, js.str());
+    std::string script = js.str();
+    eval_js(state->desktop_view, script);
+    eval_js(state->games_view, script);
 }
 
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {

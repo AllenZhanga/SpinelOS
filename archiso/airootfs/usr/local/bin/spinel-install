@@ -261,6 +261,10 @@ ANSI_COLOR="38;2;56;189;248"
 HOME_URL="https://github.com/AllenZhanga/SpinelOS"
 EOF
 
+cat > /mnt/etc/motd <<'EOF'
+SpinelOS Gaming Linux — Wayland + Steam/Proton Desktop
+EOF
+
 sed -i 's/^#\s*en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /mnt/etc/locale.gen
 sed -i 's/^#\s*zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /mnt/etc/locale.gen
 echo "LANG=zh_CN.UTF-8" > /mnt/etc/locale.conf

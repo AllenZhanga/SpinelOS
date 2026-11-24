@@ -46,6 +46,15 @@ xdg-desktop-portal-wlr
 polkit
 foot
 
+# Desktop Apps (Browser, File Manager, Editor, Viewer)
+chromium
+thunar
+thunar-archive-plugin
+file-roller
+gvfs
+mousepad
+ristretto
+
 # Steam, Proton & Gaming Utilities
 steam
 gamescope

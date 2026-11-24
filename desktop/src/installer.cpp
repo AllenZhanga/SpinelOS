@@ -38,7 +38,7 @@ struct InstallConfig {
 
 gboolean on_installer_idle(gpointer data) {
     std::unique_ptr<IdleMessage> msg(static_cast<IdleMessage *>(data));
-    if (msg->state->shutting_down.load() || !msg->state->hub_view) {
+    if (msg->state->shutting_down.load() || !msg->state->installer_view) {
         return G_SOURCE_REMOVE;
     }
 
@@ -46,7 +46,7 @@ gboolean on_installer_idle(gpointer data) {
         msg->state->install_running.store(false);
         std::ostringstream js;
         js << "window.__spinelInstallerDone && window.__spinelInstallerDone(" << msg->exit_code << ");";
-        eval_js(msg->state->hub_view, js.str());
+        eval_js(msg->state->installer_view, js.str());
         return G_SOURCE_REMOVE;
     }
 
@@ -61,14 +61,14 @@ gboolean on_installer_idle(gpointer data) {
             std::ostringstream js;
             js << "window.__spinelInstallerProgress && window.__spinelInstallerProgress("
                << pct << ",\"" << json_escape(label) << "\");";
-            eval_js(msg->state->hub_view, js.str());
+            eval_js(msg->state->installer_view, js.str());
             return G_SOURCE_REMOVE;
         }
     }
 
     std::ostringstream js;
     js << "window.__spinelInstallerLog && window.__spinelInstallerLog(\"" << json_escape(line) << "\");";
-    eval_js(msg->state->hub_view, js.str());
+    eval_js(msg->state->installer_view, js.str());
     return G_SOURCE_REMOVE;
 }
 
@@ -142,7 +142,7 @@ InstallConfig parse_install_payload(const std::string &payload) {
 }  // namespace
 
 void push_installer_env(AppState *state) {
-    if (!state || !state->hub_view) return;
+    if (!state || !state->installer_view) return;
     bool is_live = is_live_iso_env();
     bool is_uefi = fs::exists("/sys/firmware/efi/efivars");
     std::string boot_disk = run_cmd_capture(
@@ -164,7 +164,7 @@ void push_installer_env(AppState *state) {
        << "\"installing\":" << (state->install_running.load() ? "true" : "false") << ","
        << "\"lsblk\":" << lsblk_json
        << "});";
-    eval_js(state->hub_view, js.str());
+    eval_js(state->installer_view, js.str());
 }
 
 void start_disk_install(AppState *state, const std::string &payload) {

@@ -26,14 +26,15 @@ struct JsIdleCall {
 gboolean run_js_idle(gpointer data) {
     std::unique_ptr<JsIdleCall> call(static_cast<JsIdleCall *>(data));
     if (call->state->shutting_down.load()) return G_SOURCE_REMOVE;
-    eval_js(call->state->hub_view, call->script);
+    eval_js(call->state->settings_view, call->script);
     if (call->also_bar) {
         eval_js(call->state->bar_view, call->script);
+        eval_js(call->state->desktop_view, call->script);
     }
     return G_SOURCE_REMOVE;
 }
 
-void post_js_to_main(AppState *state, std::string script, bool also_bar = false) {
+void post_js_to_main(AppState *state, std::string script, bool also_bar = true) {
     if (!state || state->shutting_down.load()) return;
     g_idle_add(run_js_idle, new JsIdleCall{state, std::move(script), also_bar});
 }
@@ -227,7 +228,10 @@ void push_perf_config(AppState *state) {
        << "\"gamemode\":" << (cfg.gamemode ? "true" : "false") << ","
        << "\"render_res\":\"" << cfg.render_res << "\""
        << "});";
-    eval_js(state->hub_view, js.str());
+    std::string script = js.str();
+    eval_js(state->games_view, script);
+    eval_js(state->desktop_view, script);
+    eval_js(state->bar_view, script);
 }
 
 void update_perf_config(AppState *state, const std::string &payload) {
@@ -513,7 +517,7 @@ void push_display_state(AppState *state) {
     if (rc != 0 || out.empty() || out.front() != '[') {
         out = "[]";
     }
-    eval_js(state->hub_view, "window.__spinelDisplayState && window.__spinelDisplayState(" + out + ");");
+    eval_js(state->settings_view, "window.__spinelDisplayState && window.__spinelDisplayState(" + out + ");");
 }
 
 void apply_display_mode(AppState *state, const std::string &payload) {
@@ -532,7 +536,7 @@ void apply_display_mode(AppState *state, const std::string &payload) {
     }
 
     if (!is_valid_output_name(output) || !is_valid_mode_str(mode) || !is_valid_scale_str(scale)) {
-        eval_js(state->hub_view, "window.__spinelDisplayAction && window.__spinelDisplayAction(false, \"显示参数无效\");");
+        eval_js(state->settings_view, "window.__spinelDisplayAction && window.__spinelDisplayAction(false, \"显示参数无效\");");
         return;
     }
 
@@ -555,6 +559,6 @@ void apply_display_mode(AppState *state, const std::string &payload) {
     js << "window.__spinelDisplayAction && window.__spinelDisplayAction("
        << (rc == 0 ? "true" : "false") << ",\""
        << json_escape(rc == 0 ? "显示设置已应用并保存" : out) << "\");";
-    eval_js(state->hub_view, js.str());
+    eval_js(state->settings_view, js.str());
     push_display_state(state);
 }

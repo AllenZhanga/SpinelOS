@@ -4,6 +4,7 @@ set -euo pipefail
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=SpinelOS
 export GDK_BACKEND=wayland
+export GTK_THEME=Adwaita:dark
 export QT_QPA_PLATFORM=wayland
 export SDL_VIDEODRIVER=wayland,x11
 export MOZ_ENABLE_WAYLAND=1

@@ -1,16 +1,28 @@
 (() => {
   const params = new URLSearchParams(window.location.search);
-  const mode = params.get("mode") || "hub";
+  const mode = params.get("mode") || "desktop";
+  const initialTab = params.get("tab") || "wifi";
 
-  const topBar = document.getElementById("top-bar");
-  const hub = document.getElementById("desktop-hub");
+  const modeRoots = {
+    bar: "top-bar",
+    desktop: "desktop-canvas",
+    dock: "dock-shell",
+    games: "app-games",
+    settings: "app-settings",
+    installer: "app-installer"
+  };
 
-  if (mode === "bar") {
-    topBar.classList.remove("hidden");
-  } else {
-    hub.classList.remove("hidden");
-  }
+  Object.values(modeRoots).forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  const activeRootEl = document.getElementById(modeRoots[mode] || "desktop-canvas");
+  if (activeRootEl) activeRootEl.classList.remove("hidden");
 
+  let isLiveEnv = false;
+  let steamGames = [];
+  let desktopApps = [];
+  let trackedWindows = [];
   let selectedDisk = "";
   let installMode = "disk";
   let isUefiMode = true;
@@ -56,7 +68,195 @@
     el.textContent = msg;
   }
 
-  /* ---------------- Performance Control Strip ---------------- */
+  /* ---------------- Inline macOS-style Gradient Icons ---------------- */
+  function makeSvgIcon(kind) {
+    const presets = {
+      games: ["#6366f1", "#38bdf8", `<path d="M10 15h4m-2-2v4m7-2h.01M21 15h.01M7 10h10a5 5 0 0 1 5 5v2a3 3 0 0 1-5 2.2L15 17H9l-2 2.2A3 3 0 0 1 2 17v-2a5 5 0 0 1 5-5z" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/>`],
+      steam: ["#1e3a8a", "#0ea5e9", `<circle cx="15" cy="9" r="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M5 17l5.5 2a3 3 0 0 0 3.8-1.8L16 12" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/>`],
+      gamepad: ["#7c3aed", "#ec4899", `<rect x="4" y="6" width="16" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M9 12h6M12 9v6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`],
+      browser: ["#0284c7", "#22d3ee", `<circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M5 12h14M12 5a10 10 0 0 1 0 14M12 5a10 10 0 0 0 0 14" fill="none" stroke="#fff" stroke-width="1.4"/>`],
+      files: ["#2563eb", "#60a5fa", `<path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="#fff" stroke-width="1.8"/>`],
+      terminal: ["#1e293b", "#475569", `<path d="M6 8l4 4-4 4m5 0h7" stroke="#38bdf8" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`],
+      settings: ["#334155", "#64748b", `<circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M12 4v2m0 12v2m8-8h-2M6 12H4m13.7-5.7-1.4 1.4M7.7 16.3l-1.4 1.4m0-11.4 1.4 1.4m8.6 8.6 1.4 1.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`],
+      installer: ["#059669", "#10b981", `<path d="M12 4v10m0 0-4-4m4 4 4-4M5 18h14" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`],
+      app: ["#3b82f6", "#8b5cf6", `<rect x="6" y="6" width="12" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.8"/>`]
+    };
+    const [c1, c2, shape] = presets[kind] || presets.app;
+    return `
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="g_${kind}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs>
+        <rect width="24" height="24" rx="6" fill="url(#g_${kind})"/>
+        ${shape}
+      </svg>
+    `;
+  }
+
+  function matchAppKind(appIdOrTitle) {
+    const s = (appIdOrTitle || "").toLowerCase();
+    if (s.includes("steam")) return "steam";
+    if (s.includes("gamescope")) return "gamepad";
+    if (s.includes("chromium") || s.includes("firefox") || s.includes("browser")) return "browser";
+    if (s.includes("thunar") || s.includes("files")) return "files";
+    if (s.includes("foot") || s.includes("terminal")) return "terminal";
+    if (s.includes("游戏与启动中心") || s.includes("app-games")) return "games";
+    if (s.includes("系统设置") || s.includes("settings")) return "settings";
+    if (s.includes("安装") || s.includes("installer")) return "installer";
+    return "app";
+  }
+
+  /* ---------------- 1. Desktop Shortcuts & Wallpaper ---------------- */
+  function renderDesktopShortcuts() {
+    const grid = document.getElementById("desktop-shortcuts");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    const baseShortcuts = [
+      { label: "游戏中心", cmd: "games:open", kind: "games" },
+      { label: "Steam", cmd: "launch:steam", kind: "steam" },
+      { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad" },
+      { label: "Chromium", cmd: "launch:browser", kind: "browser" },
+      { label: "文件管理", cmd: "launch:files", kind: "files" },
+      { label: "终端", cmd: "launch:terminal", kind: "terminal" },
+      { label: "系统设置", cmd: "settings:open:display", kind: "settings" }
+    ];
+    if (isLiveEnv) {
+      baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer" });
+    }
+
+    baseShortcuts.forEach((sc) => {
+      const btn = document.createElement("button");
+      btn.className = "shortcut-item";
+      btn.setAttribute("data-cmd", sc.cmd);
+      const icon = document.createElement("div");
+      icon.className = "shortcut-icon";
+      icon.innerHTML = makeSvgIcon(sc.kind);
+      const label = document.createElement("span");
+      label.className = "shortcut-label";
+      label.textContent = sc.label;
+      btn.append(icon, label);
+      grid.appendChild(btn);
+    });
+
+    steamGames.slice(0, 6).forEach((g) => {
+      const btn = document.createElement("button");
+      btn.className = "shortcut-item";
+      btn.setAttribute("data-cmd", `steam:launch:${g.appid}`);
+      const icon = document.createElement("div");
+      icon.className = "shortcut-icon";
+      if (g.cover_uri) {
+        const img = document.createElement("img");
+        img.src = g.cover_uri;
+        img.alt = g.name;
+        img.onerror = () => { icon.innerHTML = makeSvgIcon("steam"); };
+        icon.appendChild(img);
+      } else {
+        icon.innerHTML = makeSvgIcon("steam");
+      }
+      const label = document.createElement("span");
+      label.className = "shortcut-label";
+      label.textContent = g.name;
+      btn.append(icon, label);
+      grid.appendChild(btn);
+    });
+  }
+
+  window.__spinelWallpaper = (wp) => {
+    const canvas = document.getElementById("desktop-canvas");
+    if (canvas) {
+      canvas.classList.remove("wp-crystal-blue", "wp-obsidian-purple", "wp-emerald-aurora", "wp-amber-dusk");
+      canvas.classList.add(`wp-${wp}`);
+    }
+    document.querySelectorAll("#wallpaper-grid .wp-card").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-cmd") === `wallpaper:set:${wp}`);
+    });
+  };
+
+  /* ---------------- 2. macOS Floating Dock & Window Sync ---------------- */
+  function findMatchingWindow(matcher) {
+    return trackedWindows.find((w) => {
+      const hay = `${w.app_id} ${w.title}`.toLowerCase();
+      return matcher.some((m) => hay.includes(m));
+    }) || null;
+  }
+
+  function renderDock() {
+    if (mode !== "dock") return;
+    const pinnedEl = document.getElementById("dock-pinned");
+    const runningEl = document.getElementById("dock-running");
+    const dividerEl = document.getElementById("dock-divider");
+    if (!pinnedEl || !runningEl) return;
+
+    const pinned = [
+      { title: "游戏与应用中心", cmd: "games:open", kind: "games", match: ["游戏与启动中心"] },
+      { title: "Steam", cmd: "launch:steam", kind: "steam", match: ["steam"] },
+      { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", match: ["gamescope"] },
+      { title: "Chromium 浏览器", cmd: "launch:browser", kind: "browser", match: ["chromium"] },
+      { title: "Thunar 文件管理", cmd: "launch:files", kind: "files", match: ["thunar"] },
+      { title: "Foot 终端", cmd: "launch:terminal", kind: "terminal", match: ["foot"] },
+      { title: "系统设置", cmd: "settings:open:display", kind: "settings", match: ["spinelos 系统设置"] }
+    ];
+    if (isLiveEnv) {
+      pinned.push({ title: "安装 SpinelOS 到硬盘", cmd: "installer:open", kind: "installer", match: ["安装 spinel"] });
+    }
+
+    pinnedEl.innerHTML = "";
+    const matchedIds = new Set();
+
+    pinned.forEach((p) => {
+      const win = findMatchingWindow(p.match);
+      if (win) matchedIds.add(win.id);
+
+      const btn = document.createElement("button");
+      btn.className = "dock-item" + (win && win.activated && !win.minimized ? " active" : "") + (win && win.minimized ? " minimized" : "");
+      btn.title = win ? `${p.title} (${win.title})` : p.title;
+      btn.innerHTML = makeSvgIcon(p.kind);
+      btn.setAttribute("data-cmd", win ? `window:toggle:${win.id}` : p.cmd);
+
+      if (win) {
+        const dot = document.createElement("span");
+        dot.className = "dock-dot";
+        btn.appendChild(dot);
+      }
+      pinnedEl.appendChild(btn);
+    });
+
+    const extraWins = trackedWindows.filter((w) => !matchedIds.has(w.id));
+    runningEl.innerHTML = "";
+    if (dividerEl) dividerEl.classList.toggle("hidden", extraWins.length === 0);
+
+    extraWins.forEach((w) => {
+      const btn = document.createElement("button");
+      btn.className = "dock-item" + (w.activated && !w.minimized ? " active" : "") + (w.minimized ? " minimized" : "");
+      btn.title = w.title || w.app_id || "应用窗口";
+      btn.innerHTML = makeSvgIcon(matchAppKind(`${w.app_id} ${w.title}`));
+      btn.setAttribute("data-cmd", `window:toggle:${w.id}`);
+      btn.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        sendCommand(`window:close:${w.id}`);
+      });
+
+      const dot = document.createElement("span");
+      dot.className = "dock-dot";
+      btn.appendChild(dot);
+      runningEl.appendChild(btn);
+    });
+
+    const totalItems = pinned.length + extraWins.length;
+    const width = Math.max(400, totalItems * 56 + (extraWins.length > 0 ? 44 : 28));
+    sendCommand(`dock:resize:${width}`);
+  }
+
+  window.__spinelWindows = (list) => {
+    trackedWindows = Array.isArray(list) ? list : [];
+    const activeAppEl = document.getElementById("bar-active-app");
+    if (activeAppEl) {
+      const activeWin = trackedWindows.find((w) => w.activated) || trackedWindows[0];
+      activeAppEl.textContent = activeWin ? (activeWin.title || activeWin.app_id || "应用") : "访达 · 桌面";
+    }
+    renderDock();
+  };
+
+  /* ---------------- 3. Performance Control Strip ---------------- */
   function buildLaunchOptionString(cfg) {
     const parts = [];
     if (cfg.mangohud !== "off") parts.push("MANGOHUD=1");
@@ -70,7 +270,6 @@
     if (cfg.fsr) gs.push("-F", "fsr");
     if (cfg.mangohud !== "off") gs.push("--mangoapp");
     gs.push("--", "%command%");
-
     return [...parts, ...gs].join(" ");
   }
 
@@ -80,7 +279,6 @@
       const v = btn.getAttribute("data-perf-val");
       btn.classList.toggle("active", String(perfState[k]) === String(v));
     });
-
     const fsrBtn = document.getElementById("btn-toggle-fsr");
     if (fsrBtn) {
       fsrBtn.textContent = `FSR 锐化: ${perfState.fsr ? "开" : "关"}`;
@@ -92,23 +290,20 @@
       gmBtn.classList.toggle("active", Boolean(perfState.gamemode));
     }
     const preview = document.getElementById("perf-cmd-preview");
-    if (preview) {
-      preview.textContent = buildLaunchOptionString(perfState);
-    }
+    if (preview) preview.textContent = buildLaunchOptionString(perfState);
   }
 
   function sendPerfUpdate(patch) {
     perfState = { ...perfState, ...patch };
     renderPerfState();
-    const payload = [
+    sendCommand([
       "perf:set",
       `mangohud=${perfState.mangohud}`,
       `fps_limit=${perfState.fps_limit}`,
       `fsr=${perfState.fsr ? "true" : "false"}`,
       `gamemode=${perfState.gamemode ? "true" : "false"}`,
       `render_res=${perfState.render_res}`
-    ].join("\n");
-    sendCommand(payload);
+    ].join("\n"));
   }
 
   window.__spinelPerfConfig = (cfg) => {
@@ -116,69 +311,70 @@
     renderPerfState();
   };
 
-  /* ---------------- Steam Library Wall ---------------- */
-  window.__spinelSteamGames = (games) => {
+  /* ---------------- 4. Steam Games & Launchpad Apps ---------------- */
+  function renderSteamGames() {
     const grid = document.getElementById("steam-game-grid");
     const countBadge = document.getElementById("steam-count-badge");
     if (!grid) return;
 
-    const list = Array.isArray(games) ? games : [];
-    if (countBadge) {
-      countBadge.textContent = `${list.length} 款游戏`;
-    }
+    const query = (document.getElementById("game-search-input")?.value || "").trim().toLowerCase();
+    const filtered = query
+      ? steamGames.filter((g) => (g.name || "").toLowerCase().includes(query))
+      : steamGames;
 
+    if (countBadge) countBadge.textContent = `${steamGames.length} 款游戏`;
     grid.innerHTML = "";
-    if (list.length === 0) {
+
+    if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "lib-empty";
       const msg = document.createElement("p");
-      msg.textContent = "暂未检测到本地已安装的 Steam 游戏。登录后下载任意游戏，点击“扫描游戏库”即可在这里一键启动。";
+      msg.textContent = steamGames.length === 0
+        ? "暂未检测到本地已安装的 Steam 游戏。登录后下载任意游戏，点击“扫描游戏库”即可在这里一键启动。"
+        : "没有匹配搜索关键字的游戏。";
       const actions = document.createElement("div");
       actions.className = "footer-actions";
       const b1 = document.createElement("button");
       b1.className = "btn primary small";
       b1.setAttribute("data-cmd", "launch:steam");
-      b1.textContent = "启动 Steam 下载游戏";
+      b1.textContent = "启动 Steam";
       const b2 = document.createElement("button");
       b2.className = "btn glow small";
       b2.setAttribute("data-cmd", "launch:steam-gamepadui");
-      b2.textContent = "进入主机大屏模式";
+      b2.textContent = "进入主机大屏";
       actions.append(b1, b2);
       empty.append(msg, actions);
       grid.appendChild(empty);
       return;
     }
 
-    list.forEach((g) => {
+    filtered.forEach((g) => {
       const card = document.createElement("article");
       card.className = "game-card";
-
       const poster = document.createElement("div");
       poster.className = "game-poster";
-
       const fallback = document.createElement("div");
       fallback.className = "game-poster-fallback hidden";
       fallback.textContent = g.name;
 
       const img = document.createElement("img");
       img.alt = g.name;
-      const cdnCover = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appid}/library_600x900.jpg`;
-      const cdnHeader = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg`;
-      let step = 0;
       const sources = [];
       if (g.cover_uri) sources.push(g.cover_uri);
-      sources.push(cdnCover, cdnHeader);
+      sources.push(
+        `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appid}/library_600x900.jpg`,
+        `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg`
+      );
+      let step = 0;
       img.src = sources[0];
       img.onerror = () => {
         step += 1;
-        if (step < sources.length) {
-          img.src = sources[step];
-        } else {
+        if (step < sources.length) img.src = sources[step];
+        else {
           img.classList.add("hidden");
           fallback.classList.remove("hidden");
         }
       };
-
       poster.append(img, fallback);
 
       const meta = document.createElement("div");
@@ -189,82 +385,95 @@
       const sub = document.createElement("div");
       sub.className = "game-sub";
       sub.textContent = `AppID ${g.appid} · ${formatBytes(g.size_bytes)}`;
+      const btn = document.createElement("button");
+      btn.className = "btn primary small game-launch-btn";
+      btn.textContent = "立即启动";
+      btn.setAttribute("data-cmd", `steam:launch:${g.appid}`);
 
-      const launchBtn = document.createElement("button");
-      launchBtn.className = "btn primary small game-launch-btn";
-      launchBtn.textContent = "立即启动";
-      launchBtn.setAttribute("data-cmd", `steam:launch:${g.appid}`);
-
-      meta.append(title, sub, launchBtn);
+      meta.append(title, sub, btn);
       card.append(poster, meta);
       grid.appendChild(card);
     });
+  }
+
+  function renderLaunchpadApps() {
+    const grid = document.getElementById("launchpad-app-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    desktopApps.forEach((app) => {
+      const btn = document.createElement("button");
+      btn.className = "launchpad-item";
+      btn.setAttribute("data-cmd", `app:launch:${app.id}`);
+      if (app.icon_uri) {
+        const img = document.createElement("img");
+        img.src = app.icon_uri;
+        img.alt = app.name;
+        img.onerror = () => { img.outerHTML = makeSvgIcon(matchAppKind(app.id)); };
+        btn.appendChild(img);
+      } else {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = makeSvgIcon(matchAppKind(app.id));
+        btn.appendChild(wrap.firstElementChild);
+      }
+      const label = document.createElement("span");
+      label.textContent = app.name;
+      btn.appendChild(label);
+      grid.appendChild(btn);
+    });
+  }
+
+  window.__spinelSteamGames = (games) => {
+    steamGames = Array.isArray(games) ? games : [];
+    renderSteamGames();
+    renderDesktopShortcuts();
   };
 
-  /* ---------------- Graphical Settings Center ---------------- */
+  window.__spinelDesktopApps = (apps) => {
+    desktopApps = Array.isArray(apps) ? apps : [];
+    renderLaunchpadApps();
+  };
+
+  /* ---------------- 5. Settings Window ---------------- */
   function switchSettingsTab(tab) {
-    const tabs = ["wifi", "bt", "display"];
+    const tabs = ["wifi", "bt", "display", "appearance"];
     const target = tabs.includes(tab) ? tab : "wifi";
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
       if (body) body.classList.toggle("hidden", t !== target);
     });
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
+    document.querySelectorAll("#app-settings .tab-btn").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-cmd") === `settings:tab:${target}`);
     });
-
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
   }
 
-  window.__spinelOpenSettings = (tab) => {
-    const modal = document.getElementById("settings-modal");
-    if (!modal) return;
-    modal.classList.remove("hidden");
-    switchSettingsTab(tab || "wifi");
-  };
+  window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
 
   window.__spinelWifiState = (data) => {
     const rescanBtn = document.getElementById("btn-wifi-rescan");
-    if (rescanBtn) {
-      rescanBtn.disabled = false;
-      rescanBtn.textContent = "扫描周边 Wi-Fi";
-    }
-
+    if (rescanBtn) { rescanBtn.disabled = false; rescanBtn.textContent = "扫描周边 Wi-Fi"; }
     const ifaceEl = document.getElementById("wifi-iface-list");
     if (ifaceEl) {
       ifaceEl.innerHTML = "";
       const ifaces = Array.isArray(data.interfaces) ? data.interfaces : [];
       if (ifaces.length === 0) {
-        const d = document.createElement("div");
-        d.className = "disk-empty";
-        d.textContent = "未检测到网络接口";
-        ifaceEl.appendChild(d);
+        ifaceEl.innerHTML = `<div class="disk-empty">未检测到网络接口</div>`;
       } else {
         ifaces.forEach((ifx) => {
           const item = document.createElement("div");
           item.className = "disk-item";
           const left = document.createElement("div");
-          const t = document.createElement("div");
-          t.className = "disk-title";
-          t.textContent = `${ifx.device} (${ifx.type})`;
-          const sub = document.createElement("div");
-          sub.className = "disk-sub";
-          sub.textContent = ifx.connection ? `当前连接: ${ifx.connection}` : `状态: ${ifx.state}`;
+          const t = document.createElement("div"); t.className = "disk-title"; t.textContent = `${ifx.device} (${ifx.type})`;
+          const sub = document.createElement("div"); sub.className = "disk-sub"; sub.textContent = ifx.connection ? `当前连接: ${ifx.connection}` : `状态: ${ifx.state}`;
           left.append(t, sub);
-
-          const right = document.createElement("div");
-          right.className = "disk-tags";
-          const tag = document.createElement("span");
-          tag.className = "tag";
-          tag.textContent = ifx.state;
+          const right = document.createElement("div"); right.className = "disk-tags";
+          const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = ifx.state;
           right.appendChild(tag);
-
           if (ifx.state === "connected") {
             const disc = document.createElement("button");
-            disc.className = "btn small danger";
-            disc.textContent = "断开";
+            disc.className = "btn small danger"; disc.textContent = "断开";
             disc.setAttribute("data-cmd", `settings:wifi-disconnect:${ifx.device}`);
             right.appendChild(disc);
           }
@@ -279,38 +488,23 @@
     listEl.innerHTML = "";
     const nets = Array.isArray(data.networks) ? data.networks : [];
     if (nets.length === 0) {
-      const d = document.createElement("div");
-      d.className = "disk-empty";
-      d.textContent = "暂无扫描到的 Wi-Fi 热点，请点击“扫描周边 Wi-Fi”。";
-      listEl.appendChild(d);
+      listEl.innerHTML = `<div class="disk-empty">暂无扫描到的 Wi-Fi 热点</div>`;
       return;
     }
-
     nets.sort((a, b) => Number(b.active) - Number(a.active) || b.signal - a.signal);
     nets.forEach((n) => {
       const item = document.createElement("div");
       item.className = "disk-item" + (n.active ? " selected" : "");
-
       const left = document.createElement("div");
-      const title = document.createElement("div");
-      title.className = "disk-title";
-      title.textContent = n.ssid;
-      const sub = document.createElement("div");
-      sub.className = "disk-sub";
-      sub.textContent = `信号 ${n.signal}% · ${n.security || "开放网络"}`;
+      const title = document.createElement("div"); title.className = "disk-title"; title.textContent = n.ssid;
+      const sub = document.createElement("div"); sub.className = "disk-sub"; sub.textContent = `信号 ${n.signal}% · ${n.security || "开放网络"}`;
       left.append(title, sub);
-
-      const tags = document.createElement("div");
-      tags.className = "disk-tags";
+      const tags = document.createElement("div"); tags.className = "disk-tags";
       if (n.active) {
-        const tag = document.createElement("span");
-        tag.className = "tag";
-        tag.textContent = "已连接";
+        const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "已连接";
         tags.appendChild(tag);
       } else {
-        const btn = document.createElement("button");
-        btn.className = "btn small";
-        btn.textContent = "连接";
+        const btn = document.createElement("button"); btn.className = "btn small"; btn.textContent = "连接";
         btn.addEventListener("click", (ev) => {
           ev.stopPropagation();
           selectedWifiSsid = n.ssid;
@@ -321,7 +515,6 @@
         });
         tags.appendChild(btn);
       }
-
       item.append(left, tags);
       listEl.appendChild(item);
     });
@@ -329,9 +522,7 @@
 
   window.__spinelWifiAction = (ok, msg) => {
     showFeedback("wifi-feedback", msg || (ok ? "操作成功" : "操作失败"), !ok);
-    if (ok) {
-      document.getElementById("wifi-connect-box").classList.add("hidden");
-    }
+    if (ok) document.getElementById("wifi-connect-box")?.classList.add("hidden");
   };
 
   window.__spinelBtState = (data) => {
@@ -341,80 +532,45 @@
     const scanBtn = document.getElementById("btn-bt-scan");
     if (badge) badge.textContent = btPowered ? "已开启" : "已关闭";
     if (powerBtn) powerBtn.textContent = btPowered ? "关闭蓝牙" : "开启蓝牙";
-    if (scanBtn) {
-      scanBtn.disabled = false;
-      scanBtn.textContent = "扫描手柄 (6s)";
-    }
+    if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = "扫描手柄 (6s)"; }
 
     const listEl = document.getElementById("bt-device-list");
     if (!listEl) return;
     listEl.innerHTML = "";
     const devs = Array.isArray(data.devices) ? data.devices : [];
     if (devs.length === 0) {
-      const d = document.createElement("div");
-      d.className = "disk-empty";
-      d.textContent = btPowered
-        ? "暂无发现的蓝牙设备。请将手柄设为配对模式后点击“扫描手柄”。"
-        : "蓝牙已关闭，请先开启蓝牙适配器。";
-      listEl.appendChild(d);
+      listEl.innerHTML = `<div class="disk-empty">${btPowered ? "暂无发现的蓝牙设备，请将手柄置于配对模式后扫描。" : "蓝牙已关闭，请先开启蓝牙。"}</div>`;
       return;
     }
-
     devs.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.paired) - Number(a.paired));
     devs.forEach((dev) => {
       const item = document.createElement("div");
       item.className = "disk-item" + (dev.connected ? " selected" : "");
-
       const left = document.createElement("div");
-      const title = document.createElement("div");
-      title.className = "disk-title";
-      title.textContent = dev.name;
-      const sub = document.createElement("div");
-      sub.className = "disk-sub";
-      sub.textContent = `${dev.mac}${dev.icon ? ` · ${dev.icon}` : ""}`;
+      const title = document.createElement("div"); title.className = "disk-title"; title.textContent = dev.name;
+      const sub = document.createElement("div"); sub.className = "disk-sub"; sub.textContent = `${dev.mac}${dev.icon ? ` · ${dev.icon}` : ""}`;
       left.append(title, sub);
-
-      const tags = document.createElement("div");
-      tags.className = "disk-tags";
+      const tags = document.createElement("div"); tags.className = "disk-tags";
       if (dev.connected) {
-        const tag = document.createElement("span");
-        tag.className = "tag";
-        tag.textContent = "已连接";
-        tags.appendChild(tag);
-        const disc = document.createElement("button");
-        disc.className = "btn small";
-        disc.textContent = "断开";
-        disc.setAttribute("data-cmd", `settings:bt-disconnect:${dev.mac}`);
-        tags.appendChild(disc);
+        const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "已连接"; tags.appendChild(tag);
+        const disc = document.createElement("button"); disc.className = "btn small"; disc.textContent = "断开";
+        disc.setAttribute("data-cmd", `settings:bt-disconnect:${dev.mac}`); tags.appendChild(disc);
       } else {
-        if (dev.paired) {
-          const tag = document.createElement("span");
-          tag.className = "tag";
-          tag.textContent = "已配对";
-          tags.appendChild(tag);
-        }
-        const conn = document.createElement("button");
-        conn.className = "btn primary small";
+        if (dev.paired) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "已配对"; tags.appendChild(tag); }
+        const conn = document.createElement("button"); conn.className = "btn primary small";
         conn.textContent = dev.paired ? "连接" : "配对并连接";
-        conn.setAttribute("data-cmd", `settings:bt-connect:${dev.mac}`);
-        tags.appendChild(conn);
+        conn.setAttribute("data-cmd", `settings:bt-connect:${dev.mac}`); tags.appendChild(conn);
       }
       if (dev.paired) {
-        const rem = document.createElement("button");
-        rem.className = "btn small danger";
-        rem.textContent = "移除";
-        rem.setAttribute("data-cmd", `settings:bt-remove:${dev.mac}`);
-        tags.appendChild(rem);
+        const rem = document.createElement("button"); rem.className = "btn small danger"; rem.textContent = "移除";
+        rem.setAttribute("data-cmd", `settings:bt-remove:${dev.mac}`); tags.appendChild(rem);
       }
-
       item.append(left, tags);
       listEl.appendChild(item);
     });
   };
 
-  window.__spinelBtAction = (ok, msg) => {
-    showFeedback("bt-feedback", msg || (ok ? "蓝牙操作完成" : "蓝牙操作失败"), !ok);
-  };
+  window.__spinelBtAction = (ok, msg) => showFeedback("bt-feedback", msg || (ok ? "蓝牙操作完成" : "蓝牙操作失败"), !ok);
 
   window.__spinelDisplayState = (outputs) => {
     const listEl = document.getElementById("display-output-list");
@@ -422,24 +578,17 @@
     listEl.innerHTML = "";
     const outs = Array.isArray(outputs) ? outputs : [];
     if (outs.length === 0) {
-      const d = document.createElement("div");
-      d.className = "disk-empty";
-      d.textContent = "未读取到 Wayland 显示器输出（需在 labwc Wayland 会话中运行 wlr-randr）。";
-      listEl.appendChild(d);
+      listEl.innerHTML = `<div class="disk-empty">未读取到 Wayland 显示器输出。</div>`;
       return;
     }
-
     outs.forEach((out) => {
       const item = document.createElement("div");
       item.className = "disk-item";
-
       const left = document.createElement("div");
-      const title = document.createElement("div");
-      title.className = "disk-title";
+      const title = document.createElement("div"); title.className = "disk-title";
       title.textContent = `${out.name}${out.model ? ` (${out.model})` : ""}`;
       const curMode = Array.isArray(out.modes) ? out.modes.find((m) => m.current) : null;
-      const sub = document.createElement("div");
-      sub.className = "disk-sub";
+      const sub = document.createElement("div"); sub.className = "disk-sub";
       sub.textContent = curMode
         ? `当前: ${curMode.width}x${curMode.height} @ ${Number(curMode.refresh).toFixed(2)} Hz · 缩放 ${out.scale || 1}`
         : `缩放: ${out.scale || 1}`;
@@ -447,13 +596,10 @@
 
       const controls = document.createElement("div");
       controls.className = "display-controls";
-
       const modeSel = document.createElement("select");
-      const modes = Array.isArray(out.modes) ? out.modes : [];
       const seenMode = new Set();
-      modes.forEach((m) => {
-        const hz = Number(m.refresh).toFixed(3);
-        const val = `${m.width}x${m.height}@${hz}Hz`;
+      (Array.isArray(out.modes) ? out.modes : []).forEach((m) => {
+        const val = `${m.width}x${m.height}@${Number(m.refresh).toFixed(3)}Hz`;
         if (seenMode.has(val)) return;
         seenMode.add(val);
         const opt = document.createElement("option");
@@ -462,7 +608,6 @@
         if (m.current) opt.selected = true;
         modeSel.appendChild(opt);
       });
-
       const scaleSel = document.createElement("select");
       ["1", "1.25", "1.5", "2"].forEach((sc) => {
         const opt = document.createElement("option");
@@ -471,73 +616,35 @@
         if (Math.abs(Number(out.scale || 1) - Number(sc)) < 0.05) opt.selected = true;
         scaleSel.appendChild(opt);
       });
-
       const applyBtn = document.createElement("button");
       applyBtn.className = "btn primary small";
       applyBtn.textContent = "应用并保存";
       applyBtn.addEventListener("click", () => {
-        const payload = [
-          "settings:display-apply",
-          `output=${out.name}`,
-          `mode=${modeSel.value}`,
-          `scale=${scaleSel.value}`
-        ].join("\n");
-        sendCommand(payload);
+        sendCommand(["settings:display-apply", `output=${out.name}`, `mode=${modeSel.value}`, `scale=${scaleSel.value}`].join("\n"));
       });
-
       controls.append(modeSel, scaleSel, applyBtn);
       item.append(left, controls);
       listEl.appendChild(item);
     });
   };
 
-  window.__spinelDisplayAction = (ok, msg) => {
-    showFeedback("display-feedback", msg || (ok ? "已应用显示设置" : "应用失败"), !ok);
-  };
+  window.__spinelDisplayAction = (ok, msg) => showFeedback("display-feedback", msg || (ok ? "已应用显示设置" : "应用失败"), !ok);
 
-  /* ---------------- Graphical Disk Installer ---------------- */
+  /* ---------------- 6. Graphical Disk Installer ---------------- */
   function showFormError(msg) {
     const el = document.getElementById("inst-form-error");
     if (!el) return;
-    if (!msg) {
-      el.classList.add("hidden");
-      el.textContent = "";
-    } else {
-      el.classList.remove("hidden");
-      el.textContent = msg;
-    }
-  }
-
-  function openInstallerModal() {
-    const modal = document.getElementById("installer-modal");
-    if (!modal) return;
-    modal.classList.remove("hidden");
-    showFormError("");
-    if (!installRunning) {
-      document.getElementById("inst-form-view").classList.remove("hidden");
-      document.getElementById("inst-progress-view").classList.add("hidden");
-      sendCommand("installer:scan-disks");
-    }
-  }
-
-  function closeInstallerModal() {
-    const modal = document.getElementById("installer-modal");
-    if (!modal) return;
-    modal.classList.add("hidden");
+    el.classList.toggle("hidden", !msg);
+    el.textContent = msg || "";
   }
 
   function setInstallMode(nextMode) {
     installMode = nextMode === "partition" ? "partition" : "disk";
-    const diskSec = document.getElementById("inst-disk-section");
-    const partSec = document.getElementById("inst-part-section");
-    const btnDisk = document.getElementById("btn-mode-disk");
-    const btnPart = document.getElementById("btn-mode-part");
+    document.getElementById("inst-disk-section")?.classList.toggle("hidden", installMode !== "disk");
+    document.getElementById("inst-part-section")?.classList.toggle("hidden", installMode !== "partition");
+    document.getElementById("btn-mode-disk")?.classList.toggle("active", installMode === "disk");
+    document.getElementById("btn-mode-part")?.classList.toggle("active", installMode === "partition");
     const confirmLabel = document.getElementById("inst-confirm-label");
-
-    if (diskSec) diskSec.classList.toggle("hidden", installMode !== "disk");
-    if (partSec) partSec.classList.toggle("hidden", installMode !== "partition");
-    if (btnDisk) btnDisk.classList.toggle("active", installMode === "disk");
-    if (btnPart) btnPart.classList.toggle("active", installMode === "partition");
     if (confirmLabel) {
       confirmLabel.textContent = installMode === "disk"
         ? "我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 SpinelOS（测试建议优先使用空盘或副盘）。"
@@ -548,30 +655,16 @@
 
   function submitInstaller() {
     showFormError("");
-    const rootPartEl = document.getElementById("inst-root-part");
-    const efiPartEl = document.getElementById("inst-efi-part");
-    const rootPart = rootPartEl ? rootPartEl.value : "";
-    const efiPart = efiPartEl ? efiPartEl.value : "";
+    const rootPart = document.getElementById("inst-root-part")?.value || "";
+    const efiPart = document.getElementById("inst-efi-part")?.value || "";
     const osProber = document.getElementById("inst-os-prober")?.checked ?? true;
 
     if (installMode === "disk") {
-      if (!selectedDisk) {
-        showFormError("请先选择一个目标硬盘。");
-        return;
-      }
+      if (!selectedDisk) { showFormError("请先选择一个目标硬盘。"); return; }
     } else {
-      if (!rootPart) {
-        showFormError("请选择要格式化为根分区 (/) 的目标分区。");
-        return;
-      }
-      if (isUefiMode && !efiPart) {
-        showFormError("UEFI 模式下请选择一个已有的 FAT32 EFI 分区。");
-        return;
-      }
-      if (isUefiMode && rootPart === efiPart) {
-        showFormError("根分区和 EFI 分区不能选择同一个分区。");
-        return;
-      }
+      if (!rootPart) { showFormError("请选择要格式化为根分区 (/) 的目标分区。"); return; }
+      if (isUefiMode && !efiPart) { showFormError("UEFI 模式下请选择一个已有的 FAT32 EFI 分区。"); return; }
+      if (isUefiMode && rootPart === efiPart) { showFormError("根分区和 EFI 分区不能选择同一个分区。"); return; }
     }
 
     const username = document.getElementById("inst-username").value.trim();
@@ -582,26 +675,11 @@
     const autologin = document.getElementById("inst-autologin").checked;
     const confirmWipe = document.getElementById("inst-confirm-wipe").checked;
 
-    if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(username)) {
-      showFormError("用户名必须以小写字母或下划线开头，且仅包含小写字母、数字、_ 或 -。");
-      return;
-    }
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$/.test(hostname)) {
-      showFormError("主机名仅支持字母、数字和连字符。");
-      return;
-    }
-    if (password.length < 4 || /[\r\n]/.test(password)) {
-      showFormError("密码长度至少为 4 位，且不能包含换行符。");
-      return;
-    }
-    if (password !== password2) {
-      showFormError("两次输入的密码不一致。");
-      return;
-    }
-    if (!confirmWipe) {
-      showFormError("请勾选确认框以允许格式化目标位置并开始安装。");
-      return;
-    }
+    if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(username)) { showFormError("用户名格式无效。"); return; }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$/.test(hostname)) { showFormError("主机名格式无效。"); return; }
+    if (password.length < 4 || /[\r\n]/.test(password)) { showFormError("密码长度至少为 4 位。"); return; }
+    if (password !== password2) { showFormError("两次输入的密码不一致。"); return; }
+    if (!confirmWipe) { showFormError("请勾选确认框以允许格式化目标位置并开始安装。"); return; }
 
     installRunning = true;
     document.getElementById("inst-form-view").classList.add("hidden");
@@ -614,7 +692,7 @@
     document.getElementById("inst-log-box").textContent = "";
     document.getElementById("inst-status-hint").textContent = "正在执行安装，请勿断电或拔出安装介质...";
 
-    const payload = [
+    sendCommand([
       "installer:start",
       `mode=${installMode}`,
       `disk=${selectedDisk}`,
@@ -626,31 +704,20 @@
       `timezone=${timezone}`,
       `autologin=${autologin ? "true" : "false"}`,
       `password=${password}`
-    ].join("\n");
-
-    sendCommand(payload);
+    ].join("\n"));
   }
 
   window.__spinelInstallerEnv = (env) => {
     installRunning = Boolean(env.installing);
     isUefiMode = Boolean(env.uefi);
     const badge = document.getElementById("inst-env-badge");
-    if (badge) {
-      const modeText = env.is_live ? "Live ISO" : "已安装环境";
-      const bootText = env.uefi ? "UEFI GPT" : "Legacy BIOS";
-      badge.textContent = `${modeText} · ${bootText}`;
-    }
-
-    const efiWrap = document.getElementById("inst-efi-wrap");
-    if (efiWrap) efiWrap.classList.toggle("hidden", !isUefiMode);
+    if (badge) badge.textContent = `${env.is_live ? "Live ISO" : "已安装环境"} · ${env.uefi ? "UEFI GPT" : "Legacy BIOS"}`;
+    document.getElementById("inst-efi-wrap")?.classList.toggle("hidden", !isUefiMode);
 
     const listEl = document.getElementById("inst-disk-list");
     if (!listEl) return;
-
     const rawDevices = env.lsblk && Array.isArray(env.lsblk.blockdevices) ? env.lsblk.blockdevices : [];
-    const disks = rawDevices.filter(
-      (d) => d.type === "disk" && !/^loop|^zram/.test(d.name || "")
-    );
+    const disks = rawDevices.filter((d) => d.type === "disk" && !/^loop|^zram/.test(d.name || ""));
 
     const rootSel = document.getElementById("inst-root-part");
     const efiSel = document.getElementById("inst-efi-part");
@@ -659,46 +726,34 @@
 
     const nonBootParts = [];
     disks.forEach((d) => {
-      const isBootDisk = env.boot_disk && d.name === env.boot_disk;
-      if (isBootDisk || !Array.isArray(d.children)) return;
-      d.children.forEach((p) => {
-        if (p.type === "part") {
-          nonBootParts.push({ ...p, parentName: d.name });
-        }
-      });
+      if (env.boot_disk && d.name === env.boot_disk) return;
+      if (!Array.isArray(d.children)) return;
+      d.children.forEach((p) => { if (p.type === "part") nonBootParts.push(p); });
     });
 
     if (rootSel) {
       if (nonBootParts.length === 0) {
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "未检测到可用的非启动盘分区";
-        rootSel.appendChild(opt);
+        const opt = document.createElement("option"); opt.value = ""; opt.textContent = "未检测到可用分区"; rootSel.appendChild(opt);
       } else {
         nonBootParts.forEach((p) => {
           const path = p.path || `/dev/${p.name}`;
-          const fsType = p.fstype || "未格式化";
           const opt = document.createElement("option");
           opt.value = path;
-          opt.textContent = `${path} · ${formatBytes(p.size)} · ${fsType}${p.parttypename ? ` (${p.parttypename})` : ""}`;
+          opt.textContent = `${path} · ${formatBytes(p.size)} · ${p.fstype || "未格式化"}`;
           rootSel.appendChild(opt);
         });
       }
     }
-
     if (efiSel) {
-      const vfatParts = nonBootParts.filter((p) => (p.fstype || "").toLowerCase() === "vfat");
-      if (vfatParts.length === 0) {
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "未检测到 FAT32/vfat EFI 分区";
-        efiSel.appendChild(opt);
+      const vfat = nonBootParts.filter((p) => (p.fstype || "").toLowerCase() === "vfat");
+      if (vfat.length === 0) {
+        const opt = document.createElement("option"); opt.value = ""; opt.textContent = "未检测到 FAT32 EFI 分区"; efiSel.appendChild(opt);
       } else {
-        vfatParts.forEach((p, idx) => {
+        vfat.forEach((p, idx) => {
           const path = p.path || `/dev/${p.name}`;
           const opt = document.createElement("option");
           opt.value = path;
-          opt.textContent = `${path} · ${formatBytes(p.size)} · FAT32${p.parttypename ? ` (${p.parttypename})` : ""}`;
+          opt.textContent = `${path} · ${formatBytes(p.size)} · FAT32`;
           if (idx === 0) opt.selected = true;
           efiSel.appendChild(opt);
         });
@@ -706,68 +761,38 @@
     }
 
     if (disks.length === 0) {
-      listEl.innerHTML = `<div class="disk-empty">未检测到可用磁盘设备，请点击“刷新磁盘”重试。</div>`;
+      listEl.innerHTML = `<div class="disk-empty">未检测到可用磁盘设备</div>`;
       selectedDisk = "";
       return;
     }
 
     listEl.innerHTML = "";
     let stillValid = false;
-
     disks.forEach((d) => {
       const devPath = `/dev/${d.name}`;
-      const isBootDisk = env.boot_disk && d.name === env.boot_disk;
+      const isBoot = env.boot_disk && d.name === env.boot_disk;
       const isRemovable = d.rm === true || d.rm === 1 || d.rm === "1" || d.tran === "usb";
-
-      if (!isBootDisk && selectedDisk === devPath) {
-        stillValid = true;
-      }
+      if (!isBoot && selectedDisk === devPath) stillValid = true;
 
       const item = document.createElement("div");
-      item.className = "disk-item" + (isBootDisk ? " disabled" : "");
-      if (selectedDisk === devPath && !isBootDisk) {
-        item.classList.add("selected");
-      }
-
-      const model = (d.model || "未知型号").trim();
-      const tran = (d.tran || "disk").toUpperCase();
-      const sizeStr = formatBytes(d.size);
-
-      const left = document.createElement("div");
-      left.className = "disk-left";
-
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = "target_disk";
-      radio.disabled = Boolean(isBootDisk);
-      radio.checked = selectedDisk === devPath && !isBootDisk;
-
+      item.className = "disk-item" + (isBoot ? " disabled" : "") + (selectedDisk === devPath && !isBoot ? " selected" : "");
+      const left = document.createElement("div"); left.className = "disk-left";
+      const radio = document.createElement("input"); radio.type = "radio"; radio.name = "target_disk";
+      radio.disabled = Boolean(isBoot); radio.checked = selectedDisk === devPath && !isBoot;
       const info = document.createElement("div");
-      const titleEl = document.createElement("div");
-      titleEl.className = "disk-title";
-      titleEl.textContent = devPath;
-      const subEl = document.createElement("div");
-      subEl.className = "disk-sub";
-      subEl.textContent = model;
-      info.append(titleEl, subEl);
-      left.append(radio, info);
+      const t = document.createElement("div"); t.className = "disk-title"; t.textContent = devPath;
+      const s = document.createElement("div"); s.className = "disk-sub"; s.textContent = (d.model || "未知型号").trim();
+      info.append(t, s); left.append(radio, info);
 
-      const tags = document.createElement("div");
-      tags.className = "disk-tags";
-      const addTag = (text, warn = false) => {
-        const span = document.createElement("span");
-        span.className = warn ? "tag warn" : "tag";
-        span.textContent = text;
-        tags.appendChild(span);
-      };
-      addTag(sizeStr);
-      addTag(tran);
-      if (isBootDisk) addTag("当前启动盘（禁止选择）", true);
+      const tags = document.createElement("div"); tags.className = "disk-tags";
+      const addTag = (txt, warn = false) => { const sp = document.createElement("span"); sp.className = warn ? "tag warn" : "tag"; sp.textContent = txt; tags.appendChild(sp); };
+      addTag(formatBytes(d.size));
+      addTag((d.tran || "disk").toUpperCase());
+      if (isBoot) addTag("当前启动盘（禁止）", true);
       else if (isRemovable) addTag("USB 可移动设备", true);
 
       item.append(left, tags);
-
-      if (!isBootDisk) {
+      if (!isBoot) {
         item.addEventListener("click", () => {
           selectedDisk = devPath;
           listEl.querySelectorAll(".disk-item").forEach((el) => el.classList.remove("selected"));
@@ -775,23 +800,19 @@
           radio.checked = true;
         });
       }
-
       listEl.appendChild(item);
     });
-
-    if (!stillValid) {
-      selectedDisk = "";
-    }
+    if (!stillValid) selectedDisk = "";
   };
 
   window.__spinelInstallerProgress = (pct, label) => {
-    const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+    const c = Math.max(0, Math.min(100, Number(pct) || 0));
     const stepEl = document.getElementById("inst-step-text");
     const pctEl = document.getElementById("inst-pct-text");
     const barEl = document.getElementById("inst-progress-bar");
     if (stepEl && label) stepEl.textContent = label;
-    if (pctEl) pctEl.textContent = `${clamped}%`;
-    if (barEl) barEl.style.width = `${clamped}%`;
+    if (pctEl) pctEl.textContent = `${c}%`;
+    if (barEl) barEl.style.width = `${c}%`;
   };
 
   window.__spinelInstallerLog = (line) => {
@@ -804,22 +825,34 @@
   window.__spinelInstallerDone = (code) => {
     installRunning = false;
     const hint = document.getElementById("inst-status-hint");
-    const backBtn = document.getElementById("btn-inst-back");
-    const rebootBtn = document.getElementById("btn-inst-reboot");
-    const stepEl = document.getElementById("inst-step-text");
-
     if (code === 0) {
       window.__spinelInstallerProgress(100, "安装完成！");
-      if (hint) hint.textContent = "SpinelOS 已成功写入硬盘。请拔出 U 盘后点击“立即重启电脑”。";
-      if (rebootBtn) rebootBtn.classList.remove("hidden");
+      if (hint) hint.textContent = "SpinelOS 已成功写入硬盘。请拔出安装介质后点击“立即重启电脑”。";
+      document.getElementById("btn-inst-reboot")?.classList.remove("hidden");
     } else {
+      const stepEl = document.getElementById("inst-step-text");
       if (stepEl) stepEl.textContent = `安装失败（退出码 ${code}）`;
-      if (hint) hint.textContent = "请检查上方日志输出，修改配置后重试。";
-      if (backBtn) backBtn.classList.remove("hidden");
+      if (hint) hint.textContent = "请检查上方日志输出后重试。";
+      document.getElementById("btn-inst-back")?.classList.remove("hidden");
     }
   };
 
-  /* ---------------- Global Click Router & Telemetry ---------------- */
+  /* ---------------- 7. Events, Context Menu & Gamepad ---------------- */
+  if (mode === "desktop") {
+    const canvas = document.getElementById("desktop-canvas");
+    const menu = document.getElementById("desktop-ctx-menu");
+    canvas?.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      if (!menu) return;
+      menu.style.left = `${Math.min(ev.clientX, window.innerWidth - 220)}px`;
+      menu.style.top = `${Math.min(ev.clientY, window.innerHeight - 260)}px`;
+      menu.classList.remove("hidden");
+    });
+    document.addEventListener("click", () => menu?.classList.add("hidden"));
+  }
+
+  document.getElementById("game-search-input")?.addEventListener("input", renderSteamGames);
+
   document.addEventListener("click", (ev) => {
     const perfTarget = ev.target.closest("[data-perf-key]");
     if (perfTarget) {
@@ -835,33 +868,22 @@
     ev.stopPropagation();
     const cmd = target.getAttribute("data-cmd");
 
-    if (cmd === "installer:open") {
-      openInstallerModal();
-    } else if (cmd === "installer:mode:disk") {
-      setInstallMode("disk");
-    } else if (cmd === "installer:mode:partition") {
-      setInstallMode("partition");
-    } else if (cmd === "installer:close") {
-      closeInstallerModal();
-    } else if (cmd === "installer:submit") {
-      submitInstaller();
-    } else if (cmd === "installer:back") {
+    if (cmd === "installer:mode:disk") setInstallMode("disk");
+    else if (cmd === "installer:mode:partition") setInstallMode("partition");
+    else if (cmd === "installer:submit") submitInstaller();
+    else if (cmd === "installer:back") {
       if (!installRunning) {
         document.getElementById("inst-progress-view").classList.add("hidden");
         document.getElementById("inst-form-view").classList.remove("hidden");
       }
-    } else if (cmd.startsWith("settings:open:") && mode === "hub") {
-      window.__spinelOpenSettings(cmd.split(":")[2]);
-    } else if (cmd.startsWith("settings:tab:")) {
+    } else if (cmd.startsWith("settings:tab:") && mode === "settings") {
       switchSettingsTab(cmd.split(":")[2]);
-    } else if (cmd === "settings:close") {
-      document.getElementById("settings-modal").classList.add("hidden");
     } else if (cmd === "settings:wifi-scan") {
       const btn = document.getElementById("btn-wifi-rescan");
       if (btn) { btn.disabled = true; btn.textContent = "扫描中..."; }
       sendCommand("settings:wifi-scan");
     } else if (cmd === "settings:wifi-cancel") {
-      document.getElementById("wifi-connect-box").classList.add("hidden");
+      document.getElementById("wifi-connect-box")?.classList.add("hidden");
     } else if (cmd === "settings:wifi-do-connect") {
       const pwd = document.getElementById("wifi-password-input").value;
       showFeedback("wifi-feedback", `正在连接 ${selectedWifiSsid}...`);
@@ -878,56 +900,20 @@
       sendPerfUpdate({ gamemode: !perfState.gamemode });
     } else if (cmd === "perf:copy") {
       const str = buildLaunchOptionString(perfState);
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(str).then(() => {
-          const btn = document.getElementById("btn-copy-launch");
-          if (btn) {
-            btn.textContent = "已复制!";
-            setTimeout(() => { btn.textContent = "复制 Steam 启动参数"; }, 1500);
-          }
-        }).catch(() => {});
-      }
+      navigator.clipboard?.writeText(str).then(() => {
+        const btn = document.getElementById("btn-copy-launch");
+        if (btn) { btn.textContent = "已复制!"; setTimeout(() => { btn.textContent = "复制 Steam 启动参数"; }, 1500); }
+      }).catch(() => {});
     } else {
       sendCommand(cmd);
     }
   });
 
-  function updateClock() {
-    const el = document.getElementById("bar-clock");
-    if (!el) return;
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, "0");
-    const mm = String(now.getMinutes()).padStart(2, "0");
-    el.textContent = `${hh}:${mm}`;
-  }
-
-  window.__spinelUpdateTelemetry = (data) => {
-    const set = (id, val) => {
-      const el = document.getElementById(id);
-      if (el && val) el.textContent = val;
-    };
-    set("bar-net", `网络: ${data.net}`);
-    set("bar-mem", `内存: ${data.mem}`);
-    set("hub-gpu", data.gpu);
-    set("hub-mem", data.mem);
-    set("hub-net", data.net);
-    set("hub-kernel", data.kernel);
-
-    if (typeof data.low_fx === "boolean") {
-      document.body.classList.toggle("low-fx", data.low_fx);
-    }
-
-    const desc = document.getElementById("install-card-desc");
-    if (desc && typeof data.is_live === "boolean") {
-      desc.textContent = data.is_live
-        ? "当前为 Live 体验模式。测试硬件与 Steam 正常后，可一键安装至本地 NVMe/SSD。"
-        : "当前系统已运行在本地硬盘模式，可随时管理电源或重新部署。";
-    }
-  };
-
-  /* ---------------- Web Gamepad API Spatial Navigation ---------------- */
   function initGamepadNavigation() {
-    if (mode !== "hub" || typeof navigator.getGamepads !== "function") return;
+    if ((mode !== "desktop" && mode !== "games" && mode !== "settings" && mode !== "installer") ||
+        typeof navigator.getGamepads !== "function") {
+      return;
+    }
 
     let gpFocusedEl = null;
     let lastDir = "";
@@ -935,48 +921,32 @@
     let dirRepeatCount = 0;
     const prevButtons = new Map();
 
-    const updateChip = () => {
-      const chip = document.getElementById("hub-gamepad-chip");
-      if (!chip) return;
+    const updatePadChip = () => {
       const pads = Array.from(navigator.getGamepads() || []).filter(Boolean);
-      if (pads.length === 0) {
-        chip.textContent = "手柄操控: 未连接";
-      } else {
-        const label = (pads[0].id || "Controller").replace(/\s*\(.*?\)\s*/g, "").slice(0, 26);
-        chip.textContent = `手柄已连接: ${label} (十字键/A/B)`;
+      const chip = document.getElementById("desk-gamepad");
+      if (chip) {
+        chip.textContent = pads.length === 0
+          ? "未连接"
+          : (pads[0].id || "Controller").replace(/\s*\(.*?\)\s*/g, "").slice(0, 22);
       }
     };
 
-    window.addEventListener("gamepadconnected", updateChip);
-    window.addEventListener("gamepaddisconnected", updateChip);
+    window.addEventListener("gamepadconnected", updatePadChip);
+    window.addEventListener("gamepaddisconnected", updatePadChip);
     window.addEventListener("pointerdown", () => {
-      if (gpFocusedEl) {
-        gpFocusedEl.classList.remove("gp-focused");
-        gpFocusedEl = null;
-      }
+      if (gpFocusedEl) { gpFocusedEl.classList.remove("gp-focused"); gpFocusedEl = null; }
     });
 
-    function getActiveRoot() {
-      const instModal = document.getElementById("installer-modal");
-      if (instModal && !instModal.classList.contains("hidden")) return instModal;
-      const setModal = document.getElementById("settings-modal");
-      if (setModal && !setModal.classList.contains("hidden")) return setModal;
-      return hub;
-    }
-
-    function getFocusables(root) {
-      const selector = "button:not(:disabled), input:not(:disabled), select:not(:disabled), .card.clickable, .disk-item:not(.disabled)";
-      return Array.from(root.querySelectorAll(selector)).filter((el) => {
+    function getFocusables() {
+      return Array.from(activeRootEl.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled)")).filter((el) => {
         if (el.closest(".hidden")) return false;
-        const rect = el.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
       });
     }
 
     function setFocus(el) {
-      if (gpFocusedEl && gpFocusedEl !== el) {
-        gpFocusedEl.classList.remove("gp-focused");
-      }
+      if (gpFocusedEl && gpFocusedEl !== el) gpFocusedEl.classList.remove("gp-focused");
       gpFocusedEl = el || null;
       if (gpFocusedEl) {
         gpFocusedEl.classList.add("gp-focused");
@@ -985,104 +955,41 @@
     }
 
     function moveFocus(dir) {
-      const root = getActiveRoot();
-      const items = getFocusables(root);
+      const items = getFocusables();
       if (items.length === 0) return;
-      if (!gpFocusedEl || !items.includes(gpFocusedEl)) {
-        setFocus(items[0]);
-        return;
-      }
-
+      if (!gpFocusedEl || !items.includes(gpFocusedEl)) { setFocus(items[0]); return; }
       const cur = gpFocusedEl.getBoundingClientRect();
       const cx = cur.left + cur.width / 2;
       const cy = cur.top + cur.height / 2;
-
       let best = null;
       let bestScore = Infinity;
       items.forEach((cand) => {
         if (cand === gpFocusedEl) return;
         const r = cand.getBoundingClientRect();
-        const tx = r.left + r.width / 2;
-        const ty = r.top + r.height / 2;
-        const dx = tx - cx;
-        const dy = ty - cy;
-
-        let primary = 0;
-        let ortho = 0;
+        const dx = r.left + r.width / 2 - cx;
+        const dy = r.top + r.height / 2 - cy;
+        let primary = 0, ortho = 0;
         if (dir === "right" && dx > 4) { primary = dx; ortho = Math.abs(dy); }
         else if (dir === "left" && dx < -4) { primary = -dx; ortho = Math.abs(dy); }
         else if (dir === "down" && dy > 4) { primary = dy; ortho = Math.abs(dx); }
         else if (dir === "up" && dy < -4) { primary = -dy; ortho = Math.abs(dx); }
         else return;
-
         const score = primary + ortho * 2.5;
-        if (score < bestScore) {
-          bestScore = score;
-          best = cand;
-        }
+        if (score < bestScore) { bestScore = score; best = cand; }
       });
-
       if (best) setFocus(best);
     }
 
-    function activateFocused() {
-      const root = getActiveRoot();
-      const items = getFocusables(root);
-      if (!gpFocusedEl || !items.includes(gpFocusedEl)) {
-        if (items.length > 0) setFocus(items[0]);
-        return;
-      }
-      const el = gpFocusedEl;
-      if (el.tagName === "SELECT" && el.options.length > 0) {
-        el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      } else if (el.tagName === "INPUT" && (el.type === "text" || el.type === "password")) {
-        el.focus();
-      } else {
-        el.click();
-      }
-    }
-
-    function backAction() {
-      const instModal = document.getElementById("installer-modal");
-      if (instModal && !instModal.classList.contains("hidden")) {
-        if (!installRunning) closeInstallerModal();
-        return;
-      }
-      const setModal = document.getElementById("settings-modal");
-      if (setModal && !setModal.classList.contains("hidden")) {
-        setModal.classList.add("hidden");
-      }
-    }
-
-    function switchModalTab(step) {
-      const setModal = document.getElementById("settings-modal");
-      if (setModal && !setModal.classList.contains("hidden")) {
-        const tabs = ["wifi", "bt", "display"];
-        const activeBtn = setModal.querySelector(".tab-btn.active");
-        const curCmd = activeBtn ? activeBtn.getAttribute("data-cmd") : "settings:tab:wifi";
-        const curIdx = Math.max(0, tabs.indexOf(curCmd.split(":")[2]));
-        switchSettingsTab(tabs[(curIdx + step + tabs.length) % tabs.length]);
-        return;
-      }
-      const instModal = document.getElementById("installer-modal");
-      if (instModal && !instModal.classList.contains("hidden") && !installRunning) {
-        setInstallMode(installMode === "disk" ? "partition" : "disk");
-      }
-    }
-
     function tick(now) {
-      const pads = navigator.getGamepads() || [];
-      const pad = Array.from(pads).find(Boolean);
+      const pad = Array.from(navigator.getGamepads() || []).find(Boolean);
       if (pad) {
-        const pressed = (idx) => Boolean(pad.buttons[idx] && pad.buttons[idx].pressed);
-        const justPressed = (idx) => {
-          const cur = pressed(idx);
-          const prev = prevButtons.get(idx) || false;
-          prevButtons.set(idx, cur);
+        const pressed = (i) => Boolean(pad.buttons[i] && pad.buttons[i].pressed);
+        const just = (i) => {
+          const cur = pressed(i);
+          const prev = prevButtons.get(i) || false;
+          prevButtons.set(i, cur);
           return cur && !prev;
         };
-
         const ax = pad.axes[0] || 0;
         const ay = pad.axes[1] || 0;
         let dir = "";
@@ -1090,7 +997,6 @@
         else if (pressed(13) || ay > 0.55) dir = "down";
         else if (pressed(14) || ax < -0.55) dir = "left";
         else if (pressed(15) || ax > 0.55) dir = "right";
-
         if (dir) {
           const delay = dirRepeatCount === 0 ? 210 : 115;
           if (dir !== lastDir || now - lastDirTime >= delay) {
@@ -1103,20 +1009,66 @@
           lastDir = "";
           dirRepeatCount = 0;
         }
-
-        if (justPressed(0)) activateFocused();
-        if (justPressed(1)) backAction();
-        if (justPressed(4)) switchModalTab(-1);
-        if (justPressed(5)) switchModalTab(1);
-        if (justPressed(3) && getActiveRoot() === hub) sendCommand("steam:scan");
-        if (justPressed(9) && getActiveRoot() === hub) sendCommand("launch:steam-gamepadui");
+        if (just(0)) {
+          const items = getFocusables();
+          if (!gpFocusedEl || !items.includes(gpFocusedEl)) { if (items[0]) setFocus(items[0]); }
+          else if (gpFocusedEl.tagName === "SELECT" && gpFocusedEl.options.length > 0) {
+            gpFocusedEl.selectedIndex = (gpFocusedEl.selectedIndex + 1) % gpFocusedEl.options.length;
+          } else {
+            gpFocusedEl.click();
+          }
+        }
+        if (just(9)) sendCommand("launch:steam-gamepadui");
       }
       window.requestAnimationFrame(tick);
     }
-
-    updateChip();
+    updatePadChip();
     window.requestAnimationFrame(tick);
   }
+
+  function updateClock() {
+    const el = document.getElementById("bar-clock");
+    if (!el) return;
+    const now = new Date();
+    const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    el.textContent = `${days[now.getDay()]} ${hh}:${mm}`;
+  }
+
+  window.__spinelUpdateTelemetry = (data) => {
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.textContent = val; };
+    set("bar-net", `网络: ${data.net}`);
+    set("bar-mem", `内存: ${data.mem}`);
+    set("desk-gpu", data.gpu);
+    set("desk-mem", data.mem);
+    set("desk-net", data.net);
+    set("desk-kernel", data.kernel);
+    set("about-gpu", data.gpu);
+    set("about-kernel", data.kernel);
+
+    if (typeof data.low_fx === "boolean") {
+      document.body.classList.toggle("low-fx", data.low_fx);
+    }
+
+    if (typeof data.is_live === "boolean") {
+      const changed = isLiveEnv !== data.is_live;
+      isLiveEnv = data.is_live;
+      const modeChip = document.getElementById("desktop-mode-chip");
+      if (modeChip) modeChip.textContent = isLiveEnv ? "Live ISO 模式" : "本地硬盘模式";
+      const aboutMode = document.getElementById("about-mode");
+      if (aboutMode) aboutMode.textContent = isLiveEnv ? "Live USB / ISO 体验模式" : "本地硬盘持久化系统";
+      document.getElementById("btn-desk-install")?.classList.toggle("hidden", !isLiveEnv);
+      if (changed) {
+        renderDesktopShortcuts();
+        renderDock();
+      }
+    }
+  };
+
+  if (mode === "settings") switchSettingsTab(initialTab);
+  if (mode === "desktop") renderDesktopShortcuts();
+  if (mode === "dock") renderDock();
 
   renderPerfState();
   initGamepadNavigation();
