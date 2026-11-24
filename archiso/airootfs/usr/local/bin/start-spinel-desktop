@@ -13,14 +13,33 @@ export MOZ_ENABLE_WAYLAND=1
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 fi
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 700 "${XDG_RUNTIME_DIR}" 2>/dev/null || true
 
-# Work around WebKitGTK DMABUF rendering issues on NVIDIA or virtualized GPUs
+IS_VM=0
+if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then
+  IS_VM=1
+fi
+
+# Work around WebKitGTK DMABUF & VM hardware cursor issues on NVIDIA or virtualized GPUs
 if [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GBM_BACKEND=nvidia-drm
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
-elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then
+elif [ "${IS_VM}" -eq 1 ]; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
+  export WLR_NO_HARDWARE_CURSORS=1
+fi
+
+# Force software Pixman/Mesa fallback automatically on VMs without 3D DRM (Hyper-V, basic VBox/VMware, simpledrm)
+if [ "${IS_VM}" -eq 1 ]; then
+  DRM_DRIVER="$(basename "$(readlink -f /sys/class/drm/card0/device/driver 2>/dev/null || true)" 2>/dev/null || true)"
+  case "${DRM_DRIVER}" in
+    hyperv_drm|bochs-drm|cirrus|simple-framebuffer|ast)
+      export WLR_RENDERER=pixman
+      export LIBGL_ALWAYS_SOFTWARE=1
+      ;;
+  esac
 fi
 
 # Start PipeWire audio services in user session if systemd user instance is ready
@@ -33,4 +52,28 @@ if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev
   spice-vdagent >/dev/null 2>&1 || true
 fi
 
-exec labwc
+LOG_FILE="/tmp/spinel-labwc.log"
+START_TS="$(date +%s)"
+set +e
+labwc >"${LOG_FILE}" 2>&1
+RC=$?
+END_TS="$(date +%s)"
+set -e
+
+# If hardware GLES2 renderer failed immediately (common on VMs without 3D acceleration), retry with pixman
+if [ "${RC}" -ne 0 ] && [ $((END_TS - START_TS)) -lt 5 ] && [ "${WLR_RENDERER:-}" != "pixman" ]; then
+  echo "[SpinelOS] Hardware renderer failed (rc=${RC}), retrying with software Pixman..." >>"${LOG_FILE}"
+  export WLR_RENDERER=pixman
+  export WLR_NO_HARDWARE_CURSORS=1
+  export LIBGL_ALWAYS_SOFTWARE=1
+  set +e
+  labwc >>"${LOG_FILE}" 2>&1
+  RC=$?
+  set -e
+fi
+
+if [ "${RC}" -ne 0 ]; then
+  echo "[SpinelOS] Desktop compositor exited with code ${RC}. Log (${LOG_FILE}):"
+  tail -n 25 "${LOG_FILE}" 2>/dev/null || true
+  exec /bin/bash -l
+fi

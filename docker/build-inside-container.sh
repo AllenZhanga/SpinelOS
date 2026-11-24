@@ -59,18 +59,24 @@ ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/reflector.service"
 ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/choose-mirror.service"
 
 echo "[4/5] Configuring bootloader kernel parameters, branding & profiledef..."
+rm -f "${PROFILE_DIR}/syslinux/splash.png"
+rm -f "${PROFILE_DIR}"/efiboot/loader/entries/*speech*.conf
+
 if [ -f "${PROFILE_DIR}/efiboot/loader/loader.conf" ]; then
   sed -i 's/^timeout .*/timeout 2/' "${PROFILE_DIR}/efiboot/loader/loader.conf"
 fi
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
   if [ -f "$cfg" ]; then
-    sed -i 's/Arch Linux install medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux/SpinelOS/g' "$cfg"
     sed -i '/^options / s/$/ quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
   fi
 done
 for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
   if [ -f "$cfg" ]; then
-    sed -i 's/Arch Linux install medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux live medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i 's/^MENU BACKGROUND splash.png/# SpinelOS dark menu/' "$cfg"
+    sed -i 's/^TIMEOUT 150/TIMEOUT 30/' "$cfg"
+    sed -i 's/^timeout=15/timeout=3/' "$cfg"
     sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
   fi
 done
