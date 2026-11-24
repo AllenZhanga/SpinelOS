@@ -1892,19 +1892,12 @@ void apply_native_css(NativeShellState *ns) {
 
     GdkDisplay *display = gdk_display_get_default();
     if (!display) return;
-    if (ns->css_provider) {
-        gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
-        g_object_unref(ns->css_provider);
-        ns->css_provider = nullptr;
+    if (!ns->css_provider) {
+        ns->css_provider = gtk_css_provider_new();
+        gtk_style_context_add_provider_for_display(
+            display, GTK_STYLE_PROVIDER(ns->css_provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
     }
-    ns->css_provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(ns->css_provider, css_str.c_str());
-    gtk_style_context_add_provider_for_display(
-        display, GTK_STYLE_PROVIDER(ns->css_provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
-
-    if (GtkSettings *gs = gtk_settings_get_default()) {
-        g_object_set(gs, "gtk-application-prefer-dark-theme", t.is_light ? FALSE : TRUE, nullptr);
-    }
 }
 
 }  // namespace

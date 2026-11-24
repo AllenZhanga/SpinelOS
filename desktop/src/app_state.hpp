@@ -6,6 +6,7 @@
 #include <sys/types.h>
 
 #include <atomic>
+#include <cstdio>
 #include <string>
 #include <thread>
 
@@ -52,7 +53,10 @@ inline void on_eval_js_done(GObject *source, GAsyncResult *res, gpointer) {
     if (!source || !WEBKIT_IS_WEB_VIEW(source)) return;
     JSCValue *val = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(source), res, &err);
     if (val) g_object_unref(val);
-    if (err) g_error_free(err);
+    if (err) {
+        std::fprintf(stderr, "[spinel-shell] eval_js error: %s\n", err->message ? err->message : "unknown");
+        g_error_free(err);
+    }
     if (GTK_IS_WIDGET(source) && gtk_widget_get_realized(GTK_WIDGET(source))) {
         gtk_widget_queue_draw(GTK_WIDGET(source));
     }

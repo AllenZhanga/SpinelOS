@@ -476,7 +476,10 @@
       document.body.style.background = t.ui_bg;
     }
     if (activeRootEl && t.ui_win_bg) {
-      activeRootEl.style.background = t.ui_win_bg;
+      activeRootEl.style.background = "";
+      if (t.ui_bg) activeRootEl.style.backgroundColor = t.ui_bg;
+      activeRootEl.style.backgroundImage = t.ui_win_bg.includes("gradient") ? t.ui_win_bg : "";
+      if (!t.ui_win_bg.includes("gradient")) activeRootEl.style.background = t.ui_win_bg;
       const toolbar = activeRootEl.querySelector(".win-toolbar");
       if (toolbar && t.ui_toolbar_bg) toolbar.style.background = t.ui_toolbar_bg;
     }
@@ -1758,11 +1761,6 @@
     } else if (cmd === "store:log-hide") {
       document.getElementById("store-log-wrap")?.classList.add("hidden");
     } else if (cmd.startsWith("theme:set:")) {
-      const tid = cmd.slice(10);
-      const chosen = availableThemes.find((t) => t.id === tid);
-      if (chosen) {
-        window.__spinelThemeData({ active: chosen, themes: availableThemes });
-      }
       sendCommand(cmd);
     } else {
       sendCommand(cmd);

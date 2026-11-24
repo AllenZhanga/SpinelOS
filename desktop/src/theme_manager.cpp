@@ -313,7 +313,11 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
     for (const auto &t : list) {
         if (t.id == theme_id) { valid = true; break; }
     }
-    if (!valid) return;
+    if (!valid) {
+        std::fprintf(stderr, "[Theme] 忽略无效主题 ID: '%s'\n", theme_id.c_str());
+        append_app_log("[Theme] 忽略无效主题 ID: " + theme_id);
+        return;
+    }
 
     std::error_code ec;
     fs::path dir = fs::path(home_dir()) / ".config/spinelos";
@@ -323,6 +327,9 @@ void set_active_theme(AppState *state, const std::string &theme_id) {
         ofs << theme_id << "\n";
     }
     ThemeSpec active = get_active_theme();
+    std::fprintf(stderr, "[Theme] 切换主题 request='%s' -> active='%s' (is_light=%s)\n",
+                 theme_id.c_str(), active.id.c_str(), active.is_light ? "true" : "false");
+    append_app_log("[Theme] 切换主题 -> " + active.id + (active.is_light ? " (浅色)" : " (深色)"));
     sync_fcitx5_theme(active.is_light);
     push_theme_state(state);
     native_shell_sync_theme(state);
