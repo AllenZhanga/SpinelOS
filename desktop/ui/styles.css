@@ -934,6 +934,12 @@ body.low-fx .lg-orb {
   background: rgba(255, 255, 255, 0.15);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
 .btn.primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent;
@@ -1243,6 +1249,45 @@ body.low-fx .lg-orb {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.store-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(6, 10, 20, 0.52);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.store-modal-card {
+  width: min(440px, 94vw);
+  padding: 20px 22px;
+  background: var(--card-bg);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  user-select: text;
+  outline: none;
+}
+
+.modal-input:focus {
+  border-color: var(--accent);
 }
 
 .game-card {

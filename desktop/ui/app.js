@@ -142,6 +142,66 @@
           <stop offset="0%" stop-color="#34d399"/>
           <stop offset="100%" stop-color="#059669"/>
         </linearGradient>`,
+      chrome: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#e2e8f0"/>
+        </linearGradient>`,
+      chromium: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#93c5fd"/>
+          <stop offset="100%" stop-color="#2563eb"/>
+        </linearGradient>`,
+      firefox: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#4338ca"/>
+          <stop offset="55%" stop-color="#7c3aed"/>
+          <stop offset="100%" stop-color="#ea580c"/>
+        </linearGradient>`,
+      heroic: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#0f172a"/>
+          <stop offset="55%" stop-color="#1e3a8a"/>
+          <stop offset="100%" stop-color="#0284c7"/>
+        </linearGradient>`,
+      lutris: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fbbf24"/>
+          <stop offset="55%" stop-color="#f97316"/>
+          <stop offset="100%" stop-color="#c2410c"/>
+        </linearGradient>`,
+      protonup: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#2dd4bf"/>
+          <stop offset="100%" stop-color="#0f766e"/>
+        </linearGradient>`,
+      discord: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#818cf8"/>
+          <stop offset="55%" stop-color="#5865f2"/>
+          <stop offset="100%" stop-color="#4338ca"/>
+        </linearGradient>`,
+      obs: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#334155"/>
+          <stop offset="100%" stop-color="#0f172a"/>
+        </linearGradient>`,
+      vlc: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fb923c"/>
+          <stop offset="100%" stop-color="#c2410c"/>
+        </linearGradient>`,
+      qbittorrent: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#1d4ed8"/>
+        </linearGradient>`,
+      gimp: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#a78bfa"/>
+          <stop offset="55%" stop-color="#6366f1"/>
+          <stop offset="100%" stop-color="#312e81"/>
+        </linearGradient>`,
       app: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="#60a5fa"/>
@@ -196,6 +256,51 @@
       installer: `
         <rect x="14" y="15" width="36" height="34" rx="8" fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.9)" stroke-width="2.4"/>
         <path d="M32 22v16m0 0-6.5-6.5M32 38l6.5-6.5M22 43h20" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`,
+      chrome: `
+        <circle cx="32" cy="32" r="20" fill="#ea4335"/>
+        <path d="M32 32l17.3-10A20 20 0 0 1 32 52z" fill="#fbbc05"/>
+        <path d="M32 32L32 52A20 20 0 0 1 14.7 22z" fill="#34a853"/>
+        <circle cx="32" cy="32" r="10.2" fill="#ffffff"/>
+        <circle cx="32" cy="32" r="7.4" fill="#1a73e8"/>`,
+      chromium: `
+        <circle cx="32" cy="32" r="20" fill="#3b82f6"/>
+        <path d="M32 32l17.3-10A20 20 0 0 1 32 52z" fill="#93c5fd"/>
+        <path d="M32 32L32 52A20 20 0 0 1 14.7 22z" fill="#60a5fa"/>
+        <circle cx="32" cy="32" r="10.2" fill="#ffffff"/>
+        <circle cx="32" cy="32" r="7.4" fill="#1d4ed8"/>`,
+      firefox: `
+        <circle cx="32" cy="33" r="17" fill="#6366f1"/>
+        <path d="M47 26c-2-8-10-12-17-10 4 2 6 6 4 10-3-2-7-2-10 1-5 5-4 14 2 18 7 4 16 2 20-5 2-4 3-9 1-14z" fill="#fb923c"/>
+        <circle cx="32" cy="33" r="7.5" fill="#fde047" opacity="0.92"/>`,
+      heroic: `
+        <path d="M32 13l16 7v12c0 10.5-6.8 18-16 21-9.2-3-16-10.5-16-21V20l16-7z" fill="rgba(255,255,255,0.18)" stroke="#ffffff" stroke-width="2.8" stroke-linejoin="round"/>
+        <path d="M26 24v16M38 24v16M26 32h12" stroke="#38bdf8" stroke-width="3.6" stroke-linecap="round"/>`,
+      lutris: `
+        <circle cx="32" cy="32" r="18" fill="rgba(255,255,255,0.22)" stroke="#ffffff" stroke-width="2.6"/>
+        <path d="M23 36l9-16 9 16H23z" fill="#ffffff"/>
+        <circle cx="32" cy="33" r="3" fill="#ea580c"/>`,
+      protonup: `
+        <circle cx="32" cy="32" r="17" fill="none" stroke="rgba(255,255,255,0.72)" stroke-width="2.4" stroke-dasharray="5 3"/>
+        <path d="M32 42V22m0 0-7 7m7-7 7 7" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+      discord: `
+        <rect x="14" y="20" width="36" height="24" rx="11" fill="#ffffff"/>
+        <circle cx="25.5" cy="32" r="3.2" fill="#4f46e5"/>
+        <circle cx="38.5" cy="32" r="3.2" fill="#4f46e5"/>`,
+      obs: `
+        <circle cx="32" cy="32" r="19" fill="none" stroke="rgba(255,255,255,0.88)" stroke-width="2.8"/>
+        <circle cx="32" cy="24" r="6" fill="rgba(255,255,255,0.92)"/>
+        <circle cx="24.5" cy="36.5" r="6" fill="rgba(255,255,255,0.78)"/>
+        <circle cx="39.5" cy="36.5" r="6" fill="rgba(255,255,255,0.65)"/>`,
+      vlc: `
+        <path d="M28 15h8l8 29H20l8-29z" fill="#ffffff"/>
+        <path d="M25.2 25h13.6M22.5 34h19" stroke="#ea580c" stroke-width="4.2"/>
+        <rect x="16" y="43" width="32" height="5.5" rx="2.5" fill="#ffffff"/>`,
+      qbittorrent: `
+        <circle cx="32" cy="32" r="18" fill="rgba(255,255,255,0.18)" stroke="#ffffff" stroke-width="2.6"/>
+        <path d="M23 30c0-4.4 3.6-8 8-8h2v16h-2a8 8 0 0 1-8-8zm16-6v16" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round"/>`,
+      gimp: `
+        <path d="M17 44c5-2 10-8 16-14l10-11 4 4-11 10c-6 6-12 11-19 11z" fill="#ffffff"/>
+        <circle cx="44" cy="19" r="3.2" fill="#fde047"/>`,
       app: `
         <rect x="16" y="16" width="32" height="32" rx="9" fill="rgba(255,255,255,0.22)" stroke="rgba(255,255,255,0.92)" stroke-width="2.6"/>
         <circle cx="32" cy="32" r="6" fill="#ffffff"/>`
@@ -225,7 +330,18 @@
     const s = (appIdOrTitle || "").toLowerCase();
     if (s.includes("steam")) return "steam";
     if (s.includes("gamescope")) return "gamepad";
-    if (s.includes("chromium") || s.includes("chrome") || s.includes("firefox") || s.includes("browser")) return "browser";
+    if (s.includes("chromium")) return "chromium";
+    if (s.includes("chrome")) return "chrome";
+    if (s.includes("firefox")) return "firefox";
+    if (s.includes("heroic")) return "heroic";
+    if (s.includes("lutris")) return "lutris";
+    if (s.includes("protonup") || s.includes("pupgui")) return "protonup";
+    if (s.includes("discord")) return "discord";
+    if (s.includes("obs")) return "obs";
+    if (s.includes("vlc")) return "vlc";
+    if (s.includes("qbittorrent")) return "qbittorrent";
+    if (s.includes("gimp")) return "gimp";
+    if (s.includes("browser")) return "browser";
     if (s.includes("thunar") || s.includes("files")) return "files";
     if (s.includes("foot") || s.includes("terminal")) return "terminal";
     if (s.includes("应用商店") || s.includes("app-store")) return "store";
@@ -1285,13 +1401,16 @@
   };
 
   /* ---------------- 6.5. SpinelOS App Store ---------------- */
-  let storeState = { flatpak_ready: true, sudo_nopass: false, busy: false, apps: [] };
+  let storeState = { flatpak_ready: true, sudo_nopass: false, busy: false, active_id: "", active_action: "", apps: [] };
   let storeCategory = "all";
   let pendingStoreOp = null;
 
   function renderStoreApps() {
     const grid = document.getElementById("store-app-grid");
     if (!grid) return;
+    const customBtn = document.getElementById("btn-store-custom");
+    if (customBtn) customBtn.disabled = storeState.busy;
+
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
     const list = (storeState.apps || []).filter((app) => {
       const catMatch = storeCategory === "all" ||
@@ -1317,7 +1436,8 @@
       head.className = "store-card-head";
       const iconWrap = document.createElement("div");
       iconWrap.className = "store-card-icon";
-      fillIconContainer(iconWrap, findAppIconUri([app.pkg, app.id, app.name]), matchAppKind(`${app.id} ${app.pkg}`), app.name);
+      // Always render unified SpinelOS squircle icons inside Store cards
+      fillIconContainer(iconWrap, "", matchAppKind(`${app.id} ${app.pkg}`), app.name);
 
       const info = document.createElement("div");
       info.className = "store-card-info";
@@ -1344,6 +1464,9 @@
 
       const actions = document.createElement("div");
       actions.className = "footer-actions";
+      const isActiveTarget = storeState.busy &&
+        (storeState.active_id === app.id || storeState.active_id === app.pkg);
+
       if (app.installed) {
         const launchBtn = document.createElement("button");
         launchBtn.className = "btn primary small";
@@ -1351,8 +1474,9 @@
         launchBtn.setAttribute("data-cmd", `store:launch:${app.id}`);
         const rmBtn = document.createElement("button");
         rmBtn.className = "btn small danger";
-        rmBtn.textContent = "卸载";
+        rmBtn.textContent = (isActiveTarget && storeState.active_action === "remove") ? "卸载中..." : "卸载";
         rmBtn.disabled = storeState.busy;
+        if (storeState.busy && !isActiveTarget) rmBtn.title = "请等待当前操作完成";
         rmBtn.addEventListener("click", (ev) => {
           ev.stopPropagation();
           requestStoreOp("remove", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
@@ -1361,8 +1485,9 @@
       } else {
         const instBtn = document.createElement("button");
         instBtn.className = "btn primary small";
-        instBtn.textContent = storeState.busy ? "处理中..." : "下载安装";
+        instBtn.textContent = isActiveTarget ? "安装中..." : "下载安装";
         instBtn.disabled = storeState.busy;
+        if (storeState.busy && !isActiveTarget) instBtn.title = "请等待当前队列完成";
         instBtn.addEventListener("click", (ev) => {
           ev.stopPropagation();
           requestStoreOp("install", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
@@ -1384,6 +1509,8 @@
     if (logBox) logBox.textContent = "";
     if (logTitle) logTitle.textContent = `${action === "install" ? "正在下载安装" : "正在卸载"}: ${op.name || op.pkg}`;
     storeState.busy = true;
+    storeState.active_id = op.id || op.pkg || "";
+    storeState.active_action = action;
     renderStoreApps();
     sendCommand([
       `store:${action}`,
@@ -1400,8 +1527,10 @@
       pendingStoreOp = { action, op };
       const box = document.getElementById("store-pass-box");
       const title = document.getElementById("store-pass-title");
+      const confirmBtn = document.getElementById("btn-store-pass-confirm");
       const input = document.getElementById("store-pass-input");
-      if (title) title.textContent = `${action === "install" ? "安装" : "卸载"}系统软件 ${op.pkg} 需要管理员密码`;
+      if (title) title.textContent = `${action === "install" ? "安装" : "卸载"}系统软件 ${op.name || op.pkg} 需要管理员授权`;
+      if (confirmBtn) confirmBtn.textContent = action === "install" ? "确认安装" : "确认卸载";
       if (input) input.value = "";
       box?.classList.remove("hidden");
       input?.focus();
@@ -1410,8 +1539,28 @@
     executeStoreOp(action, op, "");
   }
 
+  document.getElementById("store-pass-box")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "store-pass-box") {
+      pendingStoreOp = null;
+      ev.currentTarget.classList.add("hidden");
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      const box = document.getElementById("store-pass-box");
+      if (box && !box.classList.contains("hidden")) {
+        pendingStoreOp = null;
+        box.classList.add("hidden");
+      }
+    }
+  });
+
   window.__spinelStoreData = (data) => {
     storeState = { ...storeState, ...data };
+    if (!storeState.busy) {
+      storeState.active_id = "";
+      storeState.active_action = "";
+    }
     renderStoreApps();
   };
 
@@ -1427,6 +1576,8 @@
 
   window.__spinelStoreDone = (ok, targetId, action) => {
     storeState.busy = false;
+    storeState.active_id = "";
+    storeState.active_action = "";
     const logTitle = document.getElementById("store-log-title");
     if (logTitle) {
       logTitle.textContent = ok
@@ -1569,9 +1720,14 @@
       pendingStoreOp = null;
       document.getElementById("store-pass-box")?.classList.add("hidden");
     } else if (cmd === "store:pass-confirm") {
-      const pwd = document.getElementById("store-pass-input")?.value || "";
+      const inputEl = document.getElementById("store-pass-input");
+      const pwd = inputEl?.value || "";
+      if (!pwd) {
+        inputEl?.focus();
+        return;
+      }
       document.getElementById("store-pass-box")?.classList.add("hidden");
-      if (pendingStoreOp && pwd) {
+      if (pendingStoreOp) {
         const cur = pendingStoreOp;
         pendingStoreOp = null;
         executeStoreOp(cur.action, cur.op, pwd);

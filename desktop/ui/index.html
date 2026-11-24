@@ -622,17 +622,6 @@
         </div>
       </div>
 
-      <div id="store-pass-box" class="glass sub-panel hidden">
-        <div class="sub-panel-head">
-          <strong id="store-pass-title">需要管理员密码安装系统软件包</strong>
-          <button class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
-        </div>
-        <div class="inline-row">
-          <input type="password" id="store-pass-input" placeholder="请输入当前用户（gamer）密码..." />
-          <button class="btn small primary" data-cmd="store:pass-confirm">确认并开始安装</button>
-        </div>
-      </div>
-
       <div id="store-app-grid" class="store-grid">
         <div class="lib-empty">正在读取本地已安装状态与应用商店目录...</div>
       </div>
@@ -643,6 +632,24 @@
           <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
         </div>
         <pre id="store-log-box" class="log-box"></pre>
+      </div>
+    </div>
+
+    <div id="store-pass-box" class="store-modal-backdrop hidden">
+      <div class="store-modal-card glass">
+        <div class="sub-panel-head">
+          <strong id="store-pass-title">需要管理员密码授权</strong>
+          <button type="button" class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
+        </div>
+        <p class="muted-hint">请输入当前用户管理员密码以执行系统级软件变更。</p>
+        <input type="password" id="store-pass-input" class="modal-input" placeholder="请输入当前用户（gamer）密码..." />
+        <div class="modal-footer" style="margin-top: 4px;">
+          <span class="muted-hint">仅用于本次 sudo 授权，不会保存</span>
+          <div class="footer-actions">
+            <button type="button" class="btn small" data-cmd="store:pass-cancel">取消</button>
+            <button type="button" class="btn small primary" id="btn-store-pass-confirm" data-cmd="store:pass-confirm">确认并开始安装</button>
+          </div>
+        </div>
       </div>
     </div>
   </section>
