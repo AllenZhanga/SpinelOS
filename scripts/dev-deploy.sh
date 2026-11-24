@@ -51,29 +51,15 @@ else
   echo "==> [1/3] Skipping C++ build (--ui-only)..."
 fi
 
-echo "==> [2/3] Uploading assets to ${DEV_HOST}:${DEV_PORT}..."
-SSH_CMD="ssh -p ${DEV_PORT}"
-ssh -p "${DEV_PORT}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
-if [[ "${MODE}" != "ui" ]]; then
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
-fi
-rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
-
-if [[ "${MODE}" == "full" ]]; then
-  rsync -avz -e "${SSH_CMD}" \
-    "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
-  rsync -avz -e "${SSH_CMD}" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
-  rsync -avz -e "${SSH_CMD}" \
-    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \
-    "${DEV_HOST}:/tmp/spinel-dev/"
-fi
-
-echo "==> [3/3] Installing & restarting spinel-shell on live Wayland session..."
-ssh -t -p "${DEV_PORT}" "${DEV_HOST}" bash -s -- "${MODE}" <<'EOF'
+APPLY_SCRIPT="$(mktemp)"
+trap 'rm -f "${APPLY_SCRIPT}"' EXIT
+cat > "${APPLY_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
 set -euo pipefail
 MODE="$1"
+
+# Acquire sudo once upfront with real TTY
+sudo -v
 
 if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-shell /usr/local/bin/spinel-shell
@@ -113,7 +99,7 @@ elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; t
 fi
 
 if [ "$MODE" = "full" ]; then
-  pkill -HUP -x labwc 2>/dev/null || labwc --reconfigure 2>/dev/null || true
+  pkill -HUP -x labwc 2>/dev/null || true
 fi
 
 pkill -x spinel-shell 2>/dev/null || true
@@ -121,3 +107,27 @@ sleep 0.3
 nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
 echo "Done! spinel-shell restarted on ${WAYLAND_DISPLAY}."
 EOF
+chmod +x "${APPLY_SCRIPT}"
+
+echo "==> [2/3] Uploading assets to ${DEV_HOST}:${DEV_PORT}..."
+SSH_CMD="ssh -p ${DEV_PORT}"
+ssh -p "${DEV_PORT}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
+if [[ "${MODE}" != "ui" ]]; then
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
+fi
+rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
+rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.sh"
+
+if [[ "${MODE}" == "full" ]]; then
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/etc/xdg/labwc/" "${DEV_HOST}:/tmp/spinel-dev/labwc/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/themes/SpinelDark/" "${DEV_HOST}:/tmp/spinel-dev/SpinelDark/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \
+    "${DEV_HOST}:/tmp/spinel-dev/"
+fi
+
+echo "==> [3/3] Installing & restarting spinel-shell on live Wayland session..."
+ssh -t -p "${DEV_PORT}" "${DEV_HOST}" "bash /tmp/spinel-dev/apply.sh '${MODE}'"
