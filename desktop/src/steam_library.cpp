@@ -502,3 +502,176 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
         waitpid(pid, &status, 0);
     }).detach();
 }
+
+namespace {
+
+bool find_vdf_section_bounds(const std::string &txt,
+                             const std::string &section_name,
+                             size_t search_from,
+                             size_t search_end,
+                             size_t &open_brace,
+                             size_t &close_brace) {
+    std::string key = "\"" + section_name + "\"";
+    size_t pos = search_from;
+    while (pos < search_end) {
+        size_t hit = txt.find(key, pos);
+        if (hit == std::string::npos || hit >= search_end) return false;
+        size_t cur = hit + key.size();
+        while (cur < search_end && (txt[cur] == ' ' || txt[cur] == '\t' || txt[cur] == '\r' || txt[cur] == '\n')) {
+            ++cur;
+        }
+        if (cur < search_end && txt[cur] == '{') {
+            open_brace = cur;
+            int depth = 1;
+            bool in_str = false;
+            for (size_t i = cur + 1; i < txt.size(); ++i) {
+                char c = txt[i];
+                if (c == '\\' && in_str) { ++i; continue; }
+                if (c == '"') { in_str = !in_str; continue; }
+                if (in_str) continue;
+                if (c == '{') ++depth;
+                else if (c == '}') {
+                    --depth;
+                    if (depth == 0) {
+                        close_brace = i;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        pos = hit + key.size();
+    }
+    return false;
+}
+
+std::string vdf_escape(const std::string &s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '"') out += "\\\"";
+        else out += c;
+    }
+    return out;
+}
+
+bool patch_single_appid_in_apps(std::string &txt,
+                                size_t apps_open,
+                                size_t &apps_close,
+                                const std::string &appid,
+                                const std::string &escaped_opts) {
+    size_t app_open = 0, app_close = 0;
+    if (find_vdf_section_bounds(txt, appid, apps_open + 1, apps_close, app_open, app_close)) {
+        size_t lpos = txt.find("\"LaunchOptions\"", app_open + 1);
+        if (lpos != std::string::npos && lpos < app_close) {
+            size_t line_start = txt.rfind('\n', lpos);
+            line_start = (line_start == std::string::npos) ? app_open + 1 : line_start + 1;
+            size_t line_end = txt.find('\n', lpos);
+            if (line_end == std::string::npos || line_end > app_close) line_end = app_close;
+            std::string repl = "\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"";
+            std::ptrdiff_t delta = static_cast<std::ptrdiff_t>(repl.size()) - static_cast<std::ptrdiff_t>(line_end - line_start);
+            txt.replace(line_start, line_end - line_start, repl);
+            apps_close = static_cast<size_t>(static_cast<std::ptrdiff_t>(apps_close) + delta);
+            return true;
+        }
+        std::string ins = "\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"";
+        txt.insert(app_open + 1, ins);
+        apps_close += ins.size();
+        return true;
+    }
+    std::string block = "\n\t\t\t\t\"" + appid + "\"\n\t\t\t\t{\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"\n\t\t\t\t}";
+    txt.insert(apps_close, block);
+    apps_close += block.size();
+    return true;
+}
+
+}  // namespace
+
+std::string build_steam_launch_options(const PerfConfig &perf) {
+    std::vector<std::string> parts;
+    if (perf.mangohud != "off") parts.push_back("MANGOHUD=1");
+    if (perf.gamemode) parts.push_back("gamemoderun");
+
+    bool need_gs = (perf.render_res != "native" || perf.fps_limit > 0 || perf.fsr);
+    if (need_gs) {
+        parts.push_back("gamescope");
+        parts.push_back("-f");
+        if (perf.render_res == "720p") { parts.push_back("-w"); parts.push_back("1280"); parts.push_back("-h"); parts.push_back("720"); }
+        else if (perf.render_res == "900p") { parts.push_back("-w"); parts.push_back("1600"); parts.push_back("-h"); parts.push_back("900"); }
+        else if (perf.render_res == "1080p") { parts.push_back("-w"); parts.push_back("1920"); parts.push_back("-h"); parts.push_back("1080"); }
+        if (perf.fps_limit > 0) { parts.push_back("-r"); parts.push_back(std::to_string(perf.fps_limit)); }
+        if (perf.fsr) { parts.push_back("-F"); parts.push_back("fsr"); }
+        if (perf.mangohud != "off") parts.push_back("--mangoapp");
+        parts.push_back("--");
+    }
+    if (parts.empty()) return "";
+    parts.push_back("%command%");
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i > 0) oss << ' ';
+        oss << parts[i];
+    }
+    return oss.str();
+}
+
+SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf) {
+    SteamPerfApplyResult res;
+    res.launch_options = build_steam_launch_options(perf);
+
+    std::string pid_out;
+    int pid_rc = 1;
+    res.steam_running = run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pid_out, pid_rc) && pid_rc == 0;
+    if (res.steam_running) {
+        return res;
+    }
+
+    auto games = list_steam_games();
+    if (games.empty()) return res;
+    std::vector<std::string> appids;
+    appids.reserve(games.size());
+    for (const auto &g : games) appids.push_back(g.appid);
+
+    std::string escaped = vdf_escape(res.launch_options);
+    for (const auto &root : discover_steam_roots()) {
+        fs::path ud = root / "userdata";
+        std::error_code ec;
+        if (!fs::is_directory(ud, ec)) continue;
+        for (const auto &entry : fs::directory_iterator(ud, ec)) {
+            if (!entry.is_directory(ec)) continue;
+            fs::path vdf = entry.path() / "config/localconfig.vdf";
+            if (!fs::exists(vdf, ec)) continue;
+
+            std::ifstream ifs(vdf);
+            if (!ifs.is_open()) continue;
+            std::ostringstream buf;
+            buf << ifs.rdbuf();
+            ifs.close();
+            std::string txt = buf.str();
+
+            size_t apps_open = 0, apps_close = 0;
+            if (!find_vdf_section_bounds(txt, "apps", 0, txt.size(), apps_open, apps_close)) continue;
+
+            fs::copy_file(vdf, vdf.string() + ".bak", fs::copy_options::overwrite_existing, ec);
+            int file_updates = 0;
+            for (const auto &appid : appids) {
+                if (patch_single_appid_in_apps(txt, apps_open, apps_close, appid, escaped)) {
+                    ++file_updates;
+                }
+            }
+            if (file_updates > 0) {
+                fs::path tmp = vdf.string() + ".tmp";
+                std::ofstream ofs(tmp, std::ios::trunc);
+                if (ofs.is_open()) {
+                    ofs << txt;
+                    ofs.close();
+                    fs::rename(tmp, vdf, ec);
+                    ++res.configs_updated;
+                    res.games_updated = std::max(res.games_updated, file_updates);
+                }
+            }
+        }
+    }
+    return res;
+}

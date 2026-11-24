@@ -593,15 +593,20 @@
     if (cfg.mangohud !== "off") parts.push("MANGOHUD=1");
     if (cfg.gamemode) parts.push("gamemoderun");
 
-    const gs = ["gamescope", "-f"];
-    if (cfg.render_res === "720p") gs.push("-w", "1280", "-h", "720");
-    else if (cfg.render_res === "900p") gs.push("-w", "1600", "-h", "900");
-    else if (cfg.render_res === "1080p") gs.push("-w", "1920", "-h", "1080");
-    if (Number(cfg.fps_limit) > 0) gs.push("-r", String(cfg.fps_limit));
-    if (cfg.fsr) gs.push("-F", "fsr");
-    if (cfg.mangohud !== "off") gs.push("--mangoapp");
-    gs.push("--", "%command%");
-    return [...parts, ...gs].join(" ");
+    const needGs = cfg.render_res !== "native" || Number(cfg.fps_limit) > 0 || Boolean(cfg.fsr);
+    if (needGs) {
+      parts.push("gamescope", "-f");
+      if (cfg.render_res === "720p") parts.push("-w", "1280", "-h", "720");
+      else if (cfg.render_res === "900p") parts.push("-w", "1600", "-h", "900");
+      else if (cfg.render_res === "1080p") parts.push("-w", "1920", "-h", "1080");
+      if (Number(cfg.fps_limit) > 0) parts.push("-r", String(cfg.fps_limit));
+      if (cfg.fsr) parts.push("-F", "fsr");
+      if (cfg.mangohud !== "off") parts.push("--mangoapp");
+      parts.push("--");
+    }
+    if (parts.length === 0) return "原生直出（无额外包装参数）";
+    parts.push("%command%");
+    return parts.join(" ");
   }
 
   function renderPerfState() {
@@ -638,7 +643,10 @@
 
     const preview = document.getElementById("perf-cmd-preview");
     if (preview) preview.textContent = buildLaunchOptionString(perfState);
+    forceSoftwareRepaint();
   }
+
+  window.__spinelPerfFeedback = (ok, msg) => showFeedback("perf-feedback", msg || "", !ok);
 
   function sendPerfUpdate(patch) {
     perfState = { ...perfState, ...patch };
@@ -1570,12 +1578,6 @@
       }
     } else if (cmd === "store:log-hide") {
       document.getElementById("store-log-wrap")?.classList.add("hidden");
-    } else if (cmd === "perf:copy") {
-      const str = buildLaunchOptionString(perfState);
-      navigator.clipboard?.writeText(str).then(() => {
-        const btn = document.getElementById("btn-copy-launch");
-        if (btn) { btn.textContent = "已复制!"; setTimeout(() => { btn.textContent = "复制 Steam 启动参数"; }, 1500); }
-      }).catch(() => {});
     } else if (cmd.startsWith("theme:set:")) {
       const tid = cmd.slice(10);
       const chosen = availableThemes.find((t) => t.id === tid);

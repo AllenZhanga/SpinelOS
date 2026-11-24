@@ -372,8 +372,8 @@
             <h3>游戏性能与主机大屏预设</h3>
           </div>
           <div class="perf-launch-preview">
-            <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun gamescope -f -- %command%</code>
-            <button class="btn small" id="btn-copy-launch" data-cmd="perf:copy">复制 Steam 启动参数</button>
+            <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
+            <button class="btn small primary" id="btn-apply-steam" data-cmd="perf:apply-steam">写入全部 Steam 游戏</button>
           </div>
         </div>
 
@@ -416,6 +416,7 @@
             </div>
           </div>
         </div>
+        <div id="perf-feedback" class="feedback-banner hidden"></div>
       </section>
     </div>
 

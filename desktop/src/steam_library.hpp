@@ -15,9 +15,18 @@ struct SteamGameInfo {
     std::string cover_uri;
 };
 
+struct SteamPerfApplyResult {
+    int games_updated = 0;
+    int configs_updated = 0;
+    bool steam_running = false;
+    std::string launch_options;
+};
+
 void ensure_steam_play_preconfig();
 std::vector<SteamGameInfo> list_steam_games();
 void push_steam_library(AppState *state);
 void launch_steam_client(AppState *state);
 void launch_steam_game(const std::string &appid, const PerfConfig &perf);
 void launch_steam_gamepadui(AppState *state, const PerfConfig &perf);
+std::string build_steam_launch_options(const PerfConfig &perf);
+SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf);

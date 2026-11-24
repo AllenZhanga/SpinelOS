@@ -396,6 +396,22 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         update_perf_config(state, "mangohud=" + next);
     } else if (cmd.rfind("perf:set\n", 0) == 0) {
         update_perf_config(state, cmd);
+    } else if (cmd == "perf:apply-steam") {
+        PerfConfig cfg = load_perf_config();
+        SteamPerfApplyResult sr = apply_perf_to_steam_configs(cfg);
+        std::string msg;
+        bool ok = true;
+        if (sr.steam_running) {
+            ok = false;
+            msg = "检测到 Steam 正在运行中（退出时 Steam 会覆盖本地配置）。请先完全退出 Steam 后再点击「写入全部 Steam 游戏」。";
+        } else if (sr.games_updated > 0) {
+            msg = "已成功将当前性能参数直接写入 " + std::to_string(sr.games_updated) + " 款已安装 Steam 游戏的启动配置！";
+        } else {
+            msg = "当前尚未检测到本地已安装的 Steam 游戏；系统全局预设与 MangoHud.conf 已准备就绪。";
+        }
+        eval_js(state->settings_view,
+                "window.__spinelPerfFeedback && window.__spinelPerfFeedback(" +
+                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
     } else if (cmd == "settings:wifi-list") {
         push_wifi_state(state, false);
         push_proxy_config(state);

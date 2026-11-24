@@ -1,6 +1,7 @@
 #include "system_control.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "steam_library.hpp"
 
 #include <sys/stat.h>
 
@@ -374,6 +375,9 @@ void push_perf_config(AppState *state) {
     eval_js(state->desktop_view, script);
     eval_js(state->bar_view, script);
     eval_js(state->cc_view, script);
+    if (state->settings_view) {
+        gtk_widget_queue_draw(GTK_WIDGET(state->settings_view));
+    }
 }
 
 void update_perf_config(AppState *state, const std::string &payload) {
@@ -407,6 +411,22 @@ void update_perf_config(AppState *state, const std::string &payload) {
     sync_mangohud_config(cfg);
     push_perf_config(state);
     native_shell_sync_perf(state);
+
+    if (state && state->settings_view) {
+        SteamPerfApplyResult sr = apply_perf_to_steam_configs(cfg);
+        std::string msg;
+        bool ok = true;
+        if (sr.steam_running) {
+            msg = "系统性能预设与 MangoHud.conf 已保存；检测到 Steam 正在运行，退出 Steam 后点击右侧「写入全部 Steam 游戏」即可同步进库内游戏属性。";
+        } else if (sr.games_updated > 0) {
+            msg = "已自动保存系统预设、MangoHud.conf，并直接写入 " + std::to_string(sr.games_updated) + " 款 Steam 游戏配置！";
+        } else {
+            msg = "已保存系统性能预设与 MangoHud.conf（主机大屏、游戏中心及后续安装的 Steam 游戏均自动生效）。";
+        }
+        eval_js(state->settings_view,
+                "window.__spinelPerfFeedback && window.__spinelPerfFeedback(" +
+                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    }
 }
 
 TelemetrySnapshot collect_telemetry() {

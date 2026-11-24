@@ -1041,9 +1041,9 @@ body.low-fx .lg-orb {
 }
 
 .pill-btn.active {
-  border-color: rgba(56, 189, 248, 0.6);
-  background: rgba(56, 189, 248, 0.2);
-  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
   font-weight: 600;
 }
 
@@ -1779,12 +1779,17 @@ body.theme-light .pill-btn {
 }
 
 body.theme-light .tab-btn.active,
-body.theme-light .pill-btn.active,
 body.theme-light .disk-item.selected,
 body.theme-light .wp-card.active {
   background: rgba(2, 132, 199, 0.15);
   border-color: rgba(2, 132, 199, 0.45);
   color: #0369a1;
+}
+
+body.theme-light .pill-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
 }
 
 body.theme-light .tag,
