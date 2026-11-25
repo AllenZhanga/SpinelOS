@@ -502,6 +502,7 @@ void init_native_shell(GtkApplication *, AppState *) {}
 void shutdown_native_shell(AppState *) {}
 void native_shell_sync_telemetry(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-telemetry"); }
 void native_shell_sync_windows(AppState *) {}
+void native_shell_sync_workspaces(AppState *) {}
 void native_shell_sync_desktop(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-desktop"); }
 void native_shell_sync_wallpaper(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
 void native_shell_sync_theme(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
@@ -586,6 +587,8 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     actions.push_windows = push_windows_to_ui;
     actions.window_toggle = toggle_or_activate_window;
     actions.window_close = close_tracked_window;
+    actions.workspace_switch = +[](int idx1) { activate_tracked_workspace(idx1 - 1); };
+    actions.workspace_step = +[](int delta) { step_tracked_workspace(delta); };
 #endif
 
     dispatch_ipc_command(state, cmd, actions);

@@ -42,6 +42,8 @@ struct IpcHostActions {
     void (*pick_wallpaper)(AppState *) = nullptr;
     void (*window_toggle)(uint64_t wid) = nullptr;
     void (*window_close)(uint64_t wid) = nullptr;
+    void (*workspace_switch)(int index_1based) = nullptr;
+    void (*workspace_step)(int delta) = nullptr;
 };
 
 // Parses either a structured JSON request {"id", "method", "params"} or a

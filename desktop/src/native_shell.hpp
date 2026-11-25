@@ -7,6 +7,7 @@ void shutdown_native_shell(AppState *state);
 
 void native_shell_sync_telemetry(AppState *state);
 void native_shell_sync_windows(AppState *state);
+void native_shell_sync_workspaces(AppState *state);
 void native_shell_sync_desktop(AppState *state);
 void native_shell_sync_wallpaper(AppState *state);
 void native_shell_sync_theme(AppState *state);

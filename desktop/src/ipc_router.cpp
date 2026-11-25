@@ -647,6 +647,12 @@ bool dispatch_ipc_command(AppState *state,
         {"clip:clear", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             clear_clipboard_history();
         }},
+        {"workspace:next", +[](AppState *, const IpcRequest &, const IpcHostActions &a) {
+            if (a.workspace_step) a.workspace_step(1);
+        }},
+        {"workspace:prev", +[](AppState *, const IpcRequest &, const IpcHostActions &a) {
+            if (a.workspace_step) a.workspace_step(-1);
+        }},
     };
 
     // Prefix / parameterized routes (support both "prefix:val" and JSON params)
@@ -818,6 +824,12 @@ bool dispatch_ipc_command(AppState *state,
             auto items = load_clipboard_history();
             if (idx < items.size()) {
                 copy_text_to_clipboard(items[idx].text);
+            }
+        }},
+        {"workspace:switch:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
+            int idx1 = std::atoi(arg_or_param(r, "workspace:switch:", {"index", "num"}).c_str());
+            if (idx1 >= 1 && a.workspace_switch) {
+                a.workspace_switch(idx1);
             }
         }},
     };

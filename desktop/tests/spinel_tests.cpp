@@ -2,6 +2,7 @@
 #include "desktop_apps.hpp"
 #include "ipc_router.hpp"
 #include "native_shell.hpp"
+#include "shell/sni_tray.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
 #include "theme_manager.hpp"
@@ -558,6 +559,42 @@ void test_ipc_router() {
     EXPECT(dispatch_ipc_command(&dummy, "desktop:new-folder", mock_actions, &reply));
     EXPECT(fs::exists(fs::path(home_dir()) / "Desktop" / "新建文件夹"));
     EXPECT(dispatch_ipc_command(&dummy, "settings:net-ip-apply\ndevice=eth0\nmethod=auto", mock_actions, &reply));
+
+    // Workspace IPC dispatch (legacy string & structured JSON-RPC)
+    static int ws_switched = 0;
+    static int ws_step_total = 0;
+    mock_actions.workspace_switch = +[](int idx1) { ws_switched = idx1; };
+    mock_actions.workspace_step = +[](int delta) { ws_step_total += delta; };
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:switch:3", mock_actions, &reply));
+    EXPECT(ws_switched == 3);
+    reply.clear();
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":21,"method":"workspace:switch","params":{"index":2}})", mock_actions, &reply));
+    EXPECT(ws_switched == 2 && reply.find("\"ok\":true") != std::string::npos);
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:next", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:prev", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:next", mock_actions, &reply));
+    EXPECT(ws_step_total == 1);
+
+    // SNI StatusNotifierItem service parsing, DBusMenu label cleanup, and ARGB conversion
+    std::string bus_n, obj_p, skey;
+    EXPECT(parse_sni_service_id("/org/ayatana/NotificationItem/wechat/Menu", ":1.42", bus_n, obj_p, skey));
+    EXPECT(bus_n == ":1.42" && obj_p == "/org/ayatana/NotificationItem/wechat/Menu");
+    EXPECT(parse_sni_service_id("org.kde.StatusNotifierItem-99-1", ":1.99", bus_n, obj_p, skey));
+    EXPECT(bus_n == "org.kde.StatusNotifierItem-99-1" && obj_p == "/StatusNotifierItem");
+    EXPECT(parse_sni_service_id(":1.55/StatusNotifierItem", "", bus_n, obj_p, skey));
+    EXPECT(bus_n == ":1.55" && obj_p == "/StatusNotifierItem" && skey == ":1.55/StatusNotifierItem");
+    EXPECT(!parse_sni_service_id("/StatusNotifierItem", "", bus_n, obj_p, skey));
+    EXPECT(!parse_sni_service_id("", ":1.1", bus_n, obj_p, skey));
+
+    EXPECT(sanitize_sni_menu_label("_File") == "File");
+    EXPECT(sanitize_sni_menu_label("__Help") == "_Help");
+    EXPECT(sanitize_sni_menu_label("退出(_Q)") == "退出(Q)");
+
+    const uint8_t be_px[8] = {128, 255, 0, 64, 255, 10, 20, 30};
+    uint32_t out_px[2]{};
+    EXPECT(convert_argb32_be_to_cairo_argb32(be_px, 2, 1, 8, reinterpret_cast<uint8_t *>(out_px)));
+    EXPECT(out_px[0] == ((128u << 24) | (128u << 16) | (0u << 8) | 32u));
+    EXPECT(out_px[1] == ((255u << 24) | (10u << 16) | (20u << 8) | 30u));
 }
 
 }  // namespace

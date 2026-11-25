@@ -1,8 +1,10 @@
 #include "shell_internal.hpp"
+#include "shell/sni_tray.hpp"
 #include "common.hpp"
 
 #include <gtk4-layer-shell.h>
 
+#include <cmath>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -309,6 +311,39 @@ void sync_top_bar_app_menus(NativeShellState *ns,
     }
 }
 
+void sync_top_bar_workspaces(NativeShellState *ns) {
+    if (!ns || !ns->bar_ws_box) return;
+    while (GtkWidget *c = gtk_widget_get_first_child(ns->bar_ws_box)) {
+        gtk_box_remove(GTK_BOX(ns->bar_ws_box), c);
+    }
+
+    auto list = list_tracked_workspaces();
+    bool show = list.size() > 1;
+    gtk_widget_set_visible(ns->bar_ws_box, show);
+    if (ns->bar_ws_sep) gtk_widget_set_visible(ns->bar_ws_sep, show);
+    if (!show) return;
+
+    for (const auto &ws : list) {
+        std::string badge = format_workspace_badge_label(ws.index, ws.name);
+        std::string cmd = "workspace:switch:" + std::to_string(ws.index + 1);
+        GtkWidget *btn = make_cmd_button(ns->app_state, badge.c_str(), "spinel-ws-btn", cmd.c_str());
+        if (ws.active) gtk_widget_add_css_class(btn, "active");
+        if (ws.urgent) gtk_widget_add_css_class(btn, "urgent");
+        std::string tip = (ws.name.empty() ? ("工作区 " + std::to_string(ws.index + 1)) : ws.name) +
+                          "（点击切换 · 滚轮上下切换）";
+        gtk_widget_set_tooltip_text(btn, tip.c_str());
+        gtk_box_append(GTK_BOX(ns->bar_ws_box), btn);
+    }
+}
+
+void sync_top_bar_tray(NativeShellState *ns) {
+    if (!ns || !ns->bar_tray_box) return;
+    rebuild_sni_tray_box(ns->bar_tray_box, 16);
+    if (ns->bar_tray_sep) {
+        gtk_widget_set_visible(ns->bar_tray_sep, gtk_widget_get_visible(ns->bar_tray_box));
+    }
+}
+
 void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     AppState *state = ns->app_state;
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
@@ -362,11 +397,37 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_label_set_ellipsize(GTK_LABEL(ns->bar_active_lbl), PANGO_ELLIPSIZE_END);
     gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 16);
 
+    auto make_bar_sep = +[]() -> GtkWidget * {
+        GtkWidget *s = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class(s, "spinel-bar-sep");
+        gtk_widget_set_size_request(s, 1, 12);
+        gtk_widget_set_valign(s, GTK_ALIGN_CENTER);
+        return s;
+    };
+
     ns->bar_app_menus = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 1);
+
+    ns->bar_ws_sep = make_bar_sep();
+    gtk_widget_set_visible(ns->bar_ws_sep, FALSE);
+
+    ns->bar_ws_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_widget_add_css_class(ns->bar_ws_box, "spinel-ws-strip");
+    gtk_widget_set_valign(ns->bar_ws_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(ns->bar_ws_box, FALSE);
+    GtkEventController *ws_scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(ws_scroll, "scroll", G_CALLBACK(+[](GtkEventControllerScroll *, double, double dy, gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n || std::abs(dy) < 0.05) return GDK_EVENT_PROPAGATE;
+        trigger_cmd(n->app_state, dy > 0.0 ? "workspace:next" : "workspace:prev");
+        return GDK_EVENT_STOP;
+    }), ns);
+    gtk_widget_add_controller(ns->bar_ws_box, ws_scroll);
 
     gtk_box_append(GTK_BOX(left), brand_btn);
     gtk_box_append(GTK_BOX(left), ns->bar_active_lbl);
     gtk_box_append(GTK_BOX(left), ns->bar_app_menus);
+    gtk_box_append(GTK_BOX(left), ns->bar_ws_sep);
+    gtk_box_append(GTK_BOX(left), ns->bar_ws_box);
 
     std::string init_name;
     sync_top_bar_app_menus(ns, nullptr, init_name);
@@ -664,14 +725,15 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     }), ns);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(notif_clock_btn), npop);
 
-    auto make_bar_sep = +[]() -> GtkWidget * {
-        GtkWidget *s = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-        gtk_widget_add_css_class(s, "spinel-bar-sep");
-        gtk_widget_set_size_request(s, 1, 12);
-        gtk_widget_set_valign(s, GTK_ALIGN_CENTER);
-        return s;
-    };
+    ns->bar_tray_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_widget_add_css_class(ns->bar_tray_box, "spinel-tray-box");
+    gtk_widget_set_valign(ns->bar_tray_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(ns->bar_tray_box, FALSE);
+    ns->bar_tray_sep = make_bar_sep();
+    gtk_widget_set_visible(ns->bar_tray_sep, FALSE);
 
+    gtk_box_append(GTK_BOX(right), ns->bar_tray_box);
+    gtk_box_append(GTK_BOX(right), ns->bar_tray_sep);
     gtk_box_append(GTK_BOX(right), mem_btn);
     gtk_box_append(GTK_BOX(right), ime_btn);
     gtk_box_append(GTK_BOX(right), clip_btn);

@@ -1,11 +1,13 @@
 #include "window_tracker.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "ext-workspace-v1-client-protocol.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 #include <wayland-client.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -27,6 +29,22 @@ struct TrackedWindow {
     bool ready = false;
 };
 
+struct TrackedWorkspaceGroup {
+    ext_workspace_group_handle_v1 *handle = nullptr;
+};
+
+struct TrackedWorkspace {
+    uint64_t seq = 0;
+    ext_workspace_handle_v1 *handle = nullptr;
+    std::string id;
+    std::string name;
+    std::vector<uint32_t> coordinates;
+    bool active = false;
+    bool urgent = false;
+    bool hidden = false;
+    bool can_activate = true;
+};
+
 struct WaylandSource {
     GSource base;
     GPollFD poll_fd;
@@ -39,12 +57,138 @@ struct TrackerCtx {
     wl_registry *registry = nullptr;
     wl_seat *seat = nullptr;
     zwlr_foreign_toplevel_manager_v1 *manager = nullptr;
+    ext_workspace_manager_v1 *ws_manager = nullptr;
     uint64_t next_id = 1;
+    uint64_t next_ws_seq = 1;
     std::vector<std::unique_ptr<TrackedWindow>> windows;
+    std::vector<std::unique_ptr<TrackedWorkspaceGroup>> ws_groups;
+    std::vector<std::unique_ptr<TrackedWorkspace>> workspaces;
     GSource *glib_source = nullptr;
 };
 
 TrackerCtx g_ctx;
+
+void sort_tracked_workspaces() {
+    std::stable_sort(g_ctx.workspaces.begin(), g_ctx.workspaces.end(),
+                     [](const std::unique_ptr<TrackedWorkspace> &a, const std::unique_ptr<TrackedWorkspace> &b) {
+                         if (!a->coordinates.empty() && !b->coordinates.empty() && a->coordinates != b->coordinates) {
+                             return a->coordinates < b->coordinates;
+                         }
+                         return a->seq < b->seq;
+                     });
+}
+
+void on_ws_group_caps(void *, ext_workspace_group_handle_v1 *, uint32_t) {}
+void on_ws_group_output_enter(void *, ext_workspace_group_handle_v1 *, wl_output *) {}
+void on_ws_group_output_leave(void *, ext_workspace_group_handle_v1 *, wl_output *) {}
+void on_ws_group_ws_enter(void *, ext_workspace_group_handle_v1 *, ext_workspace_handle_v1 *) {}
+void on_ws_group_ws_leave(void *, ext_workspace_group_handle_v1 *, ext_workspace_handle_v1 *) {}
+void on_ws_group_removed(void *, ext_workspace_group_handle_v1 *group) {
+    g_ctx.ws_groups.erase(
+        std::remove_if(g_ctx.ws_groups.begin(), g_ctx.ws_groups.end(),
+                       [group](const std::unique_ptr<TrackedWorkspaceGroup> &g) {
+                           return g->handle == group;
+                       }),
+        g_ctx.ws_groups.end());
+    ext_workspace_group_handle_v1_destroy(group);
+}
+
+const ext_workspace_group_handle_v1_listener kWsGroupListener = {
+    on_ws_group_caps,
+    on_ws_group_output_enter,
+    on_ws_group_output_leave,
+    on_ws_group_ws_enter,
+    on_ws_group_ws_leave,
+    on_ws_group_removed
+};
+
+void on_ws_id(void *data, ext_workspace_handle_v1 *, const char *id) {
+    if (auto *ws = static_cast<TrackedWorkspace *>(data)) {
+        ws->id = id ? id : "";
+    }
+}
+
+void on_ws_name(void *data, ext_workspace_handle_v1 *, const char *name) {
+    if (auto *ws = static_cast<TrackedWorkspace *>(data)) {
+        ws->name = name ? name : "";
+    }
+}
+
+void on_ws_coordinates(void *data, ext_workspace_handle_v1 *, wl_array *coords) {
+    auto *ws = static_cast<TrackedWorkspace *>(data);
+    if (!ws || !coords) return;
+    ws->coordinates.clear();
+    const auto *vals = static_cast<const uint32_t *>(coords->data);
+    size_t n = coords->size / sizeof(uint32_t);
+    ws->coordinates.assign(vals, vals + n);
+}
+
+void on_ws_state(void *data, ext_workspace_handle_v1 *, uint32_t state_bits) {
+    auto *ws = static_cast<TrackedWorkspace *>(data);
+    if (!ws) return;
+    ws->active = (state_bits & EXT_WORKSPACE_HANDLE_V1_STATE_ACTIVE) != 0;
+    ws->urgent = (state_bits & EXT_WORKSPACE_HANDLE_V1_STATE_URGENT) != 0;
+    ws->hidden = (state_bits & EXT_WORKSPACE_HANDLE_V1_STATE_HIDDEN) != 0;
+}
+
+void on_ws_caps(void *data, ext_workspace_handle_v1 *, uint32_t caps) {
+    auto *ws = static_cast<TrackedWorkspace *>(data);
+    if (!ws) return;
+    ws->can_activate = (caps & EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE) != 0;
+}
+
+void on_ws_removed(void *, ext_workspace_handle_v1 *handle) {
+    g_ctx.workspaces.erase(
+        std::remove_if(g_ctx.workspaces.begin(), g_ctx.workspaces.end(),
+                       [handle](const std::unique_ptr<TrackedWorkspace> &item) {
+                           return item->handle == handle;
+                       }),
+        g_ctx.workspaces.end());
+    ext_workspace_handle_v1_destroy(handle);
+}
+
+const ext_workspace_handle_v1_listener kWsHandleListener = {
+    on_ws_id,
+    on_ws_name,
+    on_ws_coordinates,
+    on_ws_state,
+    on_ws_caps,
+    on_ws_removed
+};
+
+void on_ws_mgr_group(void *, ext_workspace_manager_v1 *, ext_workspace_group_handle_v1 *group) {
+    auto grp = std::make_unique<TrackedWorkspaceGroup>();
+    grp->handle = group;
+    ext_workspace_group_handle_v1_add_listener(group, &kWsGroupListener, grp.get());
+    g_ctx.ws_groups.push_back(std::move(grp));
+}
+
+void on_ws_mgr_workspace(void *, ext_workspace_manager_v1 *, ext_workspace_handle_v1 *ws_handle) {
+    auto ws = std::make_unique<TrackedWorkspace>();
+    ws->seq = g_ctx.next_ws_seq++;
+    ws->handle = ws_handle;
+    ext_workspace_handle_v1_add_listener(ws_handle, &kWsHandleListener, ws.get());
+    g_ctx.workspaces.push_back(std::move(ws));
+}
+
+void on_ws_mgr_done(void *, ext_workspace_manager_v1 *) {
+    sort_tracked_workspaces();
+    native_shell_sync_workspaces(g_ctx.state);
+}
+
+void on_ws_mgr_finished(void *, ext_workspace_manager_v1 *mgr) {
+    if (g_ctx.ws_manager == mgr) {
+        ext_workspace_manager_v1_destroy(mgr);
+        g_ctx.ws_manager = nullptr;
+    }
+}
+
+const ext_workspace_manager_v1_listener kWsMgrListener = {
+    on_ws_mgr_group,
+    on_ws_mgr_workspace,
+    on_ws_mgr_done,
+    on_ws_mgr_finished
+};
 
 TrackedWindow *find_window_by_id(uint64_t id) {
     for (auto &w : g_ctx.windows) {
@@ -149,6 +293,12 @@ void on_registry_global(void *, wl_registry *registry, uint32_t name, const char
             wl_registry_bind(registry, name, &zwlr_foreign_toplevel_manager_v1_interface, ver)
         );
         zwlr_foreign_toplevel_manager_v1_add_listener(g_ctx.manager, &kManagerListener, nullptr);
+    } else if (std::strcmp(interface, ext_workspace_manager_v1_interface.name) == 0 && !g_ctx.ws_manager) {
+        uint32_t ver = std::min<uint32_t>(version, 1);
+        g_ctx.ws_manager = static_cast<ext_workspace_manager_v1 *>(
+            wl_registry_bind(registry, name, &ext_workspace_manager_v1_interface, ver)
+        );
+        ext_workspace_manager_v1_add_listener(g_ctx.ws_manager, &kWsMgrListener, nullptr);
     } else if (std::strcmp(interface, wl_seat_interface.name) == 0 && !g_ctx.seat) {
         g_ctx.seat = static_cast<wl_seat *>(wl_registry_bind(registry, name, &wl_seat_interface, 1));
     }
@@ -215,6 +365,8 @@ void init_window_tracker(AppState *state) {
     g_ctx.registry = wl_display_get_registry(g_ctx.display);
     wl_registry_add_listener(g_ctx.registry, &kRegistryListener, nullptr);
     wl_display_roundtrip(g_ctx.display);
+    wl_display_roundtrip(g_ctx.display);
+    native_shell_sync_workspaces(state);
 
     GSource *gs = g_source_new(&kWlSourceFuncs, sizeof(WaylandSource));
     auto *src = reinterpret_cast<WaylandSource *>(gs);
@@ -238,6 +390,18 @@ void shutdown_window_tracker() {
         if (w->handle) zwlr_foreign_toplevel_handle_v1_destroy(w->handle);
     }
     g_ctx.windows.clear();
+    for (auto &ws : g_ctx.workspaces) {
+        if (ws->handle) ext_workspace_handle_v1_destroy(ws->handle);
+    }
+    g_ctx.workspaces.clear();
+    for (auto &grp : g_ctx.ws_groups) {
+        if (grp->handle) ext_workspace_group_handle_v1_destroy(grp->handle);
+    }
+    g_ctx.ws_groups.clear();
+    if (g_ctx.ws_manager) {
+        ext_workspace_manager_v1_destroy(g_ctx.ws_manager);
+        g_ctx.ws_manager = nullptr;
+    }
     if (g_ctx.manager) {
         zwlr_foreign_toplevel_manager_v1_destroy(g_ctx.manager);
         g_ctx.manager = nullptr;
@@ -361,4 +525,71 @@ void close_tracked_window(uint64_t id) {
     if (!w || !w->handle || !g_ctx.display) return;
     zwlr_foreign_toplevel_handle_v1_close(w->handle);
     wl_display_flush(g_ctx.display);
+}
+
+std::string format_workspace_badge_label(int index_0based, const std::string &ws_name) {
+    std::string trimmed = trim_copy(ws_name);
+    if (trimmed.empty()) {
+        return std::to_string(index_0based + 1);
+    }
+    // Extract concise number for standard prefixes like "工作区 1", "Desktop 2", "Workspace 3"
+    size_t i = trimmed.size();
+    while (i > 0 && std::isdigit(static_cast<unsigned char>(trimmed[i - 1]))) {
+        --i;
+    }
+    if (i < trimmed.size() && (i == 0 || std::isspace(static_cast<unsigned char>(trimmed[i - 1])))) {
+        return trimmed.substr(i);
+    }
+    if (trimmed.size() <= 8) return trimmed;
+    return std::to_string(index_0based + 1);
+}
+
+std::vector<TrackedWorkspaceInfo> list_tracked_workspaces() {
+    std::vector<TrackedWorkspaceInfo> out;
+    int idx = 0;
+    for (const auto &ws : g_ctx.workspaces) {
+        if (ws->hidden) continue;
+        TrackedWorkspaceInfo info;
+        info.index = idx++;
+        info.id = ws->id;
+        info.name = ws->name;
+        info.active = ws->active;
+        info.urgent = ws->urgent;
+        info.hidden = ws->hidden;
+        info.can_activate = ws->can_activate;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+bool activate_tracked_workspace(int index_0based) {
+    if (index_0based < 0 || !g_ctx.ws_manager || !g_ctx.display) return false;
+    int cur_idx = 0;
+    for (const auto &ws : g_ctx.workspaces) {
+        if (ws->hidden) continue;
+        if (cur_idx == index_0based) {
+            if (!ws->handle) return false;
+            ext_workspace_handle_v1_activate(ws->handle);
+            ext_workspace_manager_v1_commit(g_ctx.ws_manager);
+            wl_display_flush(g_ctx.display);
+            return true;
+        }
+        ++cur_idx;
+    }
+    return false;
+}
+
+bool step_tracked_workspace(int delta) {
+    auto list = list_tracked_workspaces();
+    if (list.empty()) return false;
+    int active_idx = 0;
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i].active) {
+            active_idx = static_cast<int>(i);
+            break;
+        }
+    }
+    int n = static_cast<int>(list.size());
+    int next_idx = ((active_idx + delta) % n + n) % n;
+    return activate_tracked_workspace(next_idx);
 }

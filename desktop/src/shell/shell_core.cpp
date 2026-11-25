@@ -1,4 +1,5 @@
 #include "shell_internal.hpp"
+#include "shell/sni_tray.hpp"
 #include "common.hpp"
 
 #include <pango/pangocairo.h>
@@ -1028,6 +1029,11 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     shell_internal::build_native_launcher(app, ns);
     shell_internal::build_native_switcher(app, ns);
     shell_internal::build_osd_window(app, ns);
+    init_sni_tray(+[](void *d) {
+        shell_internal::sync_top_bar_tray(static_cast<NativeShellState *>(d));
+    }, ns);
+    shell_internal::sync_top_bar_workspaces(ns);
+    shell_internal::sync_top_bar_tray(ns);
     shell_internal::sync_monitor_wallpapers(app, ns);
     if (GdkDisplay *disp = gdk_display_get_default()) {
         if (GListModel *mons = gdk_display_get_monitors(disp)) {
@@ -1049,6 +1055,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
 void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
+    shutdown_sni_tray();
     shell_internal::close_startup_splash(ns);
     if (ns->osd_timer) g_source_remove(ns->osd_timer);
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
@@ -1237,6 +1244,11 @@ void native_shell_sync_desktop(AppState *state) {
     if (!state || !state->native) return;
     state->native->desktop_apps = list_desktop_apps();
     shell_internal::rebuild_desktop_shortcuts(state->native);
+}
+
+void native_shell_sync_workspaces(AppState *state) {
+    if (!state || !state->native) return;
+    shell_internal::sync_top_bar_workspaces(state->native);
 }
 
 void native_shell_sync_theme(AppState *state) {

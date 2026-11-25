@@ -86,6 +86,10 @@ struct NativeShellState {
     GtkWidget *bar_active_lbl = nullptr;
     GtkWidget *bar_app_menus = nullptr;
     std::string bar_menu_key;
+    GtkWidget *bar_ws_sep = nullptr;
+    GtkWidget *bar_ws_box = nullptr;
+    GtkWidget *bar_tray_box = nullptr;
+    GtkWidget *bar_tray_sep = nullptr;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_ime_lbl = nullptr;
     GtkWidget *bar_vol_btn = nullptr;
@@ -287,6 +291,8 @@ GtkWidget *make_glyph_icon_btn(AppState *state, BarGlyph kind, const char *toolt
 void sync_top_bar_app_menus(NativeShellState *ns,
                             const TrackedWindowInfo *active_win,
                             std::string &out_display_name);
+void sync_top_bar_workspaces(NativeShellState *ns);
+void sync_top_bar_tray(NativeShellState *ns);
 void build_native_top_bar(GtkApplication *app, NativeShellState *ns);
 
 // Desktop & Multi-Monitor

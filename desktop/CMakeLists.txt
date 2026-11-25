@@ -23,6 +23,15 @@ set(TOPLEVEL_XML "${WLR_PROTOCOLS_DATADIR}/unstable/wlr-foreign-toplevel-managem
 set(TOPLEVEL_HDR "${CMAKE_CURRENT_BINARY_DIR}/wlr-foreign-toplevel-management-unstable-v1-client-protocol.h")
 set(TOPLEVEL_SRC "${CMAKE_CURRENT_BINARY_DIR}/wlr-foreign-toplevel-management-unstable-v1-protocol.c")
 
+pkg_get_variable(WAYLAND_PROTOCOLS_DATADIR wayland-protocols pkgdatadir)
+if(WAYLAND_PROTOCOLS_DATADIR AND EXISTS "${WAYLAND_PROTOCOLS_DATADIR}/staging/ext-workspace/ext-workspace-v1.xml")
+    set(EXT_WORKSPACE_XML "${WAYLAND_PROTOCOLS_DATADIR}/staging/ext-workspace/ext-workspace-v1.xml")
+else()
+    set(EXT_WORKSPACE_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocols/ext-workspace-v1.xml")
+endif()
+set(EXT_WORKSPACE_HDR "${CMAKE_CURRENT_BINARY_DIR}/ext-workspace-v1-client-protocol.h")
+set(EXT_WORKSPACE_SRC "${CMAKE_CURRENT_BINARY_DIR}/ext-workspace-v1-protocol.c")
+
 add_custom_command(
     OUTPUT "${TOPLEVEL_HDR}"
     COMMAND "${WAYLAND_SCANNER}" client-header "${TOPLEVEL_XML}" "${TOPLEVEL_HDR}"
@@ -37,12 +46,26 @@ add_custom_command(
     COMMENT "Generating wlr-foreign-toplevel-management protocol code"
 )
 
+add_custom_command(
+    OUTPUT "${EXT_WORKSPACE_HDR}"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${EXT_WORKSPACE_XML}" "${EXT_WORKSPACE_HDR}"
+    DEPENDS "${EXT_WORKSPACE_XML}"
+    COMMENT "Generating ext-workspace-v1 client header"
+)
+
+add_custom_command(
+    OUTPUT "${EXT_WORKSPACE_SRC}"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${EXT_WORKSPACE_XML}" "${EXT_WORKSPACE_SRC}"
+    DEPENDS "${EXT_WORKSPACE_XML}"
+    COMMENT "Generating ext-workspace-v1 protocol code"
+)
+
 add_custom_target(spinel_wayland_protos
-    DEPENDS "${TOPLEVEL_HDR}" "${TOPLEVEL_SRC}"
+    DEPENDS "${TOPLEVEL_HDR}" "${TOPLEVEL_SRC}" "${EXT_WORKSPACE_HDR}" "${EXT_WORKSPACE_SRC}"
 )
 
 set_source_files_properties(src/window_tracker.cpp PROPERTIES
-    OBJECT_DEPENDS "${TOPLEVEL_HDR}"
+    OBJECT_DEPENDS "${TOPLEVEL_HDR};${EXT_WORKSPACE_HDR}"
 )
 
 add_executable(spinel-shell
@@ -59,12 +82,15 @@ add_executable(spinel-shell
     src/theme_manager.cpp
     src/shell/shell_core.cpp
     src/shell/top_bar.cpp
+    src/shell/sni_tray.cpp
     src/shell/desktop_monitors.cpp
     src/shell/dock.cpp
     src/shell/overlays.cpp
     src/window_tracker.cpp
     "${TOPLEVEL_HDR}"
     "${TOPLEVEL_SRC}"
+    "${EXT_WORKSPACE_HDR}"
+    "${EXT_WORKSPACE_SRC}"
 )
 
 add_dependencies(spinel-shell spinel_wayland_protos)
@@ -165,6 +191,7 @@ add_executable(spinel-tests
     src/theme_manager.cpp
     src/desktop_apps.cpp
     src/steam_library.cpp
+    src/shell/sni_tray.cpp
     src/sys/network.cpp
     src/sys/display_input.cpp
     src/sys/audio_power.cpp
