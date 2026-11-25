@@ -34,11 +34,23 @@ grep -vE '^\s*(#|$)' "${WORKSPACE}/archiso/packages.custom.x86_64" >> "${PROFILE
 sort -u "${PROFILE_DIR}/packages.x86_64" -o "${PROFILE_DIR}/packages.x86_64"
 
 cp -a "${WORKSPACE}/archiso/airootfs/." "${PROFILE_DIR}/airootfs/"
+find "${PROFILE_DIR}/airootfs" -name '.DS_Store' -delete
 # Ensure custom os-release & branding replace releng defaults cleanly
 cp -f "${WORKSPACE}/archiso/airootfs/etc/os-release" "${PROFILE_DIR}/airootfs/etc/os-release"
 if [ -f "${WORKSPACE}/archiso/airootfs/usr/share/pixmaps/spinelos.png" ]; then
-  mkdir -p "${PROFILE_DIR}/airootfs/usr/share/pixmaps"
-  cp -f "${WORKSPACE}/archiso/airootfs/usr/share/pixmaps/spinelos.png" "${PROFILE_DIR}/airootfs/usr/share/pixmaps/archlinux-logo.png"
+  mkdir -p "${PROFILE_DIR}/airootfs/usr/share/libalpm/hooks"
+  cat > "${PROFILE_DIR}/airootfs/usr/share/libalpm/hooks/99-spinelos-logo.hook" <<'EOF'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = filesystem
+
+[Action]
+Description = Branding archlinux-logo.png with SpinelOS logo...
+When = PostTransaction
+Exec = /bin/sh -c 'if [ -f /usr/share/pixmaps/spinelos.png ]; then cp -f /usr/share/pixmaps/spinelos.png /usr/share/pixmaps/archlinux-logo.png; fi'
+EOF
 fi
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos"
 cat > "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos/NOTICE-THIRD-PARTY.txt" <<'EOF'
