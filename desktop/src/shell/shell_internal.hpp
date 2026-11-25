@@ -54,6 +54,8 @@ struct DesktopIconDrawCtx {
 
 enum class BarGlyph {
     Wifi,
+    Ethernet,
+    Offline,
     Search,
     ControlCenter,
     Reboot,
@@ -69,6 +71,7 @@ enum class BarGlyph {
     Volume,
     Mute,
     Brightness,
+    Battery,
     Dnd,
     Bell
 };
@@ -84,13 +87,22 @@ struct NativeShellState {
     GtkWidget *bar_app_menus = nullptr;
     std::string bar_menu_key;
     GtkWidget *bar_mem_lbl = nullptr;
+    GtkWidget *bar_ime_lbl = nullptr;
+    GtkWidget *bar_vol_btn = nullptr;
+    GtkWidget *bar_vol_da = nullptr;
+    bool bar_vol_muted = false;
+    GtkWidget *bar_bat_box = nullptr;
     GtkWidget *bar_bat_lbl = nullptr;
     GtkWidget *clip_popover = nullptr;
     GtkWidget *clip_list_box = nullptr;
     GtkWidget *notif_popover = nullptr;
     GtkWidget *notif_list_box = nullptr;
+    GtkWidget *bar_notif_da = nullptr;
+    bool bar_notif_dnd = false;
     uint32_t notif_cleared_max_id = 0;
     GtkWidget *bar_net_btn = nullptr;
+    GtkWidget *bar_net_da = nullptr;
+    std::string bar_net_kind = "wifi";
     GtkWidget *bar_cc_btn = nullptr;
     GtkWidget *bar_clock_lbl = nullptr;
     guint clock_timer_id = 0;
@@ -101,6 +113,13 @@ struct NativeShellState {
     GtkWidget *desktop_bg_da = nullptr;
     GtkWidget *desktop_flow = nullptr;
     GtkWidget *desktop_popover = nullptr;
+    GtkWidget *desktop_entry_popover = nullptr;
+    std::string desktop_ctx_path;
+    bool desktop_ctx_is_dir = false;
+    bool desktop_ctx_is_desktop_file = false;
+    bool desktop_ctx_is_exec = false;
+    GFileMonitor *desktop_dir_monitor = nullptr;
+    guint desktop_refresh_timer = 0;
     std::string wallpaper = "crystal-blue";
     struct ExtraMonitorBg {
         GdkMonitor *mon = nullptr;

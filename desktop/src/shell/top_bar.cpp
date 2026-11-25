@@ -86,7 +86,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
 
     std::string profile = "finder";
     uint64_t wid = 0;
-    out_display_name = "访达";
+    out_display_name = "桌面";
 
     if (active_win) {
         wid = active_win->id;
@@ -122,14 +122,36 @@ void sync_top_bar_app_menus(NativeShellState *ns,
         } else if (hay.find("spinel-files") != std::string::npos || hay.find("org.spinelos.files") != std::string::npos ||
                    hay.find("thunar") != std::string::npos || hay.find("文件管理") != std::string::npos) {
             profile = "files";
-            out_display_name = "文件管理";
+            out_display_name = "Spinel Files";
         } else if (hay.find("steam") != std::string::npos || hay.find("gamescope") != std::string::npos) {
             profile = "steam";
             out_display_name = hay.find("gamescope") != std::string::npos ? "主机大屏" : "Steam";
         } else {
             profile = "generic";
-            out_display_name = !active_win->title.empty() ? active_win->title :
-                               (!active_win->app_id.empty() ? active_win->app_id : "应用");
+            std::string short_name;
+            std::string laid = to_lower_copy(trim_copy(active_win->app_id));
+            if (!laid.empty()) {
+                for (const auto &a : ns->desktop_apps) {
+                    if (to_lower_copy(a.id) == laid && !a.name.empty()) {
+                        short_name = a.name;
+                        break;
+                    }
+                }
+                if (short_name.empty()) {
+                    std::string s = trim_copy(active_win->app_id);
+                    if (s.size() > 8 && to_lower_copy(s.substr(s.size() - 8)) == ".desktop") {
+                        s = s.substr(0, s.size() - 8);
+                    }
+                    auto dot = s.rfind('.');
+                    if (dot != std::string::npos && dot + 1 < s.size()) s = s.substr(dot + 1);
+                    if (!s.empty()) {
+                        s[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[0])));
+                        short_name = s;
+                    }
+                }
+            }
+            out_display_name = !short_name.empty() ? short_name :
+                               (!active_win->title.empty() ? active_win->title : "应用");
         }
     }
 
@@ -145,8 +167,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
     std::string toggle_cmd = "window:toggle:" + std::to_string(wid);
 
     if (profile == "finder") {
-        add_topbar_menu(ns, "文件", {
-            {"新建桌面文件夹", "desktop:new-folder"},
+        add_topbar_menu(ns, "桌面", {
+            {"新建文件夹", "desktop:new-folder"},
             {"在文件管理中打开桌面", "desktop:open-folder"},
             {nullptr, ""},
             {"打开文件管理", "launch:files"},
@@ -292,7 +314,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelTopBar");
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, -1, 28);
+    gtk_window_set_default_size(win, -1, 30);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-bar");
@@ -305,7 +327,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(root, "spinel-topbar");
-    gtk_widget_set_size_request(root, -1, 28);
+    gtk_widget_set_size_request(root, -1, 30);
 
     GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_set_hexpand(left, TRUE);
@@ -314,23 +336,20 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
     GtkWidget *brand_btn = gtk_menu_button_new();
     gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(brand_btn), FALSE);
-    gtk_widget_add_css_class(brand_btn, "spinel-bar-menubtn");
+    gtk_widget_add_css_class(brand_btn, "spinel-bar-brandbtn");
     gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 系统菜单");
     GtkWidget *gem_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(gem_da, 18, 18);
+    gtk_widget_set_size_request(gem_da, 17, 17);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, ns, nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(brand_btn), gem_da);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
         {"关于 SpinelOS", "settings:open:appearance"},
-        {"系统设置...", "settings:open:display"},
-        {"声音与电源...", "settings:open:audio"},
         {nullptr, ""},
-        {"区域截图 (Print/Ctrl+Shift+4)", "system:screenshot:area"},
-        {"游戏与启动中心", "games:open"},
+        {"系统设置...", "settings:open:display"},
         {"应用商店", "store:open"},
-        {"系统监视器（进程与日志）", "monitor:open:procs"},
-        {"Spinel Doctor 健康体检", "doctor:open"},
-        {"权限与安全...", "settings:open:perms"},
+        {"游戏与启动中心", "games:open"},
+        {"系统监视器", "monitor:open:procs"},
+        {"Spinel Doctor 体检", "doctor:open"},
         {nullptr, ""},
         {"锁定屏幕", "system:lock"},
         {"睡眠", "system:suspend"},
@@ -338,10 +357,10 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         {"关机...", "power:shutdown"}
     }));
 
-    ns->bar_active_lbl = gtk_label_new("访达");
+    ns->bar_active_lbl = gtk_label_new("桌面");
     gtk_widget_add_css_class(ns->bar_active_lbl, "spinel-bar-active");
     gtk_label_set_ellipsize(GTK_LABEL(ns->bar_active_lbl), PANGO_ELLIPSIZE_END);
-    gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 24);
+    gtk_label_set_max_width_chars(GTK_LABEL(ns->bar_active_lbl), 16);
 
     ns->bar_app_menus = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 1);
 
@@ -352,15 +371,21 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     std::string init_name;
     sync_top_bar_app_menus(ns, nullptr, init_name);
 
-    GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
+    GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_set_halign(right, GTK_ALIGN_END);
     gtk_widget_set_valign(right, GTK_ALIGN_CENTER);
 
-    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "monitor:open:procs");
+    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-pill-btn", "monitor:open:procs");
     ns->bar_mem_lbl = gtk_label_new("--");
     gtk_widget_add_css_class(ns->bar_mem_lbl, "spinel-bar-mem");
     gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
-    gtk_widget_set_tooltip_text(mem_btn, "内存占用（点击打开系统监视器）");
+    gtk_widget_set_tooltip_text(mem_btn, "当前内存占用（点击打开系统监视器）");
+
+    GtkWidget *ime_btn = make_cmd_button(state, nullptr, "spinel-bar-pill-btn", "ime:toggle");
+    ns->bar_ime_lbl = gtk_label_new("EN");
+    gtk_widget_add_css_class(ns->bar_ime_lbl, "spinel-bar-ime");
+    gtk_button_set_child(GTK_BUTTON(ime_btn), ns->bar_ime_lbl);
+    gtk_widget_set_tooltip_text(ime_btn, "输入法状态（点击切换中/英输入法）");
 
     auto rebuild_clip_popover = +[](NativeShellState *n) {
         if (!n || !n->clip_list_box) return;
@@ -449,7 +474,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(clip_btn, "spinel-bar-menubtn");
     gtk_widget_set_tooltip_text(clip_btn, "剪贴板历史（最多 10 条）");
     GtkWidget *clip_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(clip_da, 15, 15);
+    gtk_widget_set_size_request(clip_da, 16, 16);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(clip_da), draw_glyph_cb,
                                    reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Clipboard)), nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(clip_btn), clip_da);
@@ -549,15 +574,78 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         }
     };
 
-    GtkWidget *notif_btn = gtk_menu_button_new();
-    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(notif_btn), FALSE);
-    gtk_widget_add_css_class(notif_btn, "spinel-bar-menubtn");
-    gtk_widget_set_tooltip_text(notif_btn, "通知历史与勿扰开关");
+    GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "全局搜索 / 启动器 (Alt+Space)", "launcher:toggle");
+
+    ns->bar_vol_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "system:audio-mute-toggle");
+    gtk_widget_set_tooltip_text(ns->bar_vol_btn, "声音状态（点击静音切换）");
+    GtkWidget *vol_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(vol_da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(vol_da),
+        +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+            gtk_widget_get_color(GTK_WIDGET(da), &fg);
+            draw_monochrome_glyph(cr, w, h, (n && n->bar_vol_muted) ? BarGlyph::Mute : BarGlyph::Volume, fg);
+        }, ns, nullptr);
+    gtk_button_set_child(GTK_BUTTON(ns->bar_vol_btn), vol_da);
+    ns->bar_vol_da = vol_da;
+
+    ns->bar_net_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "settings:open:wifi");
+    gtk_widget_set_tooltip_text(ns->bar_net_btn, "网络状态（点击打开网络设置）");
+    GtkWidget *net_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(net_da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(net_da),
+        +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+            gtk_widget_get_color(GTK_WIDGET(da), &fg);
+            BarGlyph g = BarGlyph::Wifi;
+            if (n && n->bar_net_kind == "ethernet") g = BarGlyph::Ethernet;
+            else if (n && n->bar_net_kind == "offline") g = BarGlyph::Offline;
+            draw_monochrome_glyph(cr, w, h, g, fg);
+        }, ns, nullptr);
+    gtk_button_set_child(GTK_BUTTON(ns->bar_net_btn), net_da);
+    ns->bar_net_da = net_da;
+
+    ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
+
+    ns->bar_bat_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_add_css_class(ns->bar_bat_box, "spinel-bar-bat");
+    gtk_widget_set_valign(ns->bar_bat_box, GTK_ALIGN_CENTER);
+    GtkWidget *bat_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(bat_da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(bat_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Battery)), nullptr);
+    ns->bar_bat_lbl = gtk_label_new("");
+    gtk_widget_add_css_class(ns->bar_bat_lbl, "spinel-bar-mem");
+    gtk_box_append(GTK_BOX(ns->bar_bat_box), bat_da);
+    gtk_box_append(GTK_BOX(ns->bar_bat_box), ns->bar_bat_lbl);
+    gtk_widget_set_visible(ns->bar_bat_box, FALSE);
+
+    GtkWidget *notif_clock_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(notif_clock_btn), FALSE);
+    gtk_widget_add_css_class(notif_clock_btn, "spinel-bar-menubtn");
+    gtk_widget_add_css_class(notif_clock_btn, "spinel-bar-clock-btn");
+    gtk_widget_set_tooltip_text(notif_clock_btn, "通知历史、勿扰模式与日期时间");
+
+    GtkWidget *nc_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_valign(nc_row, GTK_ALIGN_CENTER);
     GtkWidget *notif_da = gtk_drawing_area_new();
     gtk_widget_set_size_request(notif_da, 15, 15);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(notif_da), draw_glyph_cb,
-                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Bell)), nullptr);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(notif_btn), notif_da);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(notif_da),
+        +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+            gtk_widget_get_color(GTK_WIDGET(da), &fg);
+            draw_monochrome_glyph(cr, w, h, (n && n->bar_notif_dnd) ? BarGlyph::Dnd : BarGlyph::Bell, fg);
+        }, ns, nullptr);
+    ns->bar_notif_da = notif_da;
+
+    ns->bar_clock_lbl = gtk_label_new("--:--");
+    gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
+    gtk_box_append(GTK_BOX(nc_row), notif_da);
+    gtk_box_append(GTK_BOX(nc_row), ns->bar_clock_lbl);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(notif_clock_btn), nc_row);
 
     GtkWidget *npop = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(npop), FALSE);
@@ -574,47 +662,27 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
             if (fn) fn(static_cast<NativeShellState *>(d));
         }
     }), ns);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(notif_btn), npop);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(notif_clock_btn), npop);
 
-    ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
-    GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "全局搜索 / 启动器 (Alt+Space)", "launcher:toggle");
-    ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
-
-    GtkWidget *power_btn = gtk_menu_button_new();
-    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(power_btn), FALSE);
-    gtk_widget_add_css_class(power_btn, "spinel-bar-menubtn");
-    gtk_widget_add_css_class(power_btn, "danger-hover");
-    gtk_widget_set_tooltip_text(power_btn, "电源菜单（重启 / 关机）");
-    GtkWidget *power_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(power_da, 15, 15);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(power_da), draw_glyph_cb,
-                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Power)), nullptr);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(power_btn), power_da);
-
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(power_btn), make_topbar_popover_menu(state, {
-        {"锁定屏幕", "system:lock"},
-        {"睡眠", "system:suspend"},
-        {nullptr, ""},
-        {"重新启动...", "power:reboot"},
-        {"关机...", "power:shutdown"}
-    }));
-
-    ns->bar_bat_lbl = gtk_label_new("");
-    gtk_widget_add_css_class(ns->bar_bat_lbl, "spinel-bar-mem");
-    gtk_widget_set_visible(ns->bar_bat_lbl, FALSE);
-
-    ns->bar_clock_lbl = gtk_label_new("--:--");
-    gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
+    auto make_bar_sep = +[]() -> GtkWidget * {
+        GtkWidget *s = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class(s, "spinel-bar-sep");
+        gtk_widget_set_size_request(s, 1, 12);
+        gtk_widget_set_valign(s, GTK_ALIGN_CENTER);
+        return s;
+    };
 
     gtk_box_append(GTK_BOX(right), mem_btn);
-    gtk_box_append(GTK_BOX(right), notif_btn);
+    gtk_box_append(GTK_BOX(right), ime_btn);
     gtk_box_append(GTK_BOX(right), clip_btn);
-    gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), search_btn);
+    gtk_box_append(GTK_BOX(right), make_bar_sep());
+    gtk_box_append(GTK_BOX(right), ns->bar_vol_btn);
+    gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
-    gtk_box_append(GTK_BOX(right), power_btn);
-    gtk_box_append(GTK_BOX(right), ns->bar_bat_lbl);
-    gtk_box_append(GTK_BOX(right), ns->bar_clock_lbl);
+    gtk_box_append(GTK_BOX(right), ns->bar_bat_box);
+    gtk_box_append(GTK_BOX(right), make_bar_sep());
+    gtk_box_append(GTK_BOX(right), notif_clock_btn);
 
     gtk_box_append(GTK_BOX(root), left);
     gtk_box_append(GTK_BOX(root), right);

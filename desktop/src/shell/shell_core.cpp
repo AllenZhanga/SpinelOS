@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 
 namespace shell_internal {
@@ -413,6 +414,141 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
     cairo_restore(cr);
 }
 
+void draw_desktop_item_icon(cairo_t *cr, double x, double y, double sz, const std::string &kind) {
+    double s = sz / 64.0;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, s, s);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    if (kind == "desk-dir") {
+        cairo_rounded_rect(cr, 7, 13, 50, 39, 7.5);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.25);
+        cairo_fill(cr);
+
+        cairo_pattern_t *back = cairo_pattern_create_linear(7, 9, 7, 48);
+        set_rgb_hex(back, 0.0, 0x38BDF8);
+        set_rgb_hex(back, 1.0, 0x0284C7);
+        cairo_move_to(cr, 12, 10);
+        cairo_line_to(cr, 25, 10);
+        cairo_line_to(cr, 30, 15.5);
+        cairo_line_to(cr, 52, 15.5);
+        cairo_curve_to(cr, 55, 15.5, 57, 17.5, 57, 20.5);
+        cairo_line_to(cr, 57, 45);
+        cairo_curve_to(cr, 57, 48.5, 54, 51, 50.5, 51);
+        cairo_line_to(cr, 13.5, 51);
+        cairo_curve_to(cr, 10, 51, 7, 48.5, 7, 45);
+        cairo_line_to(cr, 7, 15);
+        cairo_curve_to(cr, 7, 12, 9, 10, 12, 10);
+        cairo_close_path(cr);
+        cairo_set_source(cr, back);
+        cairo_fill(cr);
+        cairo_pattern_destroy(back);
+
+        cairo_pattern_t *front = cairo_pattern_create_linear(7, 20, 7, 51);
+        set_rgb_hex(front, 0.0, 0x7DD3FC);
+        set_rgb_hex(front, 1.0, 0x0EA5E9);
+        cairo_rounded_rect(cr, 7, 20, 50, 31, 6.5);
+        cairo_set_source(cr, front);
+        cairo_fill_preserve(cr);
+        cairo_pattern_destroy(front);
+
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.34);
+        cairo_set_line_width(cr, 1.2);
+        cairo_stroke(cr);
+    } else {
+        cairo_rounded_rect(cr, 13, 8, 38, 49, 6.5);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.25);
+        cairo_fill(cr);
+
+        cairo_pattern_t *pg = cairo_pattern_create_linear(13, 6, 51, 55);
+        if (kind == "desk-exec") {
+            set_rgb_hex(pg, 0.0, 0x1E293B);
+            set_rgb_hex(pg, 1.0, 0x0F172A);
+        } else {
+            set_rgb_hex(pg, 0.0, 0xFFFFFF);
+            set_rgb_hex(pg, 1.0, 0xE2E8F0);
+        }
+        cairo_move_to(cr, 19, 6);
+        cairo_line_to(cr, 40, 6);
+        cairo_line_to(cr, 51, 17);
+        cairo_line_to(cr, 51, 49);
+        cairo_curve_to(cr, 51, 52.5, 48.5, 55, 45, 55);
+        cairo_line_to(cr, 19, 55);
+        cairo_curve_to(cr, 15.5, 55, 13, 52.5, 13, 49);
+        cairo_line_to(cr, 13, 12);
+        cairo_curve_to(cr, 13, 8.5, 15.5, 6, 19, 6);
+        cairo_close_path(cr);
+        cairo_set_source(cr, pg);
+        cairo_fill_preserve(cr);
+        cairo_pattern_destroy(pg);
+
+        cairo_set_source_rgba(cr, kind == "desk-exec" ? 1.0 : 0.06, kind == "desk-exec" ? 1.0 : 0.14, kind == "desk-exec" ? 1.0 : 0.28, 0.20);
+        cairo_set_line_width(cr, 1.2);
+        cairo_stroke(cr);
+
+        cairo_move_to(cr, 40, 6);
+        cairo_line_to(cr, 40, 14.5);
+        cairo_curve_to(cr, 40, 16.0, 41.0, 17.0, 42.5, 17.0);
+        cairo_line_to(cr, 51, 17);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, kind == "desk-exec" ? 0.35 : 0.75, kind == "desk-exec" ? 0.45 : 0.82, kind == "desk-exec" ? 0.58 : 0.90, 0.72);
+        cairo_fill(cr);
+
+        if (kind == "desk-arc") {
+            cairo_set_source_rgba(cr, 0.96, 0.62, 0.04, 0.92);
+            cairo_rounded_rect(cr, 27.5, 18, 9, 26, 2.5);
+            cairo_fill(cr);
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9);
+            cairo_set_line_width(cr, 2.0);
+            for (int y0 = 22; y0 <= 38; y0 += 4) {
+                cairo_move_to(cr, 29.5, y0);
+                cairo_line_to(cr, 34.5, y0);
+            }
+            cairo_stroke(cr);
+        } else if (kind == "desk-img") {
+            cairo_rounded_rect(cr, 19, 23, 26, 22, 4);
+            cairo_set_source_rgba(cr, 0.55, 0.36, 0.96, 0.18);
+            cairo_fill(cr);
+            cairo_move_to(cr, 21, 42);
+            cairo_line_to(cr, 29, 32);
+            cairo_line_to(cr, 35, 38);
+            cairo_line_to(cr, 39, 34);
+            cairo_line_to(cr, 44, 42);
+            cairo_close_path(cr);
+            cairo_set_source_rgba(cr, 0.49, 0.23, 0.93, 0.85);
+            cairo_fill(cr);
+            cairo_arc(cr, 26, 28.5, 2.5, 0, 2 * M_PI);
+            cairo_set_source_rgba(cr, 0.96, 0.62, 0.04, 0.9);
+            cairo_fill(cr);
+        } else if (kind == "desk-exec") {
+            cairo_set_source_rgba(cr, 0.20, 0.83, 0.60, 0.95);
+            cairo_set_line_width(cr, 3.0);
+            cairo_move_to(cr, 21, 29);
+            cairo_line_to(cr, 28, 35);
+            cairo_line_to(cr, 21, 41);
+            cairo_stroke(cr);
+            cairo_set_source_rgba(cr, 0.22, 0.74, 0.97, 0.95);
+            cairo_move_to(cr, 32, 41);
+            cairo_line_to(cr, 42, 41);
+            cairo_stroke(cr);
+        } else {
+            cairo_set_source_rgba(cr, 0.02, 0.52, 0.78, 0.75);
+            cairo_set_line_width(cr, 2.6);
+            cairo_move_to(cr, 21, 27);
+            cairo_line_to(cr, 43, 27);
+            cairo_move_to(cr, 21, 34);
+            cairo_line_to(cr, 43, 34);
+            cairo_set_source_rgba(cr, 0.39, 0.45, 0.55, 0.65);
+            cairo_move_to(cr, 21, 41);
+            cairo_line_to(cr, 35, 41);
+            cairo_stroke(cr);
+        }
+    }
+    cairo_restore(cr);
+}
+
 std::string find_spinel_logo_path() {
     static const char *kCandidates[] = {
         "/usr/share/spinel-shell/ui/spinel-logo.png",
@@ -508,6 +644,11 @@ void draw_app_icon(NativeShellState *ns,
         cairo_set_source_surface(cr, surf, dx, dy);
         cairo_paint(cr);
         cairo_restore(cr);
+        return;
+    }
+    if (fallback_kind == "desk-dir" || fallback_kind == "desk-file" ||
+        fallback_kind == "desk-arc" || fallback_kind == "desk-img" || fallback_kind == "desk-exec") {
+        draw_desktop_item_icon(cr, x, y, sz, fallback_kind);
         return;
     }
     draw_system_squircle(cr, x, y, sz, fallback_kind);
@@ -633,6 +774,34 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             cairo_arc(cr, 8, 12.6, 6.4, -2.32, -0.82);
             cairo_stroke(cr);
             cairo_arc(cr, 8, 12.6, 9.2, -2.28, -0.86);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Ethernet:
+            cairo_rounded_rect(cr, 5.2, 2.2, 5.6, 4.0, 1.1);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 8.0, 6.2);
+            cairo_line_to(cr, 8.0, 9.2);
+            cairo_move_to(cr, 3.4, 9.2);
+            cairo_line_to(cr, 12.6, 9.2);
+            cairo_move_to(cr, 3.4, 9.2);
+            cairo_line_to(cr, 3.4, 11.4);
+            cairo_move_to(cr, 12.6, 9.2);
+            cairo_line_to(cr, 12.6, 11.4);
+            cairo_stroke(cr);
+            cairo_rounded_rect(cr, 1.8, 11.4, 3.2, 2.8, 0.8);
+            cairo_stroke(cr);
+            cairo_rounded_rect(cr, 11.0, 11.4, 3.2, 2.8, 0.8);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Offline:
+            cairo_arc(cr, 8, 12.6, 1.1, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_arc(cr, 8, 12.6, 4.0, -2.25, -0.89);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 12.6, 7.2, -2.22, -0.92);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 2.8, 2.8);
+            cairo_line_to(cr, 13.2, 13.2);
             cairo_stroke(cr);
             break;
         case BarGlyph::Search:
@@ -787,6 +956,15 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             }
             cairo_stroke(cr);
             break;
+        case BarGlyph::Battery:
+            cairo_rounded_rect(cr, 1.8, 4.6, 11.2, 6.8, 1.6);
+            cairo_stroke(cr);
+            cairo_rounded_rect(cr, 3.4, 6.2, 7.6, 3.6, 0.8);
+            cairo_fill(cr);
+            cairo_move_to(cr, 14.0, 6.5);
+            cairo_line_to(cr, 14.0, 9.5);
+            cairo_stroke(cr);
+            break;
         case BarGlyph::Dnd:
             cairo_arc(cr, 7.6, 8.2, 4.9, 0.55 * M_PI, 1.85 * M_PI);
             cairo_arc_negative(cr, 10.6, 5.4, 3.8, 1.35 * M_PI, 0.25 * M_PI);
@@ -880,6 +1058,15 @@ void shutdown_native_shell(AppState *state) {
         g_object_unref(ns->monitor_model);
         ns->monitor_model = nullptr;
     }
+    if (ns->desktop_refresh_timer) {
+        g_source_remove(ns->desktop_refresh_timer);
+        ns->desktop_refresh_timer = 0;
+    }
+    if (ns->desktop_dir_monitor) {
+        g_file_monitor_cancel(ns->desktop_dir_monitor);
+        g_object_unref(ns->desktop_dir_monitor);
+        ns->desktop_dir_monitor = nullptr;
+    }
     for (auto &ebg : ns->extra_desktop_bgs) {
         if (ebg.win) gtk_window_destroy(ebg.win);
         if (ebg.mon) g_object_unref(ebg.mon);
@@ -921,23 +1108,63 @@ void native_shell_sync_telemetry(AppState *state) {
     }
 
     if (ns->bar_mem_lbl) {
-        std::string m = ns->telemetry.mem_used_mb > 0
-            ? (std::to_string(ns->telemetry.mem_used_mb) + "M")
-            : ns->telemetry.mem;
+        std::string m = ns->telemetry.mem;
+        if (ns->telemetry.mem_used_mb >= 1024) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.1fG", static_cast<double>(ns->telemetry.mem_used_mb) / 1024.0);
+            m = buf;
+        } else if (ns->telemetry.mem_used_mb > 0) {
+            m = std::to_string(ns->telemetry.mem_used_mb) + "M";
+        }
         gtk_label_set_text(GTK_LABEL(ns->bar_mem_lbl), m.c_str());
     }
-    if (ns->bar_bat_lbl) {
+    if (ns->bar_ime_lbl && has_executable("fcitx5-remote")) {
+        std::string ime = trim_copy(run_cmd_capture("fcitx5-remote 2>/dev/null"));
+        gtk_label_set_text(GTK_LABEL(ns->bar_ime_lbl), ime == "2" ? "中" : "EN");
+    }
+    {
+        MediaSnapshot media = collect_media_state();
+        if (ns->bar_vol_da) {
+            ns->bar_vol_muted = media.volume_muted;
+            gtk_widget_queue_draw(ns->bar_vol_da);
+        }
+        if (ns->bar_vol_btn) {
+            std::string tip = media.volume_muted
+                ? "声音已静音（点击取消静音）"
+                : ("音量 " + std::to_string(media.volume) + "%（点击静音切换）");
+            gtk_widget_set_tooltip_text(ns->bar_vol_btn, tip.c_str());
+        }
+    }
+    {
+        bool dnd = get_dnd_enabled();
+        if (ns->bar_notif_da && ns->bar_notif_dnd != dnd) {
+            ns->bar_notif_dnd = dnd;
+            gtk_widget_queue_draw(ns->bar_notif_da);
+        }
+    }
+    if (ns->bar_bat_box && ns->bar_bat_lbl) {
         if (ns->telemetry.battery_pct >= 0) {
-            std::string b = (ns->telemetry.battery_charging ? "充电 " : "电量 ") +
+            std::string b = (ns->telemetry.battery_charging ? "⚡" : "") +
                             std::to_string(ns->telemetry.battery_pct) + "%";
             gtk_label_set_text(GTK_LABEL(ns->bar_bat_lbl), b.c_str());
-            gtk_widget_set_visible(ns->bar_bat_lbl, TRUE);
+            gtk_widget_set_visible(ns->bar_bat_box, TRUE);
         } else {
-            gtk_widget_set_visible(ns->bar_bat_lbl, FALSE);
+            gtk_widget_set_visible(ns->bar_bat_box, FALSE);
+        }
+    }
+    if (ns->bar_net_da) {
+        std::string next_kind = "wifi";
+        if (ns->telemetry.net == "Offline") next_kind = "offline";
+        else if (ns->telemetry.net.find("ethernet") != std::string::npos) next_kind = "ethernet";
+        if (ns->bar_net_kind != next_kind) {
+            ns->bar_net_kind = next_kind;
+            gtk_widget_queue_draw(ns->bar_net_da);
         }
     }
     if (ns->bar_net_btn) {
-        std::string tip = "网络: " + ns->telemetry.net;
+        std::string tip = ns->telemetry.net == "Offline"
+            ? "未连接网络（点击打开网络设置）"
+            : ("网络: " + ns->telemetry.net);
         gtk_widget_set_tooltip_text(ns->bar_net_btn, tip.c_str());
     }
     if (ns->cc_net_val) gtk_label_set_text(GTK_LABEL(ns->cc_net_val), ns->telemetry.net.c_str());
@@ -968,7 +1195,7 @@ void native_shell_sync_windows(AppState *state) {
         active_win = &windows.front();
     }
 
-    std::string active_name = "访达";
+    std::string active_name = "桌面";
     shell_internal::sync_top_bar_app_menus(ns, active_win, active_name);
     if (ns->bar_active_lbl) gtk_label_set_text(GTK_LABEL(ns->bar_active_lbl), active_name.c_str());
 
@@ -1037,6 +1264,10 @@ void native_shell_sync_perf(AppState *state) {
     }
 
     bool dnd = get_dnd_enabled();
+    if (ns->bar_notif_da && ns->bar_notif_dnd != dnd) {
+        ns->bar_notif_dnd = dnd;
+        gtk_widget_queue_draw(ns->bar_notif_da);
+    }
     if (ns->cc_dnd_circle) {
         if (dnd) gtk_widget_add_css_class(ns->cc_dnd_circle, "active-indigo");
         else gtk_widget_remove_css_class(ns->cc_dnd_circle, "active-indigo");

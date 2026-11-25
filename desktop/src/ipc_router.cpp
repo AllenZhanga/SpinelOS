@@ -340,7 +340,7 @@ bool dispatch_ipc_command(AppState *state,
             fs::create_directories(desk, ec);
             spawn_argv_detached({"spinel-files", desk.string()});
         }},
-        {"desktop:new-folder", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
+        {"desktop:new-folder", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             std::error_code ec;
             fs::path desk = fs::path(home_dir()) / "Desktop";
             fs::create_directories(desk, ec);
@@ -350,7 +350,15 @@ bool dispatch_ipc_command(AppState *state,
                 target = desk / ("新建文件夹 " + std::to_string(idx++));
             }
             fs::create_directory(target, ec);
-            spawn_argv_detached({"spinel-files", desk.string()});
+            native_shell_sync_desktop(s);
+        }},
+        {"ime:toggle", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            if (has_executable("fcitx5-remote")) {
+                std::string out;
+                int rc = 1;
+                run_argv_capture({"fcitx5-remote", "-t"}, out, rc);
+            }
+            native_shell_sync_telemetry(s);
         }},
         {"launch:browser", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
@@ -484,6 +492,8 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"telemetry:refresh", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             if (a.push_all_telemetry) a.push_all_telemetry(s);
+            native_shell_sync_desktop(s);
+            native_shell_sync_telemetry(s);
             push_theme_state(s);
             push_perf_config(s);
             push_steam_library(s);

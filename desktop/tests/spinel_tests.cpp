@@ -517,6 +517,9 @@ void test_ipc_router() {
     EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-speaker:stop", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-mic:stop", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:toggle", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "desktop:new-folder", mock_actions, &reply));
+    EXPECT(fs::exists(fs::path(home_dir()) / "Desktop" / "新建文件夹"));
     EXPECT(dispatch_ipc_command(&dummy, "settings:net-ip-apply\ndevice=eth0\nmethod=auto", mock_actions, &reply));
 }
 

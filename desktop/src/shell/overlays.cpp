@@ -592,7 +592,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
     gtk_layer_set_anchor(bd, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_margin(bd, GTK_LAYER_SHELL_EDGE_TOP, 28);
+    gtk_layer_set_margin(bd, GTK_LAYER_SHELL_EDGE_TOP, 30);
     gtk_layer_set_exclusive_zone(bd, -1);
     gtk_layer_set_keyboard_mode(bd, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
     g_signal_connect(bd, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
@@ -623,7 +623,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 34);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 36);
     gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
     g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
@@ -708,8 +708,8 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_set_homogeneous(GTK_BOX(foot_row), TRUE);
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "游戏中心", "spinel-cc-chip-btn", "games:open"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "应用商店", "spinel-cc-chip-btn", "store:open"));
-    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "主机大屏", "spinel-cc-chip-btn", "launch:steam-gamepadui"));
-    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "系统设置", "spinel-cc-chip-btn", "settings:open:audio"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "系统设置", "spinel-cc-chip-btn", "settings:open:display"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "锁屏", "spinel-cc-chip-btn", "system:lock"));
 
     gtk_box_append(GTK_BOX(root), top_row);
     gtk_box_append(GTK_BOX(root), br_card);
@@ -751,7 +751,7 @@ void apply_native_css(NativeShellState *ns) {
         "  background-color: " + t.bar_bg + ";\n"
         "  border-bottom: 1px solid " + t.bar_border + ";\n"
         "  color: " + t.bar_fg + ";\n"
-        "  padding: 0 12px;\n"
+        "  padding: 0 10px;\n"
         "}\n"
         ".spinel-bar-active {\n"
         "  color: " + t.bar_fg + ";\n"
@@ -759,7 +759,7 @@ void apply_native_css(NativeShellState *ns) {
         "  font-size: 12.5px;\n"
         "  padding: 0 8px 0 4px;\n"
         "}\n"
-        ".spinel-bar-btn, .spinel-bar-icon-btn, .spinel-bar-menubtn > button {\n"
+        ".spinel-bar-btn, .spinel-bar-icon-btn, .spinel-bar-pill-btn, .spinel-bar-menubtn > button {\n"
         "  background: transparent;\n"
         "  background-image: none;\n"
         "  border: none;\n"
@@ -767,21 +767,40 @@ void apply_native_css(NativeShellState *ns) {
         "  color: " + t.bar_fg + ";\n"
         "  font-size: 12px;\n"
         "  font-weight: 500;\n"
-        "  padding: 2px 8px;\n"
-        "  min-height: 20px;\n"
-        "  min-width: 20px;\n"
-        "  border-radius: 5px;\n"
+        "  padding: 2px 7px;\n"
+        "  min-height: 22px;\n"
+        "  min-width: 24px;\n"
+        "  border-radius: 6px;\n"
         "}\n"
-        ".spinel-bar-icon-btn, .spinel-bar-menubtn > button { padding: 2px 6px; }\n"
-        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover, .spinel-bar-menubtn > button:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-bar-brandbtn > button {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  padding: 2px 7px;\n"
+        "  min-height: 22px;\n"
+        "  min-width: 28px;\n"
+        "  border-radius: 6px;\n"
+        "}\n"
+        ".spinel-bar-icon-btn, .spinel-bar-menubtn > button { padding: 2px 5px; }\n"
+        ".spinel-bar-clock-btn > button { padding: 2px 8px; }\n"
+        ".spinel-bar-pill-btn { padding: 2px 7px; background-color: " + std::string(cc_chip_bg) + "; margin: 0 1px; }\n"
+        ".spinel-bar-btn:hover, .spinel-bar-icon-btn:hover, .spinel-bar-pill-btn:hover, .spinel-bar-brandbtn > button:hover, .spinel-bar-menubtn > button:hover { background-color: " + std::string(hover_bg) + "; }\n"
         ".spinel-bar-icon-btn.cc-open { background-color: " + std::string(open_bg) + "; }\n"
         ".spinel-bar-icon-btn.danger-hover:hover, .spinel-bar-menubtn.danger-hover > button:hover { background-color: rgba(244, 63, 94, 0.34); }\n"
-        ".spinel-bar-mem, .spinel-bar-clock {\n"
-        "  color: " + t.bar_fg + ";\n"
-        "  font-size: 12px;\n"
-        "  font-weight: 500;\n"
+        ".spinel-bar-sep {\n"
+        "  background-color: " + t.bar_border + ";\n"
+        "  margin: 0 5px;\n"
         "}\n"
-        ".spinel-bar-clock { padding-left: 6px; }\n"
+        ".spinel-bar-bat { padding: 0 4px; }\n"
+        ".spinel-bar-mem, .spinel-bar-ime, .spinel-bar-clock {\n"
+        "  color: " + t.bar_fg + ";\n"
+        "  font-size: 11.5px;\n"
+        "  font-weight: 600;\n"
+        "  font-feature-settings: \"tnum\";\n"
+        "}\n"
+        ".spinel-bar-ime { min-width: 18px; }\n"
+        ".spinel-bar-clock { font-size: 12px; font-weight: 500; }\n"
         ".spinel-shortcut-btn {\n"
         "  background: transparent;\n"
         "  background-image: none;\n"

@@ -1,12 +1,17 @@
 #include "shell_internal.hpp"
+#include "common.hpp"
 #include "steam_library.hpp"
 
 #include <gtk4-layer-shell.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 namespace shell_internal {
 
@@ -98,6 +103,45 @@ void clear_desktop_shortcut_selection(NativeShellState *ns) {
     }
 }
 
+void open_desktop_entry(const std::string &path, bool is_dir, bool is_exec, bool is_desktop_file) {
+    if (path.empty()) return;
+    if (is_dir) {
+        spawn_argv_detached({"spinel-files", path});
+    } else if (is_desktop_file && has_executable("gio")) {
+        spawn_argv_detached({"gio", "launch", path});
+    } else if (is_exec && ::access(path.c_str(), X_OK) == 0) {
+        spawn_argv_detached({path});
+    } else if (has_executable("xdg-open")) {
+        spawn_argv_detached({"xdg-open", path});
+    } else {
+        spawn_argv_detached({"spinel-files", path});
+    }
+}
+
+void trash_desktop_entry(NativeShellState *ns, const std::string &path) {
+    if (path.empty()) return;
+    std::string out;
+    int rc = 1;
+    if (has_executable("gio") && run_argv_capture({"gio", "trash", path}, out, rc) && rc == 0) {
+        if (ns) rebuild_desktop_shortcuts(ns);
+        return;
+    }
+    std::error_code ec;
+    fs::path p(path);
+    fs::path trash_files = fs::path(home_dir()) / ".local/share/Trash/files";
+    fs::create_directories(trash_files, ec);
+    fs::path dst = trash_files / p.filename();
+    int idx = 2;
+    while (fs::exists(dst, ec) && idx < 100) {
+        dst = trash_files / (p.stem().string() + "_" + std::to_string(idx++) + p.extension().string());
+    }
+    fs::rename(p, dst, ec);
+    if (ec) {
+        fs::remove_all(p, ec);
+    }
+    if (ns) rebuild_desktop_shortcuts(ns);
+}
+
 void on_desktop_shortcut_pressed(GtkGestureClick *gesture, int n_press, double, double, gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
     GtkWidget *tile = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
@@ -111,9 +155,46 @@ void on_desktop_shortcut_pressed(GtkGestureClick *gesture, int n_press, double, 
     gtk_widget_add_css_class(tile, "selected");
 
     if (n_press == 2) {
+        const char *epath = static_cast<const char *>(g_object_get_data(G_OBJECT(tile), "spinel-entry-path"));
+        if (epath && *epath) {
+            bool is_dir = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-dir")) != 0;
+            bool is_exec = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-exec")) != 0;
+            bool is_df = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-desktop")) != 0;
+            open_desktop_entry(epath, is_dir, is_exec, is_df);
+            return;
+        }
         const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(tile), "spinel-cmd"));
         if (cmd) trigger_cmd(ns->app_state, cmd);
     }
+}
+
+void on_desktop_tile_right_click(GtkGestureClick *gesture, int, double x, double y, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    GtkWidget *tile = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    if (!ns || !tile) return;
+    const char *epath = static_cast<const char *>(g_object_get_data(G_OBJECT(tile), "spinel-entry-path"));
+    if (!epath || !*epath || !ns->desktop_entry_popover) return;
+
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    clear_desktop_shortcut_selection(ns);
+    gtk_widget_add_css_class(tile, "selected");
+
+    ns->desktop_ctx_path = epath;
+    ns->desktop_ctx_is_dir = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-dir")) != 0;
+    ns->desktop_ctx_is_exec = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-exec")) != 0;
+    ns->desktop_ctx_is_desktop_file = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(tile), "spinel-entry-desktop")) != 0;
+
+    GtkWidget *term_btn = GTK_WIDGET(g_object_get_data(G_OBJECT(ns->desktop_entry_popover), "sf-term-btn"));
+    if (term_btn) gtk_widget_set_visible(term_btn, ns->desktop_ctx_is_dir);
+
+    graphene_point_t pt{static_cast<float>(x), static_cast<float>(y)};
+    graphene_point_t out_pt{};
+    if (!gtk_widget_compute_point(tile, ns->desktop_overlay, &pt, &out_pt)) {
+        out_pt = pt;
+    }
+    GdkRectangle rect{static_cast<int>(out_pt.x), static_cast<int>(out_pt.y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(ns->desktop_entry_popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(ns->desktop_entry_popover));
 }
 
 void on_desktop_bg_click(GtkGestureClick *, int, double, double, gpointer user_data) {
@@ -151,19 +232,12 @@ void build_desktop_popover(NativeShellState *ns) {
     struct MenuItem { const char *label; const char *cmd; };
     const MenuItem entries[] = {
         {"新建文件夹", "desktop:new-folder"},
-        {"在文件管理器中打开桌面", "desktop:open-folder"},
+        {"在文件管理中打开桌面", "desktop:open-folder"},
         {"打开终端", "launch:terminal"},
         {nullptr, nullptr},
-        {"打开应用商店", "store:open"},
-        {"打开游戏中心", "games:open"},
-        {nullptr, nullptr},
+        {"刷新桌面", "telemetry:refresh"},
         {"更换壁纸与外观...", "settings:open:appearance"},
-        {"显示与缩放设置...", "settings:open:display"},
-        {"系统监视器 (进程与日志)...", "monitor:open:procs"},
-        {"查看系统日志...", "monitor:open:logs"},
-        {"Spinel Doctor 健康体检...", "doctor:open"},
-        {"原生日志窗口 (排障)", "logs:native"},
-        {"刷新桌面", "telemetry:refresh"}
+        {"显示与缩放设置...", "settings:open:display"}
     };
 
     for (const auto &m : entries) {
@@ -184,6 +258,93 @@ void build_desktop_popover(NativeShellState *ns) {
     ns->desktop_popover = pop;
 }
 
+void build_desktop_entry_popover(NativeShellState *ns) {
+    GtkWidget *pop = gtk_popover_new();
+    gtk_widget_set_parent(pop, ns->desktop_overlay);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    auto make_btn = [&](const char *lbl, GCallback cb) {
+        GtkWidget *b = gtk_button_new_with_label(lbl);
+        gtk_widget_add_css_class(b, "spinel-ctx-item");
+        GtkWidget *c = gtk_button_get_child(GTK_BUTTON(b));
+        if (GTK_IS_LABEL(c)) gtk_widget_set_halign(c, GTK_ALIGN_START);
+        g_signal_connect(b, "clicked", cb, ns);
+        gtk_box_append(GTK_BOX(box), b);
+        return b;
+    };
+
+    make_btn("打开", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n->desktop_entry_popover) gtk_popover_popdown(GTK_POPOVER(n->desktop_entry_popover));
+        open_desktop_entry(n->desktop_ctx_path, n->desktop_ctx_is_dir, n->desktop_ctx_is_exec, n->desktop_ctx_is_desktop_file);
+    }));
+    make_btn("在 Spinel Files 中显示", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n->desktop_entry_popover) gtk_popover_popdown(GTK_POPOVER(n->desktop_entry_popover));
+        if (!n->desktop_ctx_path.empty()) spawn_argv_detached({"spinel-files", n->desktop_ctx_path});
+    }));
+    GtkWidget *term_b = make_btn("在终端中打开", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n->desktop_entry_popover) gtk_popover_popdown(GTK_POPOVER(n->desktop_entry_popover));
+        if (!n->desktop_ctx_path.empty()) {
+            const std::string bin = has_executable("spinel-terminal") ? "spinel-terminal" : "ptyxis";
+            spawn_argv_detached({bin, "-d", n->desktop_ctx_path});
+        }
+    }));
+    g_object_set_data(G_OBJECT(pop), "sf-term-btn", term_b);
+    gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    make_btn("移到回收站", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n->desktop_entry_popover) gtk_popover_popdown(GTK_POPOVER(n->desktop_entry_popover));
+        trash_desktop_entry(n, n->desktop_ctx_path);
+    }));
+
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    ns->desktop_entry_popover = pop;
+}
+
+std::string classify_desktop_file_kind(const fs::path &p, bool is_dir, bool &out_exec, bool &out_desktop_file) {
+    out_exec = false;
+    out_desktop_file = false;
+    if (is_dir) return "desk-dir";
+    std::string ext = to_lower_copy(p.extension().string());
+    if (ext == ".desktop") {
+        out_desktop_file = true;
+        return "app";
+    }
+    if (ext == ".zip" || ext == ".tar" || ext == ".gz" || ext == ".xz" ||
+        ext == ".bz2" || ext == ".zst" || ext == ".7z" || ext == ".rar" ||
+        ext == ".tgz" || ext == ".tbz2") {
+        return "desk-arc";
+    }
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".svg" || ext == ".bmp") {
+        return "desk-img";
+    }
+    if (ext == ".appimage" || ext == ".sh" || ::access(p.c_str(), X_OK) == 0) {
+        out_exec = true;
+        return "desk-exec";
+    }
+    return "desk-file";
+}
+
+void on_desktop_dir_changed(GFileMonitor *, GFile *, GFile *, GFileMonitorEvent, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns) return;
+    if (ns->desktop_refresh_timer) {
+        g_source_remove(ns->desktop_refresh_timer);
+    }
+    ns->desktop_refresh_timer = g_timeout_add(180, +[](gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (n) {
+            n->desktop_refresh_timer = 0;
+            rebuild_desktop_shortcuts(n);
+        }
+        return G_SOURCE_REMOVE;
+    }, ns);
+}
+
 }  // namespace
 
 void rebuild_desktop_shortcuts(NativeShellState *ns) {
@@ -198,19 +359,25 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
         std::string cmd;
         std::string kind;
         std::string icon_path;
+        std::string entry_path;
+        bool is_dir = false;
+        bool is_exec = false;
+        bool is_desktop_file = false;
     };
 
-    std::vector<ShortcutDef> items = {
-        {"游戏中心", "games:open", "games", ""},
-        {"应用商店", "store:open", "store", ""},
-        {"Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"})},
-        {"主机大屏", "launch:steam-gamepadui", "gamepad", ""},
-        {"文件管理", "launch:files", "files", ""},
-        {"终端", "launch:terminal", "terminal", ""},
-        {"系统设置", "settings:open:display", "settings", ""}
+    std::vector<ShortcutDef> items;
+    auto push_sc = [&](std::string lbl, std::string cmd, std::string kind, std::string ico) {
+        items.push_back({std::move(lbl), std::move(cmd), std::move(kind), std::move(ico), "", false, false, false});
     };
+    push_sc("游戏中心", "games:open", "games", "");
+    push_sc("应用商店", "store:open", "store", "");
+    push_sc("Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"}));
+    push_sc("主机大屏", "launch:steam-gamepadui", "gamepad", "");
+    push_sc("文件管理", "launch:files", "files", "");
+    push_sc("终端", "launch:terminal", "terminal", "");
+    push_sc("系统设置", "settings:open:display", "settings", "");
     if (ns->telemetry.is_live) {
-        items.push_back({"安装 SpinelOS", "installer:open", "installer", ""});
+        push_sc("安装 SpinelOS", "installer:open", "installer", "");
     }
 
     static const char *kFeaturedStoreIds[] = {
@@ -221,7 +388,7 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
         std::string lid = to_lower_copy(app.id);
         for (const char *fid : kFeaturedStoreIds) {
             if (lid == fid) {
-                items.push_back({app.name, "app:launch:" + app.id, match_app_kind(app.id), app.icon_path});
+                push_sc(app.name, "app:launch:" + app.id, match_app_kind(app.id), app.icon_path);
                 break;
             }
         }
@@ -231,11 +398,33 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
     int added_games = 0;
     for (const auto &g : steam_games) {
         if (added_games >= 6) break;
-        items.push_back({
-            g.name, "steam:launch:" + g.appid, "steam",
-            !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"})
-        });
+        push_sc(g.name, "steam:launch:" + g.appid, "steam",
+                !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}));
         ++added_games;
+    }
+
+    std::error_code ec;
+    fs::path desk_dir = fs::path(home_dir()) / "Desktop";
+    if (fs::is_directory(desk_dir, ec)) {
+        std::vector<ShortcutDef> desk_entries;
+        for (const auto &de : fs::directory_iterator(desk_dir, fs::directory_options::skip_permission_denied, ec)) {
+            std::string nm = de.path().filename().string();
+            if (nm.empty() || nm.front() == '.') continue;
+            bool is_dir = de.is_directory(ec);
+            bool is_exec = false;
+            bool is_df = false;
+            std::string k = classify_desktop_file_kind(de.path(), is_dir, is_exec, is_df);
+            std::string ico;
+            if (k == "desk-img" && !is_dir && de.file_size(ec) < 8 * 1024 * 1024) {
+                ico = de.path().string();
+            }
+            desk_entries.push_back({nm, "", k, ico, de.path().string(), is_dir, is_exec, is_df});
+        }
+        std::sort(desk_entries.begin(), desk_entries.end(), [](const ShortcutDef &a, const ShortcutDef &b) {
+            if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
+            return to_lower_copy(a.label) < to_lower_copy(b.label);
+        });
+        for (auto &d : desk_entries) items.push_back(std::move(d));
     }
 
     for (const auto &sc : items) {
@@ -244,7 +433,20 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
         gtk_widget_set_size_request(tile, 84, 84);
         gtk_widget_set_halign(tile, GTK_ALIGN_CENTER);
         gtk_widget_set_valign(tile, GTK_ALIGN_START);
-        g_object_set_data_full(G_OBJECT(tile), "spinel-cmd", g_strdup(sc.cmd.c_str()), g_free);
+        if (!sc.cmd.empty()) {
+            g_object_set_data_full(G_OBJECT(tile), "spinel-cmd", g_strdup(sc.cmd.c_str()), g_free);
+        }
+        if (!sc.entry_path.empty()) {
+            g_object_set_data_full(G_OBJECT(tile), "spinel-entry-path", g_strdup(sc.entry_path.c_str()), g_free);
+            g_object_set_data(G_OBJECT(tile), "spinel-entry-dir", GINT_TO_POINTER(sc.is_dir ? 1 : 0));
+            g_object_set_data(G_OBJECT(tile), "spinel-entry-exec", GINT_TO_POINTER(sc.is_exec ? 1 : 0));
+            g_object_set_data(G_OBJECT(tile), "spinel-entry-desktop", GINT_TO_POINTER(sc.is_desktop_file ? 1 : 0));
+
+            GtkGesture *tr = gtk_gesture_click_new();
+            gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(tr), GDK_BUTTON_SECONDARY);
+            g_signal_connect(tr, "pressed", G_CALLBACK(on_desktop_tile_right_click), ns);
+            gtk_widget_add_controller(tile, GTK_EVENT_CONTROLLER(tr));
+        }
 
         GtkGesture *dbl = gtk_gesture_click_new();
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(dbl), GDK_BUTTON_PRIMARY);
@@ -306,6 +508,7 @@ void build_native_desktop(GtkApplication *app, NativeShellState *ns) {
     gtk_overlay_add_overlay(GTK_OVERLAY(ns->desktop_overlay), ns->desktop_flow);
 
     build_desktop_popover(ns);
+    build_desktop_entry_popover(ns);
     GtkGesture *bg_click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bg_click), GDK_BUTTON_PRIMARY);
     g_signal_connect(bg_click, "pressed", G_CALLBACK(on_desktop_bg_click), ns);
@@ -320,6 +523,16 @@ void build_native_desktop(GtkApplication *app, NativeShellState *ns) {
     ns->desktop_win = win;
     ns->wallpaper = get_wallpaper_pref();
     rebuild_desktop_shortcuts(ns);
+
+    std::error_code ec;
+    fs::path desk_path = fs::path(home_dir()) / "Desktop";
+    fs::create_directories(desk_path, ec);
+    GFile *gf = g_file_new_for_path(desk_path.c_str());
+    ns->desktop_dir_monitor = g_file_monitor_directory(gf, G_FILE_MONITOR_NONE, nullptr, nullptr);
+    g_object_unref(gf);
+    if (ns->desktop_dir_monitor) {
+        g_signal_connect(ns->desktop_dir_monitor, "changed", G_CALLBACK(on_desktop_dir_changed), ns);
+    }
     gtk_window_present(win);
 }
 
