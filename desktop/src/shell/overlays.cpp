@@ -159,7 +159,7 @@ void rebuild_launcher_index(NativeShellState *ns) {
         {"Spinel 终端", "原生多标签 Wayland 终端 (Super+Enter)", "terminal ptyxis shell console bash", "launch:terminal", "", "terminal"},
         {"应用商店", "一键安装 Steam / 浏览器 / Flatpak / 系统更新", "store app market pacman flatpak", "store:open", "", "store"},
         {"游戏与启动中心", "浏览 Steam 游戏库、启动大屏模式与调节游戏性能", "games library launcher center", "games:open", "", "games"},
-        {"文件管理 (Thunar)", "浏览本地文件、压缩包与挂载盘", "files thunar folder manager", "launch:files", "", "files"},
+        {"文件管理 (Spinel Files)", "轻量原生文件管理、外置盘与快速操作", "files manager folder thunar spinel-files", "launch:files", "", "files"},
         {steam_installed ? "Steam 客户端" : "安装 Steam 客户端",
          steam_installed ? "启动 Valve Steam 游戏平台" : "前往应用商店一键安装 Steam",
          "steam valve game", steam_installed ? "launch:steam" : "store:open:steam",
@@ -192,7 +192,8 @@ void rebuild_launcher_index(NativeShellState *ns) {
 
     for (const auto &app : ns->desktop_apps) {
         std::string lid = to_lower_copy(app.id);
-        if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal") continue;
+        if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal" ||
+            lid == "spinel-files" || lid == "org.spinelos.files") continue;
         ns->launcher_entries.push_back({
             app.name,
             !app.category.empty() ? ("已安装应用 · " + app.category) : "已安装桌面应用",

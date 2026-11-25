@@ -113,7 +113,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
                    hay.find("terminal") != std::string::npos || hay.find("终端") != std::string::npos) {
             profile = "terminal";
             out_display_name = "终端";
-        } else if (hay.find("thunar") != std::string::npos || hay.find("文件管理") != std::string::npos) {
+        } else if (hay.find("spinel-files") != std::string::npos || hay.find("org.spinelos.files") != std::string::npos ||
+                   hay.find("thunar") != std::string::npos || hay.find("文件管理") != std::string::npos) {
             profile = "files";
             out_display_name = "文件管理";
         } else if (hay.find("steam") != std::string::npos || hay.find("gamescope") != std::string::npos) {

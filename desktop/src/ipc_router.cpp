@@ -332,13 +332,13 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"launch:files", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             native_shell_set_cc_visible(s, false);
-            spawn_argv_logged({"thunar"}, "Files");
+            spawn_argv_logged({has_executable("spinel-files") ? "spinel-files" : "thunar"}, "Files");
         }},
         {"desktop:open-folder", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             std::error_code ec;
             fs::path desk = fs::path(home_dir()) / "Desktop";
             fs::create_directories(desk, ec);
-            spawn_argv_detached({"thunar", desk.string()});
+            spawn_argv_detached({has_executable("spinel-files") ? "spinel-files" : "thunar", desk.string()});
         }},
         {"desktop:new-folder", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             std::error_code ec;
@@ -350,7 +350,7 @@ bool dispatch_ipc_command(AppState *state,
                 target = desk / ("新建文件夹 " + std::to_string(idx++));
             }
             fs::create_directory(target, ec);
-            spawn_argv_detached({"thunar", desk.string()});
+            spawn_argv_detached({has_executable("spinel-files") ? "spinel-files" : "thunar", desk.string()});
         }},
         {"launch:browser", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);

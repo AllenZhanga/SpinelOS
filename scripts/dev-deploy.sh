@@ -74,6 +74,7 @@ if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-shell /usr/local/bin/spinel-shell
   sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
+  sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
 fi
 sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
@@ -263,6 +264,7 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-webui" "${DEV_HOST}:/tmp/spinel-dev/spinel-webui"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
 fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
 rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.sh"

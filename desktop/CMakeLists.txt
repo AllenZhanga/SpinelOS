@@ -135,6 +135,27 @@ target_compile_options(spinel-terminal PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
+add_executable(spinel-files
+    src/spinel_files.cpp
+    src/common.cpp
+)
+
+target_compile_definitions(spinel-files PRIVATE
+    SPINEL_HAS_WEBKIT=0
+)
+
+target_include_directories(spinel-files PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(spinel-files PRIVATE
+    PkgConfig::GTK4
+)
+
+target_compile_options(spinel-files PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
+)
+
 enable_testing()
 
 add_executable(spinel-tests
@@ -169,5 +190,5 @@ target_compile_options(spinel-tests PRIVATE
 
 add_test(NAME spinel_unit_tests COMMAND spinel-tests)
 
-install(TARGETS spinel-shell spinel-webui spinel-terminal DESTINATION bin)
+install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)

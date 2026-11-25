@@ -37,7 +37,8 @@ std::string match_app_kind(const std::string &s) {
     if (l.find("gamescope") != std::string::npos) return "gamepad";
     if (l.find("chromium") != std::string::npos || l.find("chrome") != std::string::npos ||
         l.find("firefox") != std::string::npos) return "browser";
-    if (l.find("thunar") != std::string::npos || l.find("files") != std::string::npos) return "files";
+    if (l.find("spinel-files") != std::string::npos || l.find("org.spinelos.files") != std::string::npos ||
+        l.find("thunar") != std::string::npos || l.find("files") != std::string::npos) return "files";
     if (l.find("spinel-terminal") != std::string::npos || l.find("org.spinelos.terminal") != std::string::npos ||
         l.find("ptyxis") != std::string::npos || l.find("foot") != std::string::npos ||
         l.find("terminal") != std::string::npos || l.find("终端") != std::string::npos) return "terminal";

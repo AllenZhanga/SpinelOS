@@ -109,6 +109,9 @@ bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
         has_executable("spinel-terminal")) {
         return true;
     }
+    if ((id == "thunar" || id == "Thunar") && has_executable("spinel-files")) {
+        return true;
+    }
     static const std::set<std::string> hidden_ids = {
         "footclient",
         "foot-server",

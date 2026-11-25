@@ -154,7 +154,7 @@ std::vector<DockPinSpec> default_dock_pins(bool is_live) {
         {"应用商店", "store:open", "store", {}, {"spinelos 应用商店"}},
         {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
         {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
-        {"文件管理", "launch:files", "files", {}, {"thunar"}},
+        {"文件管理", "launch:files", "files", {}, {"spinel-files", "org.spinelos.files", "thunar"}},
         {"终端", "launch:terminal", "terminal", {}, {"spinel-terminal", "org.spinelos.terminal", "spinel 终端", "ptyxis", "org.gnome.ptyxis", "foot"}},
         {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}}
     };
@@ -229,8 +229,9 @@ DockPinSpec resolve_pin_spec_from_item(const NativeShellState *ns, const DockIte
     if (hay.find("steam") != std::string::npos) {
         return {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}};
     }
-    if (hay.find("thunar") != std::string::npos) {
-        return {"文件管理", "launch:files", "files", {}, {"thunar"}};
+    if (hay.find("spinel-files") != std::string::npos || hay.find("org.spinelos.files") != std::string::npos ||
+        hay.find("thunar") != std::string::npos) {
+        return {"文件管理", "launch:files", "files", {}, {"spinel-files", "org.spinelos.files", "thunar"}};
     }
     if (hay.find("spinel-terminal") != std::string::npos || hay.find("org.spinelos.terminal") != std::string::npos ||
         hay.find("ptyxis") != std::string::npos || hay.find("foot") != std::string::npos) {

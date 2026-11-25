@@ -409,7 +409,7 @@ void export_custom_theme_template() {
                 << "ui_accent2=#fb7185\n";
         }
     }
-    spawn_argv_detached({"thunar", dir.string()});
+    spawn_argv_detached({has_executable("spinel-files") ? "spinel-files" : "thunar", dir.string()});
 }
 
 std::string get_custom_wallpaper_image() {
