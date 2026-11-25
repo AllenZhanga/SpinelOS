@@ -107,6 +107,7 @@ struct FilesWin {
     GtkWidget *btn_view_mode = nullptr;
     GtkWidget *btn_hidden = nullptr;
     GtkWidget *btn_path_edit = nullptr;
+    GtkWidget *btn_empty_trash = nullptr;
 
     GtkWidget *crumb_scroll = nullptr;
     GtkWidget *crumb_box = nullptr;
@@ -365,6 +366,8 @@ void apply_theme_css(FilesWin *fw) {
         << ".sf-tool-btn { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 8px; padding: 4px 10px; min-height: 28px; }\n"
         << ".sf-tool-btn:hover { border-color: " << accent << "; }\n"
         << ".sf-tool-btn.is-on { background: " << sel_bg << "; border-color: " << accent << "; color: " << accent << "; }\n"
+        << ".sf-tool-danger { background: rgba(244, 63, 94, 0.14); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 8px; padding: 4px 10px; min-height: 28px; font-weight: 600; }\n"
+        << ".sf-tool-danger:hover { background: rgba(244, 63, 94, 0.24); border-color: #f43f5e; }\n"
         << ".sf-crumb-pill { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 7px; padding: 3px 9px; font-size: 12px; }\n"
         << ".sf-crumb-pill:hover { border-color: " << accent << "; }\n"
         << ".sf-entry { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 8px; padding: 4px 10px; min-height: 28px; }\n"
@@ -588,9 +591,121 @@ void do_paste(FilesWin *fw) {
     refresh_current_dir(fw);
 }
 
+fs::path trash_root_dir() { return fs::path(home_dir()) / ".local/share/Trash"; }
+fs::path trash_files_dir() { return trash_root_dir() / "files"; }
+fs::path trash_info_dir() { return trash_root_dir() / "info"; }
+
+bool is_in_trash_dir(const fs::path &dir) {
+    fs::path tf = trash_files_dir();
+    std::string ds = dir.string();
+    std::string tfs = tf.string();
+    return ds == tfs || ds.rfind(tfs + "/", 0) == 0;
+}
+
+bool trash_has_items() {
+    std::error_code ec;
+    fs::path tf = trash_files_dir();
+    if (!fs::is_directory(tf, ec)) return false;
+    for (const auto &e : fs::directory_iterator(tf, fs::directory_options::skip_permission_denied, ec)) {
+        (void)e;
+        return true;
+    }
+    return false;
+}
+
+void do_restore_from_trash(FilesWin *fw, const fs::path &trashed_item) {
+    if (!fw || trashed_item.empty()) return;
+    std::error_code ec;
+    fs::path info_file = trash_info_dir() / (trashed_item.filename().string() + ".trashinfo");
+    fs::path target;
+    if (fs::is_regular_file(info_file, ec)) {
+        std::ifstream ifs(info_file);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            line = trim_copy(line);
+            if (line.rfind("Path=", 0) == 0) {
+                std::string raw = line.substr(5);
+                g_autofree char *unescaped = g_uri_unescape_string(raw.c_str(), nullptr);
+                std::string decoded = (unescaped && *unescaped) ? std::string(unescaped) : raw;
+                fs::path parsed(decoded);
+                target = parsed.is_absolute() ? parsed : (trash_root_dir() / parsed);
+                break;
+            }
+        }
+    }
+    if (target.empty()) {
+        target = fs::path(home_dir()) / "Desktop" / trashed_item.filename();
+    }
+    fs::create_directories(target.parent_path(), ec);
+    if (fs::exists(target, ec)) {
+        std::string stem = target.stem().string();
+        std::string ext = target.extension().string();
+        for (int i = 2; i < 100 && fs::exists(target, ec); ++i) {
+            target = target.parent_path() / (stem + " (恢复 " + std::to_string(i) + ")" + ext);
+        }
+    }
+
+    fs::rename(trashed_item, target, ec);
+    if (ec) {
+        std::string out;
+        int rc = 1;
+        if (run_argv_capture({"mv", "-f", trashed_item.string(), target.string()}, out, rc) && rc == 0) {
+            ec.clear();
+        }
+    }
+    if (ec) {
+        show_error_alert(fw, "还原失败", ec.message());
+        return;
+    }
+    std::error_code rm_ec;
+    fs::remove(info_file, rm_ec);
+    fw->selected_path.clear();
+    refresh_current_dir(fw);
+    if (fw->status_label) {
+        gtk_label_set_text(GTK_LABEL(fw->status_label), ("已还原到: " + target.string()).c_str());
+    }
+}
+
+void do_empty_trash(FilesWin *fw) {
+    if (!fw) return;
+    if (!trash_has_items()) {
+        if (fw->status_label) gtk_label_set_text(GTK_LABEL(fw->status_label), "回收站已经是空的");
+        return;
+    }
+    GtkAlertDialog *dlg = gtk_alert_dialog_new("确认清空回收站吗？");
+    gtk_alert_dialog_set_detail(dlg, "清空后将永久删除回收站内的全部文件（含已挂载分区回收站），无法恢复。");
+    const char *btns[] = {"取消", "清空回收站", nullptr};
+    gtk_alert_dialog_set_buttons(dlg, btns);
+    gtk_alert_dialog_set_cancel_button(dlg, 0);
+    gtk_alert_dialog_set_default_button(dlg, 0);
+
+    gtk_alert_dialog_choose(dlg, fw->win, nullptr, +[](GObject *src, GAsyncResult *res, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, nullptr);
+        if (choice != 1) return;
+
+        std::string out;
+        int rc = 1;
+        if (has_executable("gio")) {
+            run_argv_capture({"gio", "trash", "--empty"}, out, rc);
+        }
+        std::error_code ec;
+        for (const fs::path &dir : {trash_files_dir(), trash_info_dir(), trash_root_dir() / "expunged"}) {
+            if (!fs::is_directory(dir, ec)) continue;
+            for (const auto &entry : fs::directory_iterator(dir, ec)) {
+                fs::remove_all(entry.path(), ec);
+            }
+        }
+        w->selected_path.clear();
+        refresh_current_dir(w);
+    }, fw);
+    g_object_unref(dlg);
+}
+
 void do_delete_selected(FilesWin *fw, bool permanent) {
     if (fw->selected_path.empty()) return;
     fs::path target = fw->selected_path;
+    permanent = permanent || is_in_trash_dir(fw->current_dir);
     if (!permanent && has_executable("gio")) {
         std::string out;
         int rc = 1;
@@ -618,6 +733,10 @@ void do_delete_selected(FilesWin *fw, bool permanent) {
         if (choice == 1) {
             std::error_code ec;
             fs::remove_all(ctx->target, ec);
+            if (!ec && ctx->target.parent_path() == trash_files_dir()) {
+                std::error_code iec;
+                fs::remove(trash_info_dir() / (ctx->target.filename().string() + ".trashinfo"), iec);
+            }
             if (ec) {
                 show_error_alert(ctx->fw, "删除失败", ec.message());
             } else {
@@ -1193,7 +1312,17 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         gtk_box_append(GTK_BOX(box), b);
     };
 
-    if (!item_path.empty()) {
+    if (is_in_trash_dir(fw->current_dir)) {
+        if (!item_path.empty()) {
+            fw->selected_path = item_path;
+            add_btn("还原到原位置", false, [fw, item_path]() { do_restore_from_trash(fw, item_path); });
+            add_btn("属性", false, [fw, item_path]() { show_properties(fw, item_path); });
+            add_btn("永久删除 (Delete)", true, [fw]() { do_delete_selected(fw, true); });
+        } else {
+            add_btn("清空回收站", true, [fw]() { do_empty_trash(fw); });
+            add_btn("刷新", false, [fw]() { refresh_current_dir(fw); });
+        }
+    } else if (!item_path.empty()) {
         fw->selected_path = item_path;
         std::error_code ec;
         bool is_dir = fs::is_directory(item_path, ec);
@@ -1272,6 +1401,9 @@ void rebuild_sidebar(FilesWin *fw) {
     clear_box_children(fw->drives_box);
 
     fs::path home(home_dir());
+    std::error_code init_ec;
+    fs::create_directories(trash_files_dir(), init_ec);
+    fs::create_directories(trash_info_dir(), init_ec);
     struct PlaceDef { const char *name; fs::path path; const char *icon; };
     std::vector<PlaceDef> places = {
         {"主目录", home, "user-home-symbolic"},
@@ -1279,6 +1411,7 @@ void rebuild_sidebar(FilesWin *fw) {
         {"下载", home / "Downloads", "folder-download-symbolic"},
         {"文档", home / "Documents", "folder-documents-symbolic"},
         {"图片", home / "Pictures", "folder-pictures-symbolic"},
+        {"回收站", trash_files_dir(), trash_has_items() ? "user-trash-full-symbolic" : "user-trash-symbolic"},
         {"文件系统根目录", fs::path("/"), "drive-harddisk-symbolic"}
     };
 
@@ -1460,8 +1593,15 @@ void refresh_current_dir(FilesWin *fw) {
     gtk_widget_set_sensitive(fw->btn_up, fw->current_dir.has_parent_path() && fw->current_dir.parent_path() != fw->current_dir);
 
     std::string title = fw->current_dir.filename().string();
-    if (title.empty()) title = fw->current_dir.string();
+    if (is_in_trash_dir(fw->current_dir)) title = "回收站";
+    else if (title.empty()) title = fw->current_dir.string();
     gtk_window_set_title(fw->win, ("Spinel Files · " + title).c_str());
+
+    if (fw->btn_empty_trash) {
+        bool in_trash = is_in_trash_dir(fw->current_dir);
+        gtk_widget_set_visible(fw->btn_empty_trash, in_trash);
+        gtk_widget_set_sensitive(fw->btn_empty_trash, in_trash && trash_has_items());
+    }
 
     rebuild_sidebar(fw);
     rebuild_breadcrumbs(fw);
@@ -1825,6 +1965,13 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
         gtk_stack_set_visible_child_name(GTK_STACK(w->view_stack), w->grid_mode ? "grid" : "list");
     }), fw);
 
+    fw->btn_empty_trash = gtk_button_new_with_label("清空回收站");
+    gtk_widget_add_css_class(fw->btn_empty_trash, "sf-tool-danger");
+    gtk_widget_set_visible(fw->btn_empty_trash, FALSE);
+    g_signal_connect(fw->btn_empty_trash, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        do_empty_trash(static_cast<FilesWin *>(d));
+    }), fw);
+
     GtkWidget *term_btn = gtk_button_new_with_label("打开终端");
     gtk_widget_add_css_class(term_btn, "sf-tool-btn");
     g_signal_connect(term_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
@@ -1832,7 +1979,8 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     }), fw);
 
     for (GtkWidget *w : {fw->btn_back, fw->btn_fwd, fw->btn_up, fw->crumb_scroll, fw->path_entry,
-                         fw->btn_path_edit, fw->search_entry, new_dir_btn, fw->btn_hidden, fw->btn_view_mode, term_btn}) {
+                         fw->btn_path_edit, fw->search_entry, fw->btn_empty_trash, new_dir_btn,
+                         fw->btn_hidden, fw->btn_view_mode, term_btn}) {
         gtk_box_append(GTK_BOX(bar), w);
     }
 
