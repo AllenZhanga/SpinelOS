@@ -206,19 +206,19 @@ if [ "$MODE" = "full" ]; then
   pkill -HUP -x labwc 2>/dev/null || true
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev/null 2>&1; then
     pkill -x spice-vdagent 2>/dev/null || true
-    nohup spice-vdagent >/dev/null 2>&1 </dev/null &
+    setsid -f spice-vdagent >/dev/null 2>&1 </dev/null || true
   fi
   if [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]; then
     pkill -f polkit-gnome-authentication-agent-1 2>/dev/null || true
     sleep 0.1
-    nohup /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null &
+    setsid -f /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null || true
   fi
   if command -v swayidle >/dev/null 2>&1; then
     pkill -x swayidle 2>/dev/null || true
     if grep -qx "idle_lock=true" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
-      nohup swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null &
+      setsid -f swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null || true
     else
-      nohup swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null &
+      setsid -f swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null || true
     fi
   fi
   if command -v systemctl >/dev/null 2>&1; then
@@ -235,16 +235,16 @@ fi
 pkill -x spinel-webui 2>/dev/null || true
 pkill -x spinel-shell 2>/dev/null || true
 sleep 0.3
-nohup /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null &
+setsid -f /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null || true
 
 if command -v mako >/dev/null 2>&1; then
   pkill -x mako 2>/dev/null || true
-  nohup mako >/tmp/spinel-mako.log 2>&1 </dev/null &
+  setsid -f mako >/tmp/spinel-mako.log 2>&1 </dev/null || true
 fi
 
 if command -v wl-clip-persist >/dev/null 2>&1; then
   pkill -x wl-clip-persist 2>/dev/null || true
-  nohup wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 </dev/null &
+  setsid -f wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 </dev/null || true
 fi
 
 if command -v fcitx5 >/dev/null 2>&1; then

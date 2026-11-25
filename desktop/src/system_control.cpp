@@ -1883,9 +1883,29 @@ void sync_notification_theme(bool is_light) {
             << "border-color=#ffffff2e\n"
             << "progress-color=over #38bdf833\n";
     }
+    oss << "\n[mode=do-not-disturb]\n"
+        << "invisible=1\n";
     if (write_text_file(mako_cfg.string(), oss.str()) && has_executable("makoctl")) {
         spawn_argv_detached({"makoctl", "reload"});
     }
+}
+
+bool get_dnd_enabled() {
+    std::string val = trim_copy(read_first_line(
+        (fs::path(home_dir()) / ".config/spinelos/dnd.conf").string(), "false"
+    ));
+    return val == "true" || val == "1";
+}
+
+void toggle_dnd_mode(AppState *state) {
+    bool next = !get_dnd_enabled();
+    fs::path p = fs::path(home_dir()) / ".config/spinelos/dnd.conf";
+    write_text_file(p.string(), next ? "true\n" : "false\n");
+    if (has_executable("makoctl")) {
+        spawn_argv_detached({"makoctl", "mode", next ? "-a" : "-r", "do-not-disturb"});
+    }
+    append_app_log(std::string("[Notify] 勿扰模式已") + (next ? "开启" : "关闭"));
+    native_shell_sync_perf(state);
 }
 
 namespace {

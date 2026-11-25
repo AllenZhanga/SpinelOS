@@ -81,6 +81,14 @@ struct NativeShellState {
     GtkWidget *desktop_flow = nullptr;
     GtkWidget *desktop_popover = nullptr;
     std::string wallpaper = "crystal-blue";
+    struct ExtraMonitorBg {
+        GdkMonitor *mon = nullptr;
+        GtkWindow *win = nullptr;
+        GtkWidget *da = nullptr;
+    };
+    std::vector<ExtraMonitorBg> extra_desktop_bgs;
+    GListModel *monitor_model = nullptr;
+    gulong monitor_sig_id = 0;
 
     // Dock
     GtkWindow *dock_win = nullptr;
@@ -129,11 +137,9 @@ struct NativeShellState {
     std::vector<LauncherEntry> launcher_entries;
     bool launcher_was_active = false;
 
-    // Custom desktop wallpaper image cache
+    // Custom desktop wallpaper image cache (keyed by path@WxH for multi-monitor support)
     std::string custom_wallpaper_path;
-    cairo_surface_t *wallpaper_surf = nullptr;
-    int wallpaper_w = 0;
-    int wallpaper_h = 0;
+    std::map<std::string, cairo_surface_t *> wallpaper_surfs;
 
     // Floating Hardware OSD Pill (Volume / Brightness)
     GtkWindow *osd_win = nullptr;
@@ -147,10 +153,14 @@ struct NativeShellState {
     GtkWidget *cc_mem_val = nullptr;
     GtkWidget *cc_gm_circle = nullptr;
     GtkWidget *cc_gm_val = nullptr;
+    GtkWidget *cc_dnd_circle = nullptr;
+    GtkWidget *cc_dnd_val = nullptr;
     GtkWidget *cc_mh_circle = nullptr;
     GtkWidget *cc_mh_val = nullptr;
     GtkWidget *cc_bright_pct = nullptr;
     GtkWidget *cc_bright_scale = nullptr;
+    GtkWidget *cc_vol_mute_da = nullptr;
+    bool cc_vol_muted = false;
     GtkWidget *cc_vol_pct = nullptr;
     GtkWidget *cc_vol_scale = nullptr;
     bool cc_updating_sliders = false;
@@ -755,7 +765,7 @@ void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_d
     draw_spinel_logo_at(ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz);
 }
 
-enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard, Volume, Mute, Brightness };
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard, Volume, Mute, Brightness, Dnd };
 
 void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
@@ -928,6 +938,12 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
                 cairo_move_to(cr, 8.0 + std::cos(ang) * 4.5, 8.0 + std::sin(ang) * 4.5);
                 cairo_line_to(cr, 8.0 + std::cos(ang) * 6.0, 8.0 + std::sin(ang) * 6.0);
             }
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Dnd:
+            cairo_arc(cr, 7.6, 8.2, 4.9, 0.55 * M_PI, 1.85 * M_PI);
+            cairo_arc_negative(cr, 10.6, 5.4, 3.8, 1.35 * M_PI, 0.25 * M_PI);
+            cairo_close_path(cr);
             cairo_stroke(cr);
             break;
     }
@@ -1435,13 +1451,9 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
 cairo_surface_t *get_cached_wallpaper_surface(NativeShellState *ns, int w, int h) {
     if (!ns || ns->custom_wallpaper_path.empty() || w <= 0 || h <= 0) return nullptr;
-    if (ns->wallpaper_surf && ns->wallpaper_w == w && ns->wallpaper_h == h) {
-        return ns->wallpaper_surf;
-    }
-    if (ns->wallpaper_surf) {
-        cairo_surface_destroy(ns->wallpaper_surf);
-        ns->wallpaper_surf = nullptr;
-    }
+    std::string key = ns->custom_wallpaper_path + "@" + std::to_string(w) + "x" + std::to_string(h);
+    auto it = ns->wallpaper_surfs.find(key);
+    if (it != ns->wallpaper_surfs.end()) return it->second;
 
     GdkPixbuf *raw = gdk_pixbuf_new_from_file(ns->custom_wallpaper_path.c_str(), nullptr);
     if (!raw) return nullptr;
@@ -1468,9 +1480,9 @@ cairo_surface_t *get_cached_wallpaper_surface(NativeShellState *ns, int w, int h
     if (cropped != scaled) g_object_unref(cropped);
     g_object_unref(scaled);
 
-    ns->wallpaper_surf = surf;
-    ns->wallpaper_w = w;
-    ns->wallpaper_h = h;
+    if (surf) {
+        ns->wallpaper_surfs[key] = surf;
+    }
     return surf;
 }
 
@@ -1751,6 +1763,83 @@ void build_native_desktop(GtkApplication *app, NativeShellState *ns) {
     ns->wallpaper = get_wallpaper_pref();
     rebuild_desktop_shortcuts(ns);
     gtk_window_present(win);
+}
+
+void sync_monitor_wallpapers(GtkApplication *app, NativeShellState *ns) {
+    if (!app || !ns) return;
+    GdkDisplay *display = gdk_display_get_default();
+    GListModel *monitors = display ? gdk_display_get_monitors(display) : nullptr;
+    guint n_mons = monitors ? g_list_model_get_n_items(monitors) : 0;
+
+    GdkMonitor *primary = (n_mons > 0) ? GDK_MONITOR(g_list_model_get_item(monitors, 0)) : nullptr;
+    if (primary) {
+        GtkWindow *shell_wins[] = {
+            ns->desktop_win, ns->bar_win, ns->dock_win,
+            ns->cc_backdrop_win, ns->cc_win,
+            ns->launcher_backdrop_win, ns->launcher_win,
+            ns->osd_win
+        };
+        for (GtkWindow *w : shell_wins) {
+            if (w && gtk_layer_is_layer_window(w)) {
+                gtk_layer_set_monitor(w, primary);
+            }
+        }
+        g_object_unref(primary);
+    }
+
+    std::vector<GdkMonitor *> extra_mons;
+    for (guint i = 1; i < n_mons; ++i) {
+        GdkMonitor *m = GDK_MONITOR(g_list_model_get_item(monitors, i));
+        if (m) extra_mons.push_back(m);  // takes ref from g_list_model_get_item
+    }
+
+    // Remove stale extra monitor background windows
+    for (auto it = ns->extra_desktop_bgs.begin(); it != ns->extra_desktop_bgs.end();) {
+        bool still_present = std::find(extra_mons.begin(), extra_mons.end(), it->mon) != extra_mons.end();
+        if (!still_present) {
+            if (it->win) gtk_window_destroy(it->win);
+            if (it->mon) g_object_unref(it->mon);
+            it = ns->extra_desktop_bgs.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Create background wallpaper windows for newly attached secondary monitors
+    for (GdkMonitor *m : extra_mons) {
+        bool exists = false;
+        for (const auto &ebg : ns->extra_desktop_bgs) {
+            if (ebg.mon == m) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+            gtk_window_set_title(win, "SpinelDesktopSecondary");
+            gtk_layer_init_for_window(win);
+            gtk_layer_set_namespace(win, "spinel-desktop-extra");
+            gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_BOTTOM);
+            gtk_layer_set_monitor(win, m);
+            gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+            gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+            gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+            gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+            gtk_layer_set_exclusive_zone(win, -1);
+            gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+            GtkWidget *da = gtk_drawing_area_new();
+            gtk_widget_set_hexpand(da, TRUE);
+            gtk_widget_set_vexpand(da, TRUE);
+            gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_desktop_wallpaper, ns, nullptr);
+            gtk_window_set_child(win, da);
+            gtk_window_present(win);
+
+            g_object_ref(m);
+            ns->extra_desktop_bgs.push_back(NativeShellState::ExtraMonitorBg{m, win, da});
+        }
+        g_object_unref(m);
+    }
 }
 
 /* ==================== 3. Native Cairo Frosted Bottom Dock ==================== */
@@ -2716,6 +2805,22 @@ GtkWidget *make_cc_slider_card(NativeShellState *ns,
     gtk_widget_add_css_class(card, "spinel-cc-card");
 
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    if (is_volume) {
+        GtkWidget *mute_btn = make_cmd_button(ns->app_state, nullptr, "spinel-bar-icon-btn", "system:audio-mute-toggle");
+        gtk_widget_set_tooltip_text(mute_btn, "静音 / 取消静音");
+        GtkWidget *mda = gtk_drawing_area_new();
+        gtk_widget_set_size_request(mda, 14, 14);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(mda),
+            +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
+                auto *n = static_cast<NativeShellState *>(d);
+                GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+                gtk_widget_get_color(GTK_WIDGET(da), &fg);
+                draw_monochrome_glyph(cr, w, h, (n && n->cc_vol_muted) ? BarGlyph::Mute : BarGlyph::Volume, fg);
+            }, ns, nullptr);
+        gtk_button_set_child(GTK_BUTTON(mute_btn), mda);
+        ns->cc_vol_mute_da = mda;
+        gtk_box_append(GTK_BOX(head), mute_btn);
+    }
     GtkWidget *lbl = gtk_label_new(title);
     gtk_widget_add_css_class(lbl, "spinel-cc-title");
     gtk_widget_set_hexpand(lbl, TRUE);
@@ -2823,6 +2928,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, nullptr, &ns->cc_net_val));
     gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, nullptr, nullptr));
     gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Dnd, "active-indigo", "勿扰模式", "已关闭", "dnd:toggle", false, &ns->cc_dnd_circle, &ns->cc_dnd_val));
 
     GtkWidget *right_col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_hexpand(right_col, TRUE);
@@ -3653,6 +3759,8 @@ gboolean on_osd_hide_timeout(gpointer user_data) {
 void sync_cc_media_sliders(NativeShellState *ns) {
     if (!ns) return;
     MediaSnapshot media = collect_media_state();
+    ns->cc_vol_muted = media.volume_muted;
+    if (ns->cc_vol_mute_da) gtk_widget_queue_draw(ns->cc_vol_mute_da);
     ns->cc_updating_sliders = true;
     if (ns->cc_vol_scale && ns->cc_vol_pct) {
         gtk_range_set_value(GTK_RANGE(ns->cc_vol_scale), media.volume);
@@ -3693,6 +3801,18 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     build_native_control_center(app, ns);
     build_native_launcher(app, ns);
     build_osd_window(app, ns);
+    sync_monitor_wallpapers(app, ns);
+    if (GdkDisplay *disp = gdk_display_get_default()) {
+        if (GListModel *mons = gdk_display_get_monitors(disp)) {
+            ns->monitor_model = G_LIST_MODEL(g_object_ref(mons));
+            ns->monitor_sig_id = g_signal_connect(mons, "items-changed",
+                G_CALLBACK(+[](GListModel *, guint, guint, guint, gpointer d) {
+                    auto *n = static_cast<NativeShellState *>(d);
+                    if (!n || !n->desktop_win) return;
+                    sync_monitor_wallpapers(gtk_window_get_application(n->desktop_win), n);
+                }), ns);
+        }
+    }
     show_desktop_startup_splash(app, ns);
 
     native_shell_sync_telemetry(state);
@@ -3706,16 +3826,26 @@ void shutdown_native_shell(AppState *state) {
     if (ns->osd_timer) g_source_remove(ns->osd_timer);
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
     if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
+    if (ns->monitor_model) {
+        if (ns->monitor_sig_id) g_signal_handler_disconnect(ns->monitor_model, ns->monitor_sig_id);
+        g_object_unref(ns->monitor_model);
+        ns->monitor_model = nullptr;
+    }
+    for (auto &ebg : ns->extra_desktop_bgs) {
+        if (ebg.win) gtk_window_destroy(ebg.win);
+        if (ebg.mon) g_object_unref(ebg.mon);
+    }
+    ns->extra_desktop_bgs.clear();
     if (ns->css_provider) {
         if (GdkDisplay *display = gdk_display_get_default()) {
             gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
         }
         g_object_unref(ns->css_provider);
     }
-    if (ns->wallpaper_surf) {
-        cairo_surface_destroy(ns->wallpaper_surf);
-        ns->wallpaper_surf = nullptr;
+    for (auto &kv : ns->wallpaper_surfs) {
+        if (kv.second) cairo_surface_destroy(kv.second);
     }
+    ns->wallpaper_surfs.clear();
     for (auto &kv : ns->surface_cache) {
         if (kv.second) cairo_surface_destroy(kv.second);
     }
@@ -3806,13 +3936,17 @@ void native_shell_sync_theme(AppState *state) {
     std::string next_wp = get_custom_wallpaper_image();
     if (next_wp != ns->custom_wallpaper_path) {
         ns->custom_wallpaper_path = next_wp;
-        if (ns->wallpaper_surf) {
-            cairo_surface_destroy(ns->wallpaper_surf);
-            ns->wallpaper_surf = nullptr;
+        for (auto &kv : ns->wallpaper_surfs) {
+            if (kv.second) cairo_surface_destroy(kv.second);
         }
+        ns->wallpaper_surfs.clear();
     }
     apply_native_css(ns);
     if (ns->desktop_bg_da) gtk_widget_queue_draw(ns->desktop_bg_da);
+    for (const auto &ebg : ns->extra_desktop_bgs) {
+        if (ebg.da) gtk_widget_queue_draw(ebg.da);
+        if (ebg.win) gtk_widget_queue_draw(GTK_WIDGET(ebg.win));
+    }
     if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
     if (ns->desktop_win) gtk_widget_queue_draw(GTK_WIDGET(ns->desktop_win));
     if (ns->dock_win) gtk_widget_queue_draw(GTK_WIDGET(ns->dock_win));
@@ -3849,6 +3983,13 @@ void native_shell_sync_perf(AppState *state) {
         const char *lbl = cfg.mangohud == "full" ? "详细监控" : (cfg.mangohud == "off" ? "已关闭" : "精简监控");
         gtk_label_set_text(GTK_LABEL(ns->cc_mh_val), lbl);
     }
+
+    bool dnd = get_dnd_enabled();
+    if (ns->cc_dnd_circle) {
+        if (dnd) gtk_widget_add_css_class(ns->cc_dnd_circle, "active-indigo");
+        else gtk_widget_remove_css_class(ns->cc_dnd_circle, "active-indigo");
+    }
+    if (ns->cc_dnd_val) gtk_label_set_text(GTK_LABEL(ns->cc_dnd_val), dnd ? "已开启" : "已关闭");
 }
 
 void native_shell_set_cc_visible(AppState *state, bool visible) {

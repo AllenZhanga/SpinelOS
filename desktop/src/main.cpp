@@ -586,6 +586,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     } else if (cmd.rfind("system:audio-set:", 0) == 0) {
         int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
+    } else if (cmd == "system:audio-mute-toggle") {
+        trigger_media_osd(state, "mute");
+    } else if (cmd == "dnd:toggle") {
+        toggle_dnd_mode(state);
     } else if (cmd.rfind("system:brightness-set:", 0) == 0) {
         int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 5, 100);
         set_system_brightness_pct(pct);

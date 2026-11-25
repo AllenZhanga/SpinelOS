@@ -103,6 +103,8 @@ void push_process_list(AppState *state);
 void kill_process_by_pid(AppState *state, int pid, bool force);
 
 void sync_notification_theme(bool is_light);
+bool get_dnd_enabled();
+void toggle_dnd_mode(AppState *state);
 void push_audio_power_state(AppState *state);
 void set_audio_default_node(AppState *state, int id, bool is_sink);
 void set_mic_volume(AppState *state, int pct);
