@@ -23,6 +23,7 @@ struct TrackedWindow {
     bool activated = false;
     bool minimized = false;
     bool maximized = false;
+    bool fullscreen = false;
     bool ready = false;
 };
 
@@ -72,6 +73,7 @@ void on_state(void *data, zwlr_foreign_toplevel_handle_v1 *, wl_array *state_arr
     w->activated = false;
     w->minimized = false;
     w->maximized = false;
+    w->fullscreen = false;
 
     const uint32_t *vals = static_cast<const uint32_t *>(state_arr->data);
     size_t count = state_arr->size / sizeof(uint32_t);
@@ -80,6 +82,7 @@ void on_state(void *data, zwlr_foreign_toplevel_handle_v1 *, wl_array *state_arr
             case ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_ACTIVATED: w->activated = true; break;
             case ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED: w->minimized = true; break;
             case ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED: w->maximized = true; break;
+            case ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN: w->fullscreen = true; break;
             default: break;
         }
     }
@@ -264,6 +267,7 @@ std::vector<TrackedWindowInfo> list_tracked_windows() {
         info.activated = w->activated;
         info.minimized = w->minimized;
         info.maximized = w->maximized;
+        info.fullscreen = w->fullscreen;
         out.push_back(std::move(info));
     }
     return out;
@@ -291,6 +295,7 @@ std::vector<TrackedWindowInfo> list_tracked_windows_mru() {
         info.activated = w->activated;
         info.minimized = w->minimized;
         info.maximized = w->maximized;
+        info.fullscreen = w->fullscreen;
         out.push_back(std::move(info));
     }
     return out;
@@ -313,7 +318,8 @@ void push_windows_to_ui(AppState *state) {
            << "\"app_id\":\"" << json_escape(list[i].app_id) << "\","
            << "\"activated\":" << (list[i].activated ? "true" : "false") << ","
            << "\"minimized\":" << (list[i].minimized ? "true" : "false") << ","
-           << "\"maximized\":" << (list[i].maximized ? "true" : "false")
+           << "\"maximized\":" << (list[i].maximized ? "true" : "false") << ","
+           << "\"fullscreen\":" << (list[i].fullscreen ? "true" : "false")
            << "}";
     }
     js << "]);";

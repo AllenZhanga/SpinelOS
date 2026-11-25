@@ -106,6 +106,7 @@ struct NativeShellState {
     GtkWidget *bar_cc_btn = nullptr;
     GtkWidget *bar_clock_lbl = nullptr;
     guint clock_timer_id = 0;
+    bool fullscreen_hidden = false;
 
     // Desktop
     GtkWindow *desktop_win = nullptr;

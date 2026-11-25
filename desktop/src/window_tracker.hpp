@@ -13,6 +13,7 @@ struct TrackedWindowInfo {
     bool activated = false;
     bool minimized = false;
     bool maximized = false;
+    bool fullscreen = false;
 };
 
 void init_window_tracker(AppState *state);

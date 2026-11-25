@@ -1200,6 +1200,37 @@ void native_shell_sync_windows(AppState *state) {
     if (ns->bar_active_lbl) gtk_label_set_text(GTK_LABEL(ns->bar_active_lbl), active_name.c_str());
 
     shell_internal::rebuild_dock_items(ns, windows);
+
+    bool hide_for_fullscreen = false;
+    if (active_win && !active_win->minimized && active_win->fullscreen) {
+        hide_for_fullscreen = true;
+    } else if (!active_win) {
+        for (const auto &w : windows) {
+            if (!w.minimized && w.fullscreen) {
+                hide_for_fullscreen = true;
+                break;
+            }
+        }
+    }
+    if (hide_for_fullscreen != ns->fullscreen_hidden) {
+        ns->fullscreen_hidden = hide_for_fullscreen;
+        if (hide_for_fullscreen) {
+            if (ns->dock_popover && gtk_widget_get_visible(ns->dock_popover)) {
+                gtk_popover_popdown(GTK_POPOVER(ns->dock_popover));
+            }
+            if (ns->clip_popover && gtk_widget_get_visible(ns->clip_popover)) {
+                gtk_popover_popdown(GTK_POPOVER(ns->clip_popover));
+            }
+            if (ns->notif_popover && gtk_widget_get_visible(ns->notif_popover)) {
+                gtk_popover_popdown(GTK_POPOVER(ns->notif_popover));
+            }
+            if (ns->bar_win) gtk_widget_set_visible(GTK_WIDGET(ns->bar_win), FALSE);
+            if (ns->dock_win) gtk_widget_set_visible(GTK_WIDGET(ns->dock_win), FALSE);
+        } else {
+            if (ns->bar_win) gtk_widget_set_visible(GTK_WIDGET(ns->bar_win), TRUE);
+            if (ns->dock_win) gtk_widget_set_visible(GTK_WIDGET(ns->dock_win), TRUE);
+        }
+    }
 }
 
 void native_shell_sync_desktop(AppState *state) {

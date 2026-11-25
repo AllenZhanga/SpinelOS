@@ -318,7 +318,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-bar");
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_TOP);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
