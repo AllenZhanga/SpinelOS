@@ -103,6 +103,14 @@ ln -sf /usr/lib/systemd/system/bluetooth.service \
 ln -sf /usr/lib/systemd/system/power-profiles-daemon.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/power-profiles-daemon.service"
 
+# Remove releng's systemd-networkd/iwd defaults so NetworkManager exclusively manages all NICs/Wi-Fi
+rm -f "${PROFILE_DIR}/airootfs/etc/systemd/network"/*.network \
+      "${PROFILE_DIR}/airootfs/etc/systemd/system/dbus-org.freedesktop.network1.service" \
+      "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/systemd-networkd.service" \
+      "${PROFILE_DIR}/airootfs/etc/systemd/system/sockets.target.wants/systemd-networkd.socket" \
+      "${PROFILE_DIR}/airootfs/etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service" \
+      "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/iwd.service"
+
 # Disable slow boot-blocking wait-online / mirror-ranking services on Live ISO
 ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/NetworkManager-wait-online.service"
 ln -sf /dev/null "${PROFILE_DIR}/airootfs/etc/systemd/system/systemd-networkd-wait-online.service"
