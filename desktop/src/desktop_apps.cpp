@@ -3,6 +3,8 @@
 #include "native_shell.hpp"
 #include "system_control.hpp"
 
+#include <gtk/gtk.h>
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -27,48 +29,84 @@ struct DesktopApp {
     bool terminal = false;
 };
 
-std::string resolve_icon_path(const std::string &icon) {
+std::string resolve_icon_path(const std::string &icon_raw) {
+    std::string icon = trim_copy(icon_raw);
     if (icon.empty()) return "";
+    if (icon.size() >= 2 && ((icon.front() == '"' && icon.back() == '"') ||
+                              (icon.front() == '\'' && icon.back() == '\''))) {
+        icon = icon.substr(1, icon.size() - 2);
+    }
     std::error_code ec;
-    if (icon.front() == '/' && fs::exists(icon, ec)) {
+    if (icon.front() == '/' && fs::exists(icon, ec) && fs::is_regular_file(icon, ec)) {
         return icon;
     }
 
-    fs::path local_icons = fs::path(home_dir()) / ".local/share/icons/hicolor";
-    fs::path flatpak_user_icons = fs::path(home_dir()) / ".local/share/flatpak/exports/share/icons/hicolor";
-    fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
-    const std::vector<fs::path> search_dirs = {
-        local_icons / "scalable/apps",
-        local_icons / "128x128/apps",
-        local_icons / "64x64/apps",
-        local_icons / "256x256/apps",
-        flatpak_user_icons / "scalable/apps",
-        flatpak_user_icons / "128x128/apps",
-        flatpak_user_icons / "64x64/apps",
-        flatpak_user_icons / "256x256/apps",
-        flatpak_sys_icons / "scalable/apps",
-        flatpak_sys_icons / "128x128/apps",
-        flatpak_sys_icons / "64x64/apps",
-        flatpak_sys_icons / "256x256/apps",
-        "/usr/share/icons/hicolor/scalable/apps",
-        "/usr/share/icons/hicolor/128x128/apps",
-        "/usr/share/icons/hicolor/64x64/apps",
-        "/usr/share/icons/hicolor/256x256/apps",
-        "/usr/share/icons/hicolor/512x512/apps",
-        "/usr/share/icons/hicolor/48x48/apps",
-        "/usr/share/icons/Adwaita/scalable/apps",
-        "/usr/share/icons/Adwaita/scalable/places",
-        "/usr/share/icons/Adwaita/128x128/apps",
-        "/usr/share/icons/Adwaita/256x256/apps",
-        "/usr/share/pixmaps"
+    const std::string home = home_dir();
+    const fs::path local_icons = fs::path(home) / ".local/share/icons/hicolor";
+    const fs::path flatpak_user_icons = fs::path(home) / ".local/share/flatpak/exports/share/icons/hicolor";
+    const fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
+    const std::vector<fs::path> icon_roots = {
+        local_icons,
+        flatpak_user_icons,
+        flatpak_sys_icons,
+        "/usr/local/share/icons/hicolor",
+        "/usr/share/icons/hicolor",
+        "/usr/share/icons/Adwaita"
     };
-    const std::vector<std::string> exts = {".svg", ".png", ""};
+    const std::vector<const char *> subdirs = {
+        "scalable/apps", "512x512/apps", "256x256/apps", "192x192/apps",
+        "128x128/apps", "96x96/apps", "64x64/apps", "48x48/apps",
+        "32x32/apps", "0x0/apps", "scalable/places"
+    };
+    const std::vector<std::string> exts = {"", ".svg", ".png"};
 
-    for (const auto &dir : search_dirs) {
+    for (const auto &root : icon_roots) {
+        if (!fs::is_directory(root, ec)) continue;
+        for (const char *sub : subdirs) {
+            fs::path dir = root / sub;
+            for (const auto &ext : exts) {
+                fs::path p = dir / (icon + ext);
+                if (fs::exists(p, ec) && fs::is_regular_file(p, ec)) {
+                    return p.string();
+                }
+            }
+        }
+    }
+
+    for (const fs::path &pdir : {fs::path(home) / ".local/share/pixmaps", fs::path("/usr/share/pixmaps")}) {
+        if (!fs::is_directory(pdir, ec)) continue;
         for (const auto &ext : exts) {
-            fs::path p = dir / (icon + ext);
+            fs::path p = pdir / (icon + ext);
             if (fs::exists(p, ec) && fs::is_regular_file(p, ec)) {
                 return p.string();
+            }
+        }
+    }
+
+    if (GdkDisplay *disp = gdk_display_get_default()) {
+        if (GtkIconTheme *theme = gtk_icon_theme_get_for_display(disp)) {
+            std::string lookup_name = icon;
+            for (const char *sfx : {".png", ".svg", ".xpm"}) {
+                std::string s(sfx);
+                if (lookup_name.size() > s.size() &&
+                    lookup_name.compare(lookup_name.size() - s.size(), s.size(), s) == 0) {
+                    lookup_name = lookup_name.substr(0, lookup_name.size() - s.size());
+                    break;
+                }
+            }
+            GtkIconPaintable *paintable = gtk_icon_theme_lookup_icon(
+                theme, lookup_name.c_str(), nullptr, 128, 1, GTK_TEXT_DIR_NONE, GTK_ICON_LOOKUP_PRELOAD);
+            if (paintable) {
+                std::string resolved;
+                if (GFile *gf = gtk_icon_paintable_get_file(paintable)) {
+                    g_autofree char *fpath = g_file_get_path(gf);
+                    if (fpath && fs::exists(fpath, ec) && fs::is_regular_file(fpath, ec)) {
+                        resolved = fpath;
+                    }
+                    g_object_unref(gf);
+                }
+                g_object_unref(paintable);
+                if (!resolved.empty()) return resolved;
             }
         }
     }

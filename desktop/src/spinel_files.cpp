@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -765,7 +767,73 @@ std::string sanitize_url_scheme(const std::string &raw) {
     return out;
 }
 
-std::string find_nearby_app_icon(const fs::path &exe_path) {
+std::string extract_asar_png_icon(const fs::path &asar_path, const std::string &slug) {
+    std::ifstream ifs(asar_path, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) return "";
+    std::streamsize total_sz = ifs.tellg();
+    if (total_sz < 32) return "";
+    ifs.seekg(0, std::ios::beg);
+
+    uint8_t hdr[16]{};
+    if (!ifs.read(reinterpret_cast<char *>(hdr), 16)) return "";
+    auto u32le = [](const uint8_t *p) -> uint32_t {
+        return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+               (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    };
+    uint32_t pickle_sz = u32le(hdr + 4);
+    uint32_t jlen = u32le(hdr + 12);
+    if (jlen == 0 || jlen > 4u * 1024u * 1024u || 8ULL + pickle_sz > static_cast<uint64_t>(total_sz)) {
+        return "";
+    }
+
+    std::string jstr(jlen, '\0');
+    if (!ifs.read(&jstr[0], jlen)) return "";
+    uint64_t base_offset = 8ULL + pickle_sz;
+
+    for (const char *key : {"\"icon.png\":{", "\"code.png\":{", "\"logo.png\":{", "\"app.png\":{"}) {
+        size_t pos = jstr.find(key);
+        if (pos == std::string::npos) continue;
+        size_t obj_start = jstr.find('{', pos);
+        size_t obj_end = jstr.find('}', obj_start);
+        if (obj_start == std::string::npos || obj_end == std::string::npos) continue;
+        std::string sub = jstr.substr(obj_start, obj_end - obj_start + 1);
+
+        auto find_uint = [&](const char *field, uint64_t &out_val) -> bool {
+            size_t fp = sub.find(field);
+            if (fp == std::string::npos) return false;
+            fp = sub.find(':', fp);
+            if (fp == std::string::npos) return false;
+            ++fp;
+            while (fp < sub.size() && (sub[fp] == ' ' || sub[fp] == '"')) ++fp;
+            if (fp >= sub.size() || !std::isdigit(static_cast<unsigned char>(sub[fp]))) return false;
+            out_val = std::strtoull(sub.c_str() + fp, nullptr, 10);
+            return true;
+        };
+
+        uint64_t sz = 0, off = 0;
+        if (!find_uint("\"size\"", sz) || !find_uint("\"offset\"", off)) continue;
+        if (sz < 16 || sz > 4ULL * 1024 * 1024 || base_offset + off + sz > static_cast<uint64_t>(total_sz)) continue;
+
+        std::string bytes(sz, '\0');
+        ifs.seekg(static_cast<std::streamoff>(base_offset + off), std::ios::beg);
+        if (!ifs.read(&bytes[0], static_cast<std::streamsize>(sz))) continue;
+        static const uint8_t kPngMagic[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+        if (std::memcmp(bytes.data(), kPngMagic, 8) != 0) continue;
+
+        std::error_code ec;
+        fs::path icon_dir = fs::path(home_dir()) / ".local/share/icons/hicolor/256x256/apps";
+        fs::create_directories(icon_dir, ec);
+        fs::path out_png = icon_dir / ("spinelos-user-" + slug + ".png");
+        std::ofstream ofs(out_png, std::ios::binary);
+        if (ofs.is_open()) {
+            ofs.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            return out_png.string();
+        }
+    }
+    return "";
+}
+
+std::string find_nearby_app_icon(const fs::path &exe_path, const std::string &slug) {
     std::error_code ec;
     fs::path dir = exe_path.parent_path();
     std::string stem_low = to_lower_copy(exe_path.stem().string());
@@ -789,7 +857,13 @@ std::string find_nearby_app_icon(const fs::path &exe_path) {
             }
         }
     }
-    return !fallback.empty() ? fallback : "application-x-executable";
+    if (!fallback.empty()) return fallback;
+    fs::path asar = dir / "resources/app.asar";
+    if (fs::is_regular_file(asar, ec)) {
+        std::string extracted = extract_asar_png_icon(asar, slug);
+        if (!extracted.empty()) return extracted;
+    }
+    return "application-x-executable";
 }
 
 fs::path user_desktop_entry_path(const fs::path &exe_path) {
@@ -922,7 +996,8 @@ void do_add_to_app_center(FilesWin *fw, const fs::path &target) {
         }
         quoted_exe += '"';
 
-        std::string icon = find_nearby_app_icon(c->target);
+        std::string slug = sanitize_app_slug(c->target.filename().string());
+        std::string icon = find_nearby_app_icon(c->target, slug);
         std::ostringstream oss;
         oss << "[Desktop Entry]\n"
             << "Name=" << app_name << "\n"

@@ -1,6 +1,6 @@
 (() => {
   const UI = window.SpinelUI;
-  const { state, sendCommand, formatBytes, showFeedback, forceSoftwareRepaint, fillIconContainer, matchAppKind, renderDesktopShortcuts } = UI;
+  const { state, sendCommand, formatBytes, showFeedback, forceSoftwareRepaint, fillIconContainer, findAppIconUri, matchAppKind, renderDesktopShortcuts } = UI;
 
   /* ---------------- 3. Performance Control Strip ---------------- */
   function buildLaunchOptionString(cfg) {
@@ -312,7 +312,7 @@
       head.className = "store-card-head";
       const iconWrap = document.createElement("div");
       iconWrap.className = "store-card-icon";
-      fillIconContainer(iconWrap, "", matchAppKind(`${app.id} ${app.pkg}`), app.name);
+      fillIconContainer(iconWrap, findAppIconUri([app.id, app.pkg, app.name]), matchAppKind(`${app.id} ${app.pkg}`), app.name);
 
       const info = document.createElement("div");
       info.className = "store-card-info";
