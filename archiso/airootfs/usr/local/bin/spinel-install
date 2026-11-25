@@ -279,6 +279,10 @@ rm -f /mnt/etc/systemd/system/multi-user.target.wants/pacman-init.service
 rm -f /mnt/etc/systemd/system/multi-user.target.wants/choose-mirror.service
 rm -f /mnt/etc/systemd/system/multi-user.target.wants/livecd-alsa-unmuter.service
 rm -f /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd-wait-online.service
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd.service
+rm -f /mnt/etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+rm -f /mnt/etc/systemd/system/multi-user.target.wants/iwd.service
+rm -f /mnt/etc/systemd/network/*.network /mnt/etc/systemd/network/*.link 2>/dev/null || true
 rm -f /mnt/etc/systemd/system/etc-pacman.d-gnupg.mount
 rm -f /mnt/etc/systemd/system/getty@tty1.service.d/autologin.conf
 rm -f /mnt/etc/sysusers.d/gamer.conf

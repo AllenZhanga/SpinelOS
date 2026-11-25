@@ -450,13 +450,26 @@ void test_ipc_router() {
     EXPECT(!is_valid_block_dev_path("/dev/../etc/passwd"));
     EXPECT(!is_valid_block_dev_path("/dev/sda1;rm -rf /"));
     EXPECT(!is_valid_block_dev_path("/tmp/sda1"));
-    EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
     EXPECT(is_valid_audio_node_name("alsa_output.pci-0000_01_00.1.hdmi-stereo"));
     EXPECT(!is_valid_audio_node_name("alsa_output bad\nnode"));
+    last_tab.clear();
+    EXPECT(dispatch_ipc_command(&dummy, "settings:open:devices", mock_actions, &reply));
+    EXPECT(last_tab == "devices");
     static bool doctor_opened = false;
     mock_actions.open_doctor = +[](AppState *) { doctor_opened = true; };
     EXPECT(dispatch_ipc_command(&dummy, "doctor:open", mock_actions, &reply));
     EXPECT(doctor_opened);
+
+    // Network IPv4 & Netmask validation + safe IPC dispatch
+    EXPECT(is_valid_ipv4_addr("192.168.31.189"));
+    EXPECT(!is_valid_ipv4_addr("999.168.31.1"));
+    int pfx = 0;
+    EXPECT(parse_ipv4_mask_prefix("255.255.255.0", pfx) && pfx == 24);
+    EXPECT(parse_ipv4_mask_prefix("/16", pfx) && pfx == 16);
+    EXPECT(!parse_ipv4_mask_prefix("255.0.255.0", pfx));
+    dummy.shutting_down.store(true);
+    EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "settings:net-ip-apply\ndevice=eth0\nmethod=auto", mock_actions, &reply));
 }
 
 }  // namespace

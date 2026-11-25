@@ -646,11 +646,30 @@
           item.className = "disk-item";
           const left = document.createElement("div");
           const t = document.createElement("div"); t.className = "disk-title"; t.textContent = `${ifx.device} (${ifx.type})`;
-          const sub = document.createElement("div"); sub.className = "disk-sub"; sub.textContent = ifx.connection ? `当前连接: ${ifx.connection}` : `状态: ${ifx.state}`;
+          const modeLabel = ifx.method === "manual" ? "手动静态 IP" : "DHCP 自动";
+          const addrDesc = ifx.ip ? `${ifx.ip}/${ifx.prefix || "24"}` : "未分配 IP";
+          const gwDesc = ifx.gateway ? ` · 网关 ${ifx.gateway}` : "";
+          const dnsDesc = ifx.dns ? ` · DNS ${ifx.dns}` : "";
+          const sub = document.createElement("div"); sub.className = "disk-sub";
+          sub.textContent = ifx.connection
+            ? `${ifx.connection} · ${modeLabel} · ${addrDesc}${gwDesc}${dnsDesc}`
+            : `状态: ${ifx.state}`;
           left.append(t, sub);
           const right = document.createElement("div"); right.className = "disk-tags";
-          const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = ifx.state;
+          const tag = document.createElement("span"); tag.className = "tag";
+          tag.textContent = ifx.ip ? (ifx.method === "manual" ? "静态" : "DHCP") : ifx.state;
           right.appendChild(tag);
+
+          const cfgBtn = document.createElement("button");
+          cfgBtn.type = "button";
+          cfgBtn.className = "btn small primary";
+          cfgBtn.textContent = "配置 IP / DNS";
+          cfgBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            openNetIpConfig(ifx);
+          });
+          right.appendChild(cfgBtn);
+
           if (ifx.state === "connected") {
             const disc = document.createElement("button");
             disc.className = "btn small danger"; disc.textContent = "断开";
@@ -700,9 +719,75 @@
     });
   };
 
+  let activeNetCfgIface = null;
+
+  function syncNetMethodInputs() {
+    const method = document.getElementById("net-ip-method")?.value || "auto";
+    const isManual = method === "manual";
+    ["net-ip-addr", "net-ip-mask", "net-ip-gw"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !isManual;
+    });
+  }
+
+  function openNetIpConfig(ifx) {
+    activeNetCfgIface = ifx;
+    const box = document.getElementById("net-ip-config-box");
+    const titleEl = document.getElementById("net-cfg-title");
+    const methodEl = document.getElementById("net-ip-method");
+    const addrEl = document.getElementById("net-ip-addr");
+    const maskEl = document.getElementById("net-ip-mask");
+    const gwEl = document.getElementById("net-ip-gw");
+    const dnsEl = document.getElementById("net-ip-dns");
+
+    if (titleEl) titleEl.textContent = `配置网络接口: ${ifx.device}${ifx.connection ? ` (${ifx.connection})` : ""}`;
+    if (methodEl) methodEl.value = ifx.method === "manual" ? "manual" : "auto";
+    if (addrEl) addrEl.value = ifx.ip || "";
+    if (maskEl) maskEl.value = ifx.prefix || "24";
+    if (gwEl) gwEl.value = ifx.gateway || "";
+    if (dnsEl) dnsEl.value = ifx.dns || "";
+    UI.syncAllCustomSelects?.();
+    syncNetMethodInputs();
+    box?.classList.remove("hidden");
+    showFeedback("wifi-feedback", "");
+  }
+
+  document.getElementById("net-ip-method")?.addEventListener("change", syncNetMethodInputs);
+  document.getElementById("btn-net-ip-cancel")?.addEventListener("click", () => {
+    activeNetCfgIface = null;
+    document.getElementById("net-ip-config-box")?.classList.add("hidden");
+  });
+  document.querySelectorAll("[data-dns-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const el = document.getElementById("net-ip-dns");
+      if (el) el.value = btn.getAttribute("data-dns-preset") || "";
+    });
+  });
+  document.getElementById("btn-net-ip-save")?.addEventListener("click", () => {
+    if (!activeNetCfgIface) return;
+    const method = document.getElementById("net-ip-method")?.value || "auto";
+    const ip = (document.getElementById("net-ip-addr")?.value || "").trim();
+    const mask = (document.getElementById("net-ip-mask")?.value || "").trim();
+    const gw = (document.getElementById("net-ip-gw")?.value || "").trim();
+    const dns = (document.getElementById("net-ip-dns")?.value || "").trim();
+    sendCommand([
+      "settings:net-ip-apply",
+      `device=${activeNetCfgIface.device}`,
+      `connection=${activeNetCfgIface.connection || ""}`,
+      `method=${method}`,
+      `ip=${ip}`,
+      `mask=${mask}`,
+      `gateway=${gw}`,
+      `dns=${dns}`
+    ].join("\n"));
+  });
+
   window.__spinelWifiAction = (ok, msg) => {
     showFeedback("wifi-feedback", msg || (ok ? "操作成功" : "操作失败"), !ok);
-    if (ok) document.getElementById("wifi-connect-box")?.classList.add("hidden");
+    if (ok) {
+      document.getElementById("wifi-connect-box")?.classList.add("hidden");
+      document.getElementById("net-ip-config-box")?.classList.add("hidden");
+    }
   };
 
   window.__spinelBtState = (data) => {

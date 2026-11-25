@@ -411,6 +411,46 @@
         </div>
       </div>
 
+      <div id="net-ip-config-box" class="connect-box hidden" style="flex-direction: column; align-items: stretch; gap: 10px;">
+        <div class="connect-head">
+          <strong id="net-cfg-title">配置 IP 与 DNS</strong>
+          <button type="button" class="icon-btn" id="btn-net-ip-cancel">取消</button>
+        </div>
+        <div class="form-grid">
+          <label class="field">
+            <span>IPv4 分配方式</span>
+            <select id="net-ip-method">
+              <option value="auto">自动获取 (DHCP)</option>
+              <option value="manual">手动设置静态 IP</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>IP 地址（静态模式必填）</span>
+            <input type="text" id="net-ip-addr" placeholder="例如 192.168.31.189" />
+          </label>
+          <label class="field">
+            <span>子网掩码 / 前缀长度</span>
+            <input type="text" id="net-ip-mask" placeholder="例如 255.255.255.0 或 24" value="24" />
+          </label>
+          <label class="field">
+            <span>默认网关（可选）</span>
+            <input type="text" id="net-ip-gw" placeholder="例如 192.168.31.1" />
+          </label>
+          <label class="field" style="grid-column: 1 / -1;">
+            <span>自定义 DNS 服务器（多个用逗号分隔；DHCP 模式下填写也会优先使用）</span>
+            <input type="text" id="net-ip-dns" placeholder="例如 223.5.5.5, 119.29.29.29（留空则自动跟随路由器）" />
+          </label>
+        </div>
+        <div class="footer-actions" style="justify-content: space-between; flex-wrap: wrap;">
+          <div class="footer-actions">
+            <button type="button" class="btn small ghost" data-dns-preset="223.5.5.5, 119.29.29.29">国内高速 DNS (阿里/腾讯)</button>
+            <button type="button" class="btn small ghost" data-dns-preset="1.1.1.1, 8.8.8.8">国际公共 DNS (1.1.1.1)</button>
+            <button type="button" class="btn small ghost" data-dns-preset="">恢复默认 DNS</button>
+          </div>
+          <button type="button" class="btn small primary" id="btn-net-ip-save">保存并应用网络配置</button>
+        </div>
+      </div>
+
       <div id="wifi-feedback" class="feedback-banner hidden"></div>
 
       <div class="inst-section">

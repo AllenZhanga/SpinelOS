@@ -4,6 +4,8 @@
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 
+#include <arpa/inet.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -579,12 +581,64 @@ void push_wifi_state(AppState *state, bool rescan) {
             if (line.empty()) continue;
             auto cols = split_nmcli_escaped(line);
             if (cols.size() < 4 || (cols[1] != "wifi" && cols[1] != "ethernet")) continue;
+            const std::string &dev = cols[0];
+            const std::string &con_name = cols[3];
+
+            std::string ip_cidr, gw, dns_csv, ip_method = "auto";
+            if (is_valid_iface(dev)) {
+                std::string dinfo;
+                int drc = 0;
+                if (run_argv_capture({"nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS", "dev", "show", dev}, dinfo, drc) && drc == 0) {
+                    std::vector<std::string> dns_list;
+                    for (const auto &dl : split_lines(dinfo)) {
+                        auto p = dl.find(':');
+                        if (p == std::string::npos) continue;
+                        std::string k = dl.substr(0, p);
+                        std::string v = trim_copy(dl.substr(p + 1));
+                        if (k.rfind("IP4.ADDRESS", 0) == 0 && ip_cidr.empty()) ip_cidr = v;
+                        else if (k.rfind("IP4.GATEWAY", 0) == 0 && gw.empty() && v != "--") gw = v;
+                        else if (k.rfind("IP4.DNS", 0) == 0 && !v.empty() && v != "--") dns_list.push_back(v);
+                    }
+                    for (size_t i = 0; i < dns_list.size(); ++i) {
+                        if (i) dns_csv += ", ";
+                        dns_csv += dns_list[i];
+                    }
+                }
+                if (!con_name.empty() && con_name != "--") {
+                    std::string cinfo;
+                    int crc = 0;
+                    if (run_argv_capture({"nmcli", "-t", "-f", "ipv4.method,ipv4.dns", "con", "show", con_name}, cinfo, crc) && crc == 0) {
+                        for (const auto &cl : split_lines(cinfo)) {
+                            auto p = cl.find(':');
+                            if (p == std::string::npos) continue;
+                            std::string k = cl.substr(0, p);
+                            std::string v = trim_copy(cl.substr(p + 1));
+                            if (k == "ipv4.method" && v == "manual") ip_method = "manual";
+                            else if (k == "ipv4.dns" && !v.empty() && v != "--") dns_csv = v;
+                        }
+                    }
+                }
+            }
+
+            std::string ip_only = ip_cidr;
+            std::string prefix_only = "24";
+            auto sl = ip_cidr.find('/');
+            if (sl != std::string::npos) {
+                ip_only = ip_cidr.substr(0, sl);
+                prefix_only = ip_cidr.substr(sl + 1);
+            }
+
             if (!first_dev) js << ",";
             first_dev = false;
-            js << "{\"device\":\"" << json_escape(cols[0]) << "\","
+            js << "{\"device\":\"" << json_escape(dev) << "\","
                << "\"type\":\"" << json_escape(cols[1]) << "\","
                << "\"state\":\"" << json_escape(cols[2]) << "\","
-               << "\"connection\":\"" << json_escape(cols[3]) << "\"}";
+               << "\"connection\":\"" << json_escape(con_name == "--" ? "" : con_name) << "\","
+               << "\"method\":\"" << json_escape(ip_method) << "\","
+               << "\"ip\":\"" << json_escape(ip_only) << "\","
+               << "\"prefix\":\"" << json_escape(prefix_only) << "\","
+               << "\"gateway\":\"" << json_escape(gw) << "\","
+               << "\"dns\":\"" << json_escape(dns_csv) << "\"}";
         }
         js << "],\"networks\":[";
         bool first_net = true;
@@ -657,6 +711,179 @@ void disconnect_iface(AppState *state, const std::string &iface) {
            << (rc == 0 ? "true" : "false") << ",\"" << json_escape(out) << "\");";
         sys_internal::post_js_to_main(state, js.str());
         push_wifi_state(state, false);
+    }).detach();
+}
+
+bool is_valid_ipv4_addr(const std::string &ip) {
+    if (ip.empty() || ip.size() > 15) return false;
+    struct in_addr addr{};
+    return inet_pton(AF_INET, ip.c_str(), &addr) == 1;
+}
+
+bool parse_ipv4_mask_prefix(const std::string &mask_or_prefix, int &prefix_out) {
+    std::string s = trim_copy(mask_or_prefix);
+    if (s.empty()) return false;
+    if (s.front() == '/') s.erase(s.begin());
+    if (s.empty()) return false;
+
+    bool all_digits = std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (all_digits) {
+        int p = std::atoi(s.c_str());
+        if (p >= 1 && p <= 32) {
+            prefix_out = p;
+            return true;
+        }
+        return false;
+    }
+
+    struct in_addr addr{};
+    if (inet_pton(AF_INET, s.c_str(), &addr) != 1) return false;
+    uint32_t m = ntohl(addr.s_addr);
+    if (m == 0) return false;
+    // Verify contiguous leading 1s: ~m + 1 must be a power of two (including 0 when m == 0xffffffff)
+    uint32_t inv = ~m;
+    if ((inv & (inv + 1)) != 0) return false;
+    int bits = 0;
+    while (m & 0x80000000u) {
+        ++bits;
+        m <<= 1;
+    }
+    prefix_out = bits;
+    return bits >= 1 && bits <= 32;
+}
+
+void apply_iface_ip_config(AppState *state, const std::string &payload) {
+    if (!state || state->shutting_down.load() || state->wifi_busy.exchange(true)) return;
+
+    std::string device, con_name, method = "auto", ip, mask = "24", gateway, dns_raw;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "device") device = v;
+        else if (k == "connection") con_name = v;
+        else if (k == "method") method = v;
+        else if (k == "ip") ip = v;
+        else if (k == "mask") mask = v;
+        else if (k == "gateway") gateway = v;
+        else if (k == "dns") dns_raw = v;
+    }
+
+    auto fail_fast = [&](const std::string &msg) {
+        state->wifi_busy.store(false);
+        sys_internal::post_js_to_main(state,
+            "window.__spinelWifiAction && window.__spinelWifiAction(false,\"" + json_escape(msg) + "\");");
+    };
+
+    if (!is_valid_iface(device)) {
+        fail_fast("无效的网络接口名称: " + device);
+        return;
+    }
+
+    // Parse & validate DNS list (comma or whitespace separated)
+    std::string normalized_dns;
+    {
+        std::string tmp = dns_raw;
+        for (char &ch : tmp) {
+            if (ch == ',' || ch == ';') ch = ' ';
+        }
+        std::istringstream iss(tmp);
+        std::string tok;
+        while (iss >> tok) {
+            if (!is_valid_ipv4_addr(tok)) {
+                fail_fast("DNS 地址格式无效: " + tok);
+                return;
+            }
+            if (!normalized_dns.empty()) normalized_dns += ' ';
+            normalized_dns += tok;
+        }
+    }
+
+    bool manual = (method == "manual");
+    int prefix = 24;
+    if (manual) {
+        if (!is_valid_ipv4_addr(ip)) {
+            fail_fast("静态 IPv4 地址格式无效: " + ip);
+            return;
+        }
+        if (!parse_ipv4_mask_prefix(mask, prefix)) {
+            fail_fast("子网掩码或前缀格式无效: " + mask);
+            return;
+        }
+        if (!gateway.empty() && !is_valid_ipv4_addr(gateway)) {
+            fail_fast("默认网关 IPv4 格式无效: " + gateway);
+            return;
+        }
+    }
+
+    std::thread([state, device, con_name, manual, ip, prefix, gateway, normalized_dns]() {
+        std::string target_con = con_name;
+        if (target_con.empty() || target_con == "--") {
+            std::string out;
+            int rc = 0;
+            if (run_argv_capture({"nmcli", "-t", "-f", "GENERAL.CONNECTION", "dev", "show", device}, out, rc) && rc == 0) {
+                for (const auto &l : split_lines(out)) {
+                    auto p = l.find(':');
+                    if (p != std::string::npos) {
+                        std::string v = trim_copy(l.substr(p + 1));
+                        if (!v.empty() && v != "--") target_con = v;
+                    }
+                }
+            }
+        }
+
+        std::string out;
+        int rc = 1;
+        if (target_con.empty()) {
+            target_con = "wired-" + device;
+            run_argv_capture({"nmcli", "con", "add", "type", "ethernet", "ifname", device, "con-name", target_con}, out, rc);
+        }
+
+        std::vector<std::string> mod_args = {"nmcli", "con", "modify", target_con};
+        if (manual) {
+            mod_args.insert(mod_args.end(), {
+                "ipv4.method", "manual",
+                "ipv4.addresses", ip + "/" + std::to_string(prefix),
+                "ipv4.gateway", gateway
+            });
+        } else {
+            mod_args.insert(mod_args.end(), {
+                "ipv4.method", "auto",
+                "ipv4.addresses", "",
+                "ipv4.gateway", ""
+            });
+        }
+        if (!normalized_dns.empty()) {
+            mod_args.insert(mod_args.end(), {
+                "ipv4.dns", normalized_dns,
+                "ipv4.ignore-auto-dns", "yes"
+            });
+        } else {
+            mod_args.insert(mod_args.end(), {
+                "ipv4.dns", "",
+                "ipv4.ignore-auto-dns", "no"
+            });
+        }
+
+        bool ok = run_argv_capture(mod_args, out, rc) && rc == 0;
+        if (ok) {
+            std::string up_out;
+            int up_rc = 1;
+            ok = run_argv_capture({"nmcli", "con", "up", target_con, "ifname", device}, up_out, up_rc) && up_rc == 0;
+            if (!ok) out = up_out;
+        }
+
+        state->wifi_busy.store(false);
+        std::string msg = ok
+            ? ("已应用网络配置 (" + device + ": " + (manual ? (ip + "/" + std::to_string(prefix)) : "DHCP 自动获取") +
+               (normalized_dns.empty() ? "" : (" · DNS " + normalized_dns)) + ")")
+            : ("应用网络配置失败: " + (out.empty() ? target_con : trim_copy(out)));
+        sys_internal::post_js_to_main(state,
+            "window.__spinelWifiAction && window.__spinelWifiAction(" +
+                std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+        push_wifi_state(state, false);
+        push_proxy_config(state);
     }).detach();
 }
 

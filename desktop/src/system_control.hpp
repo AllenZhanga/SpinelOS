@@ -58,6 +58,9 @@ void push_cc_media_state(AppState *state);
 void push_wifi_state(AppState *state, bool rescan);
 void connect_wifi(AppState *state, const std::string &payload);
 void disconnect_iface(AppState *state, const std::string &iface);
+bool is_valid_ipv4_addr(const std::string &ip);
+bool parse_ipv4_mask_prefix(const std::string &mask_or_prefix, int &prefix_out);
+void apply_iface_ip_config(AppState *state, const std::string &payload);
 
 void push_bt_state(AppState *state, bool do_scan);
 void set_bt_power(AppState *state, bool on);

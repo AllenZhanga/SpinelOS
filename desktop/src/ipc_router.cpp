@@ -555,6 +555,9 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:wifi-connect", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             connect_wifi(s, r.legacy_raw);
         }},
+        {"settings:net-ip-apply", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            apply_iface_ip_config(s, r.legacy_raw);
+        }},
         {"settings:bt-status", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_bt_state(s, false);
         }},
