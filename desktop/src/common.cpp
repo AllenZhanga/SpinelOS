@@ -54,6 +54,11 @@ std::string home_dir() {
 }
 
 void ensure_display_env() {
+    const char *xdg_cur = std::getenv("XDG_CURRENT_DESKTOP");
+    if (!xdg_cur || !*xdg_cur || std::string(xdg_cur).find("GNOME") == std::string::npos) {
+        setenv("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME", 1);
+    }
+
     const char *disp = std::getenv("DISPLAY");
     if (disp && *disp) return;
 

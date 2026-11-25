@@ -374,7 +374,9 @@ void launch_browser_command(std::vector<std::string> args, const std::string &ta
     envs.emplace_back("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
 
     ProxyConfig p = resolve_effective_proxy();
-    if (is_chromium_like && p.enabled && (!p.http_proxy.empty() || !p.socks_proxy.empty())) {
+    // When GSettings is present, Chromium dynamically watches org.gnome.system.proxy via XDG_CURRENT_DESKTOP=SpinelOS:GNOME.
+    // Only pin --proxy-server if GSettings is unavailable so live proxy toggling works without restarting Chromium.
+    if (is_chromium_like && !has_executable("gsettings") && p.enabled && (!p.http_proxy.empty() || !p.socks_proxy.empty())) {
         std::string srv = !p.http_proxy.empty() ? p.http_proxy : p.socks_proxy;
         if (!has_arg("--proxy-server=")) args.push_back("--proxy-server=" + srv);
         if (!p.no_proxy.empty() && !has_arg("--proxy-bypass-list=")) {

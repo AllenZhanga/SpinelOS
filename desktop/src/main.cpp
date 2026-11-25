@@ -592,6 +592,9 @@ int main(int argc, char **argv) {
 #endif
 
     sync_process_proxy_env();
+#if !SPINEL_HAS_WEBKIT
+    spawn_argv_detached({"dbus-update-activation-environment", "--systemd", "XDG_CURRENT_DESKTOP=SpinelOS:GNOME"});
+#endif
 
 #if SPINEL_HAS_WEBKIT
     AppState state;
