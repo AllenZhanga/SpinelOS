@@ -15,12 +15,23 @@ if [[ -f "${HOME}/.config/spinelos/theme.conf" ]]; then
   THEME_ID="$(head -n1 "${HOME}/.config/spinelos/theme.conf" | tr -d '[:space:]')"
 fi
 
+IMG_ARGS=()
+for cand in /usr/share/pixmaps/spinelos.png /usr/share/spinel-shell/ui/spinel-logo.png; do
+  if [[ -f "${cand}" ]]; then
+    IMG_ARGS=(-s center -i "${cand}")
+    break
+  fi
+done
+
 if [[ "${THEME_ID}" == "tahoe-light" ]]; then
   exec swaylock -f \
+    --indicator-idle-visible \
+    --show-failed-attempts \
+    "${IMG_ARGS[@]}" \
     --color e8f0fe \
-    --inside-color ffffffd8 \
-    --inside-ver-color e0f2fee8 \
-    --inside-wrong-color fee2e2e8 \
+    --inside-color ffffff38 \
+    --inside-ver-color e0f2fe80 \
+    --inside-wrong-color fee2e280 \
     --ring-color 0284c7 \
     --ring-ver-color 0ea5e9 \
     --ring-wrong-color ef4444 \
@@ -29,14 +40,17 @@ if [[ "${THEME_ID}" == "tahoe-light" ]]; then
     --text-color 0f172a \
     --text-ver-color 0369a1 \
     --text-wrong-color b91c1c \
-    --indicator-radius 88 \
+    --indicator-radius 138 \
     --indicator-thickness 7
 else
   exec swaylock -f \
+    --indicator-idle-visible \
+    --show-failed-attempts \
+    "${IMG_ARGS[@]}" \
     --color 070b14 \
-    --inside-color 0f172ae0 \
-    --inside-ver-color 0c2d48e8 \
-    --inside-wrong-color 3f111be8 \
+    --inside-color 0f172a48 \
+    --inside-ver-color 0c2d4880 \
+    --inside-wrong-color 3f111b80 \
     --ring-color 38bdf8 \
     --ring-ver-color 0ea5e9 \
     --ring-wrong-color f43f5e \
@@ -45,6 +59,6 @@ else
     --text-color f8fafc \
     --text-ver-color e0f2fe \
     --text-wrong-color ffe4e6 \
-    --indicator-radius 88 \
+    --indicator-radius 138 \
     --indicator-thickness 7
 fi

@@ -370,17 +370,20 @@ void close_tab(TermWin *w, uint64_t tab_id) {
     std::size_t idx = static_cast<std::size_t>(std::distance(w->tabs.begin(), it));
     bool was_active = (w->active_tab_id == tab_id);
 
-    if (tab->tab_btn && w->tab_strip) {
+    if (tab->tab_btn && w->tab_strip && GTK_IS_BOX(w->tab_strip) &&
+        gtk_widget_get_parent(tab->tab_btn) == w->tab_strip) {
         gtk_box_remove(GTK_BOX(w->tab_strip), tab->tab_btn);
-        tab->tab_btn = nullptr;
     }
-    if (tab->page && w->stack) {
+    tab->tab_btn = nullptr;
+    if (tab->page && w->stack && GTK_IS_STACK(w->stack)) {
         if (tab->vte) {
             g_signal_handlers_disconnect_by_data(tab->vte, g_object_get_data(G_OBJECT(tab->vte), "vte-exit-ref"));
             g_signal_handlers_disconnect_by_data(tab->vte, g_object_get_data(G_OBJECT(tab->vte), "vte-prop-ref"));
             g_signal_handlers_disconnect_by_data(tab->vte, g_object_get_data(G_OBJECT(tab->vte), "vte-rclick-ref"));
         }
-        gtk_stack_remove(GTK_STACK(w->stack), tab->page);
+        if (gtk_widget_get_parent(tab->page) == w->stack) {
+            gtk_stack_remove(GTK_STACK(w->stack), tab->page);
+        }
         tab->page = nullptr;
         tab->vte = nullptr;
     }
@@ -920,6 +923,17 @@ void build_terminal_window(GtkApplication *app, const LaunchOptions &opts) {
     gtk_widget_add_controller(GTK_WIDGET(win), key_ctl);
 
     w->theme_timer = g_timeout_add(1200, on_theme_poll, w);
+    g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer data) -> gboolean {
+        auto *tw = static_cast<TermWin *>(data);
+        for (auto &t : tw->tabs) {
+            if (t && t->vte) {
+                t->closing = true;
+                g_signal_handlers_disconnect_by_data(t->vte, g_object_get_data(G_OBJECT(t->vte), "vte-exit-ref"));
+                g_signal_handlers_disconnect_by_data(t->vte, g_object_get_data(G_OBJECT(t->vte), "vte-prop-ref"));
+            }
+        }
+        return FALSE;
+    }), w);
     g_signal_connect(win, "destroy", G_CALLBACK(+[](GtkWidget *, gpointer data) {
         auto *tw = static_cast<TermWin *>(data);
         for (auto &t : tw->tabs) {

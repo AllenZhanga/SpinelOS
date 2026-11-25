@@ -26,9 +26,13 @@ if command -v wl-clip-persist >/dev/null 2>&1; then
   wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 &
 fi
 
-# Start idle lock daemon when swayidle is enabled (default 15m lock unless disabled in power.conf)
-if command -v swayidle >/dev/null 2>&1 && ! grep -qx "idle_lock=false" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
-  swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 &
+# Lock before system sleep; optional idle timeout only if explicitly enabled (idle_lock=true in power.conf)
+if command -v swayidle >/dev/null 2>&1; then
+  if grep -qx "idle_lock=true" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
+    swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 &
+  else
+    swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 &
+  fi
 fi
 
 # Start our custom C++20 + GTK4/WebKitGTK6 Wayland Desktop Shell (with persistent startup log)

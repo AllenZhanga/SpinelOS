@@ -212,6 +212,14 @@ if [ "$MODE" = "full" ]; then
     sleep 0.1
     nohup /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null &
   fi
+  if command -v swayidle >/dev/null 2>&1; then
+    pkill -x swayidle 2>/dev/null || true
+    if grep -qx "idle_lock=true" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
+      nohup swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null &
+    else
+      nohup swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null &
+    fi
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true
     systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true
