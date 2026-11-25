@@ -12,6 +12,7 @@
       wifi: "Wi-Fi 与网络",
       bt: "蓝牙手柄",
       display: "显示器",
+      devices: "设备管理器",
       audio: "声音与电源",
       shortcuts: "键盘与快捷键",
       perf: "游戏性能",
@@ -38,6 +39,7 @@
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
+    else if (target === "devices") sendCommand("settings:devices-get");
     else if (target === "audio") sendCommand("settings:audio-get");
     else if (target === "shortcuts") sendCommand("settings:shortcuts-get");
     else if (target === "perf") sendCommand("perf:get");
@@ -810,6 +812,164 @@
   };
 
   window.__spinelDisplayAction = (ok, msg) => showFeedback("display-feedback", msg || (ok ? "已应用显示设置" : "应用失败"), !ok);
+
+  /* ---------------- Device Manager ---------------- */
+  window.__spinelDevicesAction = (ok, msg) => showFeedback("devices-feedback", msg || (ok ? "外设操作完成" : "外设操作失败"), !ok);
+
+  window.__spinelDevicesData = (data) => {
+    if (!data) return;
+    const disks = Array.isArray(data.disks) ? data.disks : [];
+    const usb = Array.isArray(data.usb) ? data.usb : [];
+    const inputs = Array.isArray(data.inputs) ? data.inputs : [];
+    const pci = Array.isArray(data.pci) ? data.pci : [];
+
+    const summaryEl = document.getElementById("dev-summary-chip");
+    if (summaryEl) {
+      const extCount = disks.filter((d) => d.removable).length;
+      summaryEl.textContent = `外置卷 ${extCount} · USB ${usb.length} · 输入 ${inputs.length} · PCIe ${pci.length}`;
+    }
+
+    const diskList = document.getElementById("dev-disk-list");
+    if (diskList) {
+      diskList.innerHTML = "";
+      if (disks.length === 0) {
+        diskList.innerHTML = '<div class="disk-empty">未检测到可用存储分区（插入 U 盘或移动硬盘后点右上角「重新扫描外设」）。</div>';
+      } else {
+        disks.forEach((d) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div");
+          title.className = "disk-title";
+          title.textContent = `${d.label || d.name} (${d.path})`;
+          const busLabel = d.removable ? "USB/外置" : (d.tran ? d.tran.toUpperCase() : "本地磁盘");
+          const mountDesc = d.mountpoint ? `已挂载: ${d.mountpoint}` : "未挂载";
+          const sub = document.createElement("div");
+          sub.className = "disk-sub";
+          sub.textContent = `${busLabel} · ${d.size || "-"} · ${d.fstype || "-"} · ${mountDesc}`;
+          left.append(title, sub);
+
+          const actions = document.createElement("div");
+          actions.className = "disk-tags";
+          if (d.is_system) {
+            const sysChip = document.createElement("span");
+            sysChip.className = "tag";
+            sysChip.textContent = "系统分区";
+            actions.appendChild(sysChip);
+          } else {
+            if (d.mountpoint) {
+              const openBtn = document.createElement("button");
+              openBtn.type = "button";
+              openBtn.className = "btn small primary";
+              openBtn.textContent = "打开目录";
+              openBtn.setAttribute("data-cmd", `devices:open:${d.mountpoint}`);
+              const umountBtn = document.createElement("button");
+              umountBtn.type = "button";
+              umountBtn.className = "btn small";
+              umountBtn.textContent = "卸载";
+              umountBtn.setAttribute("data-cmd", `devices:unmount:${d.path}`);
+              actions.append(openBtn, umountBtn);
+            } else {
+              const mountBtn = document.createElement("button");
+              mountBtn.type = "button";
+              mountBtn.className = "btn small primary";
+              mountBtn.textContent = "挂载使用";
+              mountBtn.setAttribute("data-cmd", `devices:mount:${d.path}`);
+              actions.appendChild(mountBtn);
+            }
+            if (d.removable && d.parent_disk) {
+              const ejectBtn = document.createElement("button");
+              ejectBtn.type = "button";
+              ejectBtn.className = "btn small danger";
+              ejectBtn.textContent = "安全弹出";
+              ejectBtn.setAttribute("data-cmd", `devices:eject:${d.parent_disk}`);
+              actions.appendChild(ejectBtn);
+            }
+          }
+          item.append(left, actions);
+          diskList.appendChild(item);
+        });
+      }
+    }
+
+    const usbList = document.getElementById("dev-usb-list");
+    if (usbList) {
+      usbList.innerHTML = "";
+      if (usb.length === 0) {
+        usbList.innerHTML = '<div class="disk-empty">未检测到 USB 外设。</div>';
+      } else {
+        usb.forEach((u) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div"); title.className = "disk-title";
+          title.textContent = u.name || u.vid_pid;
+          const sub = document.createElement("div"); sub.className = "disk-sub";
+          sub.textContent = `总线 ${u.bus_id} · ID ${u.vid_pid}${u.speed ? ` · ${u.speed}` : ""}`;
+          left.append(title, sub);
+          const tags = document.createElement("div"); tags.className = "disk-tags";
+          const drv = document.createElement("span");
+          drv.className = "tag";
+          drv.textContent = u.driver ? `驱动: ${u.driver}` : "无驱动/复合设备";
+          tags.appendChild(drv);
+          item.append(left, tags);
+          usbList.appendChild(item);
+        });
+      }
+    }
+
+    const inputList = document.getElementById("dev-input-list");
+    if (inputList) {
+      inputList.innerHTML = "";
+      if (inputs.length === 0) {
+        inputList.innerHTML = '<div class="disk-empty">未读取到输入设备。</div>';
+      } else {
+        inputs.forEach((inDev) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div"); title.className = "disk-title";
+          title.textContent = inDev.name;
+          const sub = document.createElement("div"); sub.className = "disk-sub";
+          sub.textContent = `接口 ${inDev.bus} · 节点 ${inDev.handlers}`;
+          left.append(title, sub);
+          const tags = document.createElement("div"); tags.className = "disk-tags";
+          const kind = document.createElement("span");
+          kind.className = "tag";
+          kind.textContent = inDev.kind;
+          tags.appendChild(kind);
+          item.append(left, tags);
+          inputList.appendChild(item);
+        });
+      }
+    }
+
+    const pciList = document.getElementById("dev-pci-list");
+    if (pciList) {
+      pciList.innerHTML = "";
+      if (pci.length === 0) {
+        pciList.innerHTML = '<div class="disk-empty">未读取到 PCIe 设备列表。</div>';
+      } else {
+        pci.forEach((p) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div"); title.className = "disk-title";
+          title.textContent = p.desc;
+          const sub = document.createElement("div"); sub.className = "disk-sub";
+          sub.textContent = `PCIe 插槽 ${p.slot}`;
+          left.append(title, sub);
+          const tags = document.createElement("div"); tags.className = "disk-tags";
+          const drv = document.createElement("span");
+          drv.className = "tag";
+          drv.textContent = p.driver ? `驱动: ${p.driver}` : "未绑定内核驱动";
+          tags.appendChild(drv);
+          item.append(left, tags);
+          pciList.appendChild(item);
+        });
+      }
+    }
+  };
 
   UI.hooks.switchSettingsTab = switchSettingsTab;
 })();

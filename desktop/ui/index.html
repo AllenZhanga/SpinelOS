@@ -348,6 +348,10 @@
           <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="8.5" rx="1.6"/><path d="M5.5 13.5h5M8 11v2.5" stroke-linecap="round"/></svg></span>
           <span>显示器</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:devices">
+          <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="8" height="9" rx="1.5"/><path d="M6 3.5V2M10 3.5V2M6 12.5V14M10 12.5V14M6.5 6.8h3v2.4h-3z"/></svg></span>
+          <span>设备管理器</span>
+        </button>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:audio">
           <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.8l3.5-2.8v9.2L5.3 9.8H2.5z"/><path d="M11.3 5.4a3.6 3.6 0 0 1 0 5.2M13.2 3.8a6 6 0 0 1 0 8.4"/></svg></span>
           <span>声音与电源</span>
@@ -476,6 +480,61 @@
       <div id="display-feedback" class="feedback-banner hidden"></div>
       <div id="display-output-list" class="disk-list">
         <div class="disk-empty">正在读取显示器信息...</div>
+      </div>
+    </div>
+
+    <div id="tab-devices" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>外置存储与磁盘分区</h3>
+            <p class="muted-hint">一键挂载、打开文件管理器、卸载或安全断电弹出 U 盘、移动硬盘与扩展 SSD。</p>
+          </div>
+          <div class="footer-actions">
+            <span id="dev-summary-chip" class="status-chip">扫描中...</span>
+            <button type="button" class="btn small primary" data-cmd="settings:devices-get">重新扫描外设</button>
+          </div>
+        </div>
+        <div id="devices-feedback" class="feedback-banner hidden"></div>
+        <div id="dev-disk-list" class="disk-list">
+          <div class="disk-empty">正在扫描存储设备与外置 U 盘...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>USB 外设与扩展设备</h3>
+            <p class="muted-hint">查看已连接的 USB 控制器、接收器、摄像头、读卡器及当前绑定的内核驱动。</p>
+          </div>
+        </div>
+        <div id="dev-usb-list" class="disk-list">
+          <div class="disk-empty">正在扫描 USB 总线...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>输入设备与游戏手柄</h3>
+            <p class="muted-hint">识别键盘、鼠标、触控板与已接入的 Xbox / DualSense / Switch 手柄。</p>
+          </div>
+        </div>
+        <div id="dev-input-list" class="disk-list">
+          <div class="disk-empty">正在检测输入设备...</div>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>核心硬件与内核驱动 (PCIe)</h3>
+            <p class="muted-hint">核对显卡、有线/无线网卡、声卡与 NVMe 控制器是否均已正常加载内核驱动。</p>
+          </div>
+        </div>
+        <div id="dev-pci-list" class="disk-list">
+          <div class="disk-empty">正在读取 PCIe 硬件驱动状态...</div>
+        </div>
       </div>
     </div>
 

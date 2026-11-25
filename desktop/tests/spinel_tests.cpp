@@ -443,6 +443,14 @@ void test_ipc_router() {
     reply.clear();
     EXPECT(dispatch_ipc_command(&dummy, "store:cancel", mock_actions, &reply));
     EXPECT(cancel_called);
+
+    // Device manager path validation & IPC dispatch
+    EXPECT(is_valid_block_dev_path("/dev/sda1"));
+    EXPECT(is_valid_block_dev_path("/dev/nvme0n1p2"));
+    EXPECT(!is_valid_block_dev_path("/dev/../etc/passwd"));
+    EXPECT(!is_valid_block_dev_path("/dev/sda1;rm -rf /"));
+    EXPECT(!is_valid_block_dev_path("/tmp/sda1"));
+    EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
 }
 
 }  // namespace

@@ -53,6 +53,7 @@ add_executable(spinel-shell
     src/sys/network.cpp
     src/sys/display_input.cpp
     src/sys/audio_power.cpp
+    src/sys/devices.cpp
     src/sys/doctor_logs.cpp
     src/desktop_apps.cpp
     src/theme_manager.cpp
@@ -95,6 +96,7 @@ add_executable(spinel-webui
     src/sys/network.cpp
     src/sys/display_input.cpp
     src/sys/audio_power.cpp
+    src/sys/devices.cpp
     src/sys/doctor_logs.cpp
     src/installer.cpp
     src/desktop_apps.cpp
@@ -145,6 +147,7 @@ add_executable(spinel-tests
     src/sys/network.cpp
     src/sys/display_input.cpp
     src/sys/audio_power.cpp
+    src/sys/devices.cpp
     src/sys/doctor_logs.cpp
 )
 

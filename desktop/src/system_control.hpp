@@ -115,6 +115,13 @@ void reset_shortcuts_config(AppState *state);
 void push_process_list(AppState *state);
 void kill_process_by_pid(AppState *state, int pid, bool force);
 
+bool is_valid_block_dev_path(const std::string &path);
+void push_devices_state(AppState *state);
+void mount_block_device(AppState *state, const std::string &dev_path);
+void unmount_block_device(AppState *state, const std::string &dev_path);
+void eject_block_device(AppState *state, const std::string &disk_path);
+void open_mount_folder(AppState *state, const std::string &mount_path);
+
 void sync_notification_theme(bool is_light);
 bool get_dnd_enabled();
 void toggle_dnd_mode(AppState *state);

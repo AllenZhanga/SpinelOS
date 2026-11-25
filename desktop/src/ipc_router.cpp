@@ -615,6 +615,9 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},
+        {"settings:devices-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_devices_state(s);
+        }},
         {"clip:clear", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             clear_clipboard_history();
         }},
@@ -649,11 +652,23 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"settings:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             std::string tab = arg_or_param(r, "settings:open:", {"tab", "id"});
-            if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "audio" || tab == "shortcuts" ||
+            if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "devices" || tab == "audio" || tab == "shortcuts" ||
                 tab == "perf" || tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
                 native_shell_set_cc_visible(s, false);
                 if (a.open_settings) a.open_settings(s, tab);
             }
+        }},
+        {"devices:mount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            mount_block_device(s, arg_or_param(r, "devices:mount:", {"dev", "path"}));
+        }},
+        {"devices:unmount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            unmount_block_device(s, arg_or_param(r, "devices:unmount:", {"dev", "path"}));
+        }},
+        {"devices:eject:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            eject_block_device(s, arg_or_param(r, "devices:eject:", {"disk", "dev", "path"}));
+        }},
+        {"devices:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            open_mount_folder(s, arg_or_param(r, "devices:open:", {"path"}));
         }},
         {"system:audio-set:", +[](AppState *, const IpcRequest &r, const IpcHostActions &) {
             std::string v = arg_or_param(r, "system:audio-set:", {"value", "pct"});
