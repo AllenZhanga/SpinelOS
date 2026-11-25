@@ -103,7 +103,7 @@ if [ "$MODE" = "full" ]; then
   sudo pacman -Syu --noconfirm --needed \
     flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
-    spice-vdagent file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
+    spice-vdagent file-roller 7zip gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-rime fcitx5-gtk
   fc-cache -f >/dev/null 2>&1 || true

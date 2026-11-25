@@ -644,9 +644,9 @@ void open_terminal_at(const fs::path &dir) {
 bool is_archive_file(const fs::path &p) {
     std::string name = to_lower_copy(p.filename().string());
     static const char *exts[] = {
-        ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst",
-        ".tgz", ".txz", ".tbz2", ".tzst", ".tar",
-        ".zip", ".7z", ".rar", ".iso"
+        ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tar.lz4",
+        ".tgz", ".txz", ".tbz2", ".tzst", ".tlz", ".tar",
+        ".zip", ".7z", ".rar", ".iso", ".deb", ".cab", ".jar", ".whl", ".cpio"
     };
     for (const char *ext : exts) {
         std::string e(ext);
@@ -659,7 +659,7 @@ bool is_archive_file(const fs::path &p) {
 
 std::string strip_archive_ext(const std::string &fname) {
     std::string lower = to_lower_copy(fname);
-    for (const char *multi : {".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst"}) {
+    for (const char *multi : {".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tar.lz4"}) {
         std::string e(multi);
         if (lower.size() > e.size() && lower.compare(lower.size() - e.size(), e.size(), e) == 0) {
             return fname.substr(0, fname.size() - e.size());
@@ -668,6 +668,58 @@ std::string strip_archive_ext(const std::string &fname) {
     auto dot = fname.rfind('.');
     if (dot != std::string::npos && dot > 0) return fname.substr(0, dot);
     return fname + "_extracted";
+}
+
+bool is_script_or_appimage(const fs::path &p) {
+    std::string ext = to_lower_copy(p.extension().string());
+    return ext == ".sh" || ext == ".appimage" || ext == ".run" || ext == ".bin";
+}
+
+void execute_file_direct(FilesWin *fw, const fs::path &p) {
+    std::string dir = p.has_parent_path() ? p.parent_path().string() : home_dir();
+    spawn_argv_detached({
+        "sh", "-c", "cd \"$1\" && exec \"$2\"", "_", dir, p.string()
+    });
+    if (fw && fw->status_label) {
+        gtk_label_set_text(GTK_LABEL(fw->status_label), ("已启动执行: " + p.filename().string()).c_str());
+    }
+}
+
+void execute_file_in_terminal(const fs::path &p, bool force_bash) {
+    std::string dir = p.has_parent_path() ? p.parent_path().string() : home_dir();
+    std::string term = has_executable("spinel-terminal") ? "spinel-terminal" : (has_executable("ptyxis") ? "ptyxis" : "foot");
+    if (force_bash) {
+        spawn_argv_detached({
+            term, "--working-directory", dir, "-e",
+            "sh", "-c", "bash \"$1\"; echo \"\"; echo \"[执行结束，按回车关闭]\"; read _", "_", p.string()
+        });
+    } else {
+        spawn_argv_detached({
+            term, "--working-directory", dir, "-e",
+            "sh", "-c", "\"$1\"; echo \"\"; echo \"[执行结束，按回车关闭]\"; read _", "_", p.string()
+        });
+    }
+}
+
+void toggle_exec_permission(FilesWin *fw, const fs::path &p, bool enable_exec) {
+    std::error_code ec;
+    auto st = fs::symlink_status(p, ec);
+    if (ec) {
+        show_error_alert(fw, "修改权限失败", ec.message());
+        return;
+    }
+    auto perms = st.permissions();
+    auto next = enable_exec
+        ? (perms | fs::perms::owner_exec | fs::perms::group_exec)
+        : (perms & ~(fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec));
+    fs::permissions(p, next, ec);
+    if (ec) {
+        show_error_alert(fw, "修改权限失败", ec.message());
+        return;
+    }
+    fw->pending_select = p;
+    void refresh_current_dir(FilesWin *fw);
+    refresh_current_dir(fw);
 }
 
 void refresh_current_dir(FilesWin *fw);
@@ -725,7 +777,13 @@ void do_extract_archive(FilesWin *fw, const fs::path &archive, bool into_subdir)
     run_archive_task(
         fw,
         "正在解压: " + archive.filename().string() + " ...",
-        {"bsdtar", "-xf", archive.string(), "-C", dest.string()},
+        {"sh", "-c",
+         "ERR=$(mktemp); "
+         "bsdtar -xf \"$1\" -C \"$2\" 2>\"$ERR\" || "
+         "(command -v 7z >/dev/null 2>&1 && 7z x -y -o\"$2\" \"$1\") || "
+         "{ cat \"$ERR\"; rm -f \"$ERR\"; exit 1; }; "
+         "rm -f \"$ERR\"",
+         "_", archive.string(), dest.string()},
         select_target
     );
 }
@@ -806,6 +864,16 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         fw->selected_path = item_path;
         std::error_code ec;
         bool is_dir = fs::is_directory(item_path, ec);
+        bool is_exec_file = !is_dir && (::access(item_path.c_str(), X_OK) == 0);
+        if (is_exec_file) {
+            add_btn("执行", false, [fw, item_path]() { execute_file_direct(fw, item_path); });
+            add_btn("在终端中运行", false, [item_path]() { execute_file_in_terminal(item_path, false); });
+        } else if (!is_dir && is_script_or_appimage(item_path)) {
+            if (to_lower_copy(item_path.extension().string()) == ".sh") {
+                add_btn("在终端中运行 (bash)", false, [item_path]() { execute_file_in_terminal(item_path, true); });
+            }
+            add_btn("设为可执行 (+x)", false, [fw, item_path]() { toggle_exec_permission(fw, item_path, true); });
+        }
         add_btn("打开", false, [fw, item_path]() { open_item_action(fw, item_path); });
         if (is_dir) {
             add_btn("在此目录打开终端", false, [item_path]() { open_terminal_at(item_path); });
@@ -817,6 +885,9 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
                     spawn_argv_detached({"file-roller", item_path.string()});
                 });
             }
+        }
+        if (is_exec_file) {
+            add_btn("取消执行权限 (-x)", false, [fw, item_path]() { toggle_exec_permission(fw, item_path, false); });
         }
         add_btn("压缩为 .zip", false, [fw, item_path]() { do_compress_zip(fw, item_path); });
         add_btn("复制 (Ctrl+C)", false, [fw, item_path]() {
