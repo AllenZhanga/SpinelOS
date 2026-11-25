@@ -108,6 +108,7 @@ if [ "$MODE" = "full" ]; then
   sudo cp -a /tmp/spinel-dev/grub-theme/. /usr/share/grub/themes/spinelos/
   sudo cp -a /tmp/spinel-dev/grub-theme/. /boot/grub/themes/spinelos/
   sudo install -Dm644 /tmp/spinel-dev/plymouthd.conf /etc/plymouth/plymouthd.conf
+  sudo install -Dm644 /tmp/spinel-dev/faillock.conf /etc/security/faillock.conf
   sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/pixmaps/spinelos.png
   sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/icons/hicolor/256x256/apps/spinelos.png
   sudo install -Dm644 /tmp/spinel-dev/spinelos.svg /usr/share/icons/hicolor/scalable/apps/spinelos.svg
@@ -283,6 +284,7 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/usr/share/grub/themes/spinelos/" "${DEV_HOST}:/tmp/spinel-dev/grub-theme/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/plymouth/plymouthd.conf" \
+    "${ROOT_DIR}/archiso/airootfs/etc/security/faillock.conf" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/pixmaps/spinelos.png" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinelos.svg" \
     "${ROOT_DIR}/archiso/airootfs/etc/systemd/zram-generator.conf" \
