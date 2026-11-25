@@ -4,16 +4,16 @@ title-text: ""
 terminal-font: "Unknown Regular 16"
 
 + image {
-    left = 50%-80
-    top = 22%
-    width = 160
-    height = 160
+    left = 50%-48
+    top = 18%
+    width = 96
+    height = 96
     file = "logo.png"
 }
 
 + label {
     left = 0
-    top = 22%+178
+    top = 18%+116
     width = 100%
     align = "center"
     text = "SpinelOS"
@@ -22,7 +22,7 @@ terminal-font: "Unknown Regular 16"
 
 + boot_menu {
     left = 28%
-    top = 54%
+    top = 46%
     width = 44%
     height = 28%
     item_color = "#94a3b8"
