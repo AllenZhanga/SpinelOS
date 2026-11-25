@@ -892,6 +892,21 @@
     </div>
 
     <div id="tab-logs" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div class="bt-head-left">
+            <h3>Spinel Doctor · 系统全链路健康体检</h3>
+            <span id="doc-summary-chip" class="status-chip">等待检查...</span>
+          </div>
+          <div class="footer-actions">
+            <button type="button" class="btn small" data-cmd="settings:doctor-scan">重新体检</button>
+            <button type="button" class="btn small primary" data-cmd="settings:doctor-export">导出脱敏诊断报告</button>
+          </div>
+        </div>
+        <div id="doc-check-grid" class="doctor-grid"></div>
+        <div id="doc-feedback" class="feedback-banner hidden" style="margin-top: 8px;"></div>
+      </div>
+
       <div class="section-head">
         <div class="pill-group" id="logs-source-tabs">
           <button class="pill-btn active" data-cmd="settings:logs:apps">应用与 Steam</button>
@@ -906,7 +921,7 @@
           <button class="btn small ghost" data-cmd="logs:native">独立原生弹窗</button>
         </div>
       </div>
-      <pre id="sys-logs-box" class="log-box selectable" style="height: 410px;">正在读取系统日志...</pre>
+      <pre id="sys-logs-box" class="log-box selectable" style="height: 280px;">正在读取系统日志...</pre>
     </div>
     </div>
   </section>

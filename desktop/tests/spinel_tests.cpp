@@ -332,6 +332,29 @@ void test_system_control_configs() {
     EXPECT(is_welcome_completed() == false);
     mark_welcome_completed();
     EXPECT(is_welcome_completed() == true);
+
+    // Spinel Doctor checks + log/credential redaction
+    std::string raw_secret =
+        "Proxy=http://alice:TopSecret99@127.0.0.1:7890\n"
+        "Home=/home/alice/.config/spinelos/apps.log\n"
+        "wifi-sec.psk:MyWifiPass42 password=hunter2 token=abc123xyz\n"
+        "BSSID=12:34:56:78:9A:BC\n";
+    std::string redacted = redact_sensitive_text(raw_secret);
+    EXPECT(redacted.find("TopSecret99") == std::string::npos);
+    EXPECT(redacted.find("MyWifiPass42") == std::string::npos);
+    EXPECT(redacted.find("hunter2") == std::string::npos);
+    EXPECT(redacted.find("abc123xyz") == std::string::npos);
+    EXPECT(redacted.find("alice") == std::string::npos);
+    EXPECT(redacted.find("78:9A:BC") == std::string::npos);
+    EXPECT(redacted.find("http://***@127.0.0.1:7890") != std::string::npos);
+    EXPECT(redacted.find("/home/<REDACTED>/.config") != std::string::npos);
+    EXPECT(redacted.find("12:34:56:**:**:**") != std::string::npos);
+
+    auto doc_checks = run_system_health_checks();
+    EXPECT(doc_checks.size() == 7);
+    std::string doc_report = build_redacted_diagnostic_report();
+    EXPECT(doc_report.find("SpinelOS Doctor Diagnostic Report") != std::string::npos);
+    EXPECT(doc_report.find("[Health Checks]") != std::string::npos);
 }
 
 }  // namespace

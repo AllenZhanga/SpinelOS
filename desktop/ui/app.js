@@ -1122,7 +1122,10 @@
       sendCommand("settings:procs-get");
       procTimerId = setInterval(() => sendCommand("settings:procs-get"), 2000);
     }
-    else if (target === "logs") sendCommand(`settings:logs:${activeLogSource}`);
+    else if (target === "logs") {
+      sendCommand("settings:doctor-scan");
+      sendCommand(`settings:logs:${activeLogSource}`);
+    }
   }
 
   window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);
@@ -1577,6 +1580,49 @@
       box.textContent = data.text || "(暂无日志内容)";
       box.scrollTop = box.scrollHeight;
     }
+  };
+
+  window.__spinelDoctorData = (data) => {
+    if (!data) return;
+    const chip = document.getElementById("doc-summary-chip");
+    if (chip) {
+      const ok = Number(data.ok_count || 0);
+      const warn = Number(data.warn_count || 0);
+      const fail = Number(data.fail_count || 0);
+      chip.textContent = fail > 0 ? `${ok} 正常 · ${warn} 提示 · ${fail} 异常` : (warn > 0 ? `${ok} 正常 · ${warn} 提示` : `${ok} 项全部健康`);
+    }
+    const grid = document.getElementById("doc-check-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    (Array.isArray(data.checks) ? data.checks : []).forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "doctor-card";
+      const top = document.createElement("div");
+      top.className = "doctor-card-head";
+      const name = document.createElement("strong");
+      name.textContent = c.name || c.id;
+      const badge = document.createElement("span");
+      badge.className = `doc-badge doc-${c.status || "warn"}`;
+      badge.textContent = c.status === "ok" ? "正常" : (c.status === "fail" ? "异常" : "提示");
+      top.append(name, badge);
+
+      const det = document.createElement("div");
+      det.className = "muted-hint";
+      det.textContent = c.detail || "";
+      row.append(top, det);
+
+      if (c.fix_hint) {
+        const hint = document.createElement("div");
+        hint.className = "doctor-hint";
+        hint.textContent = `建议：${c.fix_hint}`;
+        row.appendChild(hint);
+      }
+      grid.appendChild(row);
+    });
+  };
+
+  window.__spinelDoctorExported = (ok, path) => {
+    showFeedback("doc-feedback", ok ? `已导出脱敏诊断报告到桌面：${path}（已自动隐藏用户目录、密码与代理凭据）` : "导出诊断报告失败", !ok);
   };
 
   document.getElementById("btn-logs-refresh")?.addEventListener("click", () => {

@@ -803,6 +803,10 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_system_logs(state, cmd.substr(14));
     } else if (cmd.rfind("settings:logs-clear:", 0) == 0) {
         clear_system_logs(state, cmd.substr(20));
+    } else if (cmd == "settings:doctor-scan") {
+        push_doctor_report(state);
+    } else if (cmd == "settings:doctor-export") {
+        export_diagnostic_report(state);
 #if SPINEL_HAS_WEBKIT
     } else if (cmd == "installer:scan-disks") {
         push_installer_env(state);

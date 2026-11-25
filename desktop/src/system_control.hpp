@@ -70,6 +70,19 @@ void push_system_logs(AppState *state, const std::string &source);
 void clear_system_logs(AppState *state, const std::string &source);
 void open_native_log_window(AppState *state, const std::string &banner = "");
 
+struct DoctorCheckItem {
+    std::string id;
+    std::string name;
+    std::string status;  // ok | warn | fail
+    std::string detail;
+    std::string fix_hint;
+};
+std::vector<DoctorCheckItem> run_system_health_checks();
+std::string redact_sensitive_text(const std::string &raw);
+std::string build_redacted_diagnostic_report();
+void push_doctor_report(AppState *state);
+void export_diagnostic_report(AppState *state);
+
 void ensure_fcitx5_defaults(bool is_light);
 void sync_fcitx5_theme(bool is_light);
 void ensure_terminal_defaults(bool is_light);

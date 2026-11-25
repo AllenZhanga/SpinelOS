@@ -20,6 +20,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -1058,6 +1059,383 @@ void open_native_log_window(AppState *state, const std::string &banner) {
 
     refresh_native_log_view(ctx);
     gtk_window_present(ctx->win);
+}
+
+namespace {
+
+bool is_hex_pair(const std::string &s, size_t pos) {
+    return pos + 1 < s.size() &&
+           std::isxdigit(static_cast<unsigned char>(s[pos])) &&
+           std::isxdigit(static_cast<unsigned char>(s[pos + 1]));
+}
+
+bool is_mac_at(const std::string &s, size_t pos) {
+    if (pos + 17 > s.size()) return false;
+    if (pos > 0 && std::isxdigit(static_cast<unsigned char>(s[pos - 1]))) return false;
+    if (pos + 17 < s.size() && std::isxdigit(static_cast<unsigned char>(s[pos + 17]))) return false;
+    for (int g = 0; g < 6; ++g) {
+        if (!is_hex_pair(s, pos + g * 3)) return false;
+        if (g < 5 && s[pos + g * 3 + 2] != ':') return false;
+    }
+    return true;
+}
+
+bool proc_running_name(const char *exact_name) {
+    std::string out;
+    int rc = 1;
+    return run_argv_capture({"pgrep", "-x", exact_name}, out, rc) && rc == 0;
+}
+
+bool proc_running_pattern(const char *pat) {
+    std::string out;
+    int rc = 1;
+    return run_argv_capture({"pgrep", "-f", pat}, out, rc) && rc == 0;
+}
+
+}  // namespace
+
+std::string redact_sensitive_text(const std::string &raw) {
+    std::string out;
+    out.reserve(raw.size());
+
+    auto is_delim = [](char ch) {
+        return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+               ch == '"' || ch == '\'' || ch == '&' || ch == ',' || ch == ')';
+    };
+
+    std::string lower;
+    lower.resize(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+        lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(raw[i])));
+    }
+
+    static const char *kSecretKeys[] = {
+        "password=", "password:", "passwd=", "psk=", "wifi-sec.psk:", "token=", "secret="
+    };
+
+    for (size_t i = 0; i < raw.size();) {
+        // 1. Mask /home/<user>
+        if (raw.compare(i, 6, "/home/") == 0 && (i == 0 || is_delim(raw[i - 1]) || raw[i - 1] == '=')) {
+            size_t end = i + 6;
+            while (end < raw.size() && raw[end] != '/' && !is_delim(raw[end]) && raw[end] != ':') {
+                ++end;
+            }
+            if (end > i + 6) {
+                out += "/home/<REDACTED>";
+                i = end;
+                continue;
+            }
+        }
+
+        // 2. Mask URL user[:pass]@host credentials
+        if (raw.compare(i, 3, "://") == 0) {
+            out += "://";
+            i += 3;
+            size_t scan = i;
+            size_t at_pos = std::string::npos;
+            while (scan < raw.size() && raw[scan] != '/' && !is_delim(raw[scan])) {
+                if (raw[scan] == '@') {
+                    at_pos = scan;
+                    break;
+                }
+                ++scan;
+            }
+            if (at_pos != std::string::npos && at_pos > i) {
+                out += "***@";
+                i = at_pos + 1;
+            }
+            continue;
+        }
+
+        // 3. Mask key=secret / key:secret tokens
+        bool matched_secret = false;
+        for (const char *k : kSecretKeys) {
+            size_t klen = std::strlen(k);
+            if (lower.compare(i, klen, k) == 0 &&
+                (i == 0 || !std::isalnum(static_cast<unsigned char>(lower[i - 1])))) {
+                out.append(raw, i, klen);
+                i += klen;
+                while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t')) {
+                    out += raw[i++];
+                }
+                while (i < raw.size() && !is_delim(raw[i])) {
+                    ++i;
+                }
+                out += "<REDACTED>";
+                matched_secret = true;
+                break;
+            }
+        }
+        if (matched_secret) continue;
+
+        // 4. Mask MAC / BSSID addresses
+        if (is_mac_at(raw, i)) {
+            out.append(raw, i, 8);  // keep OUI XX:XX:XX
+            out += ":**:**:**";
+            i += 17;
+            continue;
+        }
+
+        out += raw[i++];
+    }
+    return out;
+}
+
+std::vector<DoctorCheckItem> run_system_health_checks() {
+    std::vector<DoctorCheckItem> checks;
+    std::error_code ec;
+
+    // 1. Wayland & DRM / Pixman Stack
+    {
+        const char *wd = std::getenv("WAYLAND_DISPLAY");
+        const char *wlr = std::getenv("WLR_RENDERER");
+        bool has_dri = false;
+        if (fs::is_directory("/dev/dri", ec)) {
+            for (const auto &e : fs::directory_iterator("/dev/dri", ec)) {
+                if (e.path().filename().string().rfind("renderD", 0) == 0) {
+                    has_dri = true;
+                    break;
+                }
+            }
+        }
+        bool pixman = (wlr && std::string(wlr) == "pixman");
+        DoctorCheckItem it;
+        it.id = "wayland_drm";
+        it.name = "Wayland 与图形渲染";
+        if (has_dri) {
+            it.status = "ok";
+            it.detail = std::string("DRM 硬件渲染节点就绪") + (wd ? (" · WAYLAND=" + std::string(wd)) : "");
+        } else if (pixman) {
+            it.status = "warn";
+            it.detail = "当前运行在虚拟机软件 Pixman 兼容模式（无 3D 硬件加速节点）";
+            it.fix_hint = "如需 3D 游戏加速，请在虚拟机开启 VirGL / 显卡直通并在物理机启动";
+        } else {
+            it.status = "warn";
+            it.detail = "未检测到 /dev/dri/renderD* 渲染节点";
+            it.fix_hint = "检查显卡驱动加载（amdgpu / i915 / nvidia_drm.modeset=1）";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 2. Vulkan 64-bit / 32-bit ICDs
+    {
+        std::vector<std::string> icds;
+        bool has_32 = false;
+        fs::path icd_dir = "/usr/share/vulkan/icd.d";
+        if (fs::is_directory(icd_dir, ec)) {
+            for (const auto &e : fs::directory_iterator(icd_dir, ec)) {
+                if (e.path().extension() == ".json") {
+                    std::string fn = e.path().filename().string();
+                    icds.push_back(fn);
+                    if (fn.find("i686") != std::string::npos || fn.find("32") != std::string::npos) {
+                        has_32 = true;
+                    }
+                }
+            }
+        }
+        if (fs::exists("/usr/lib32/libvulkan.so.1", ec) && !icds.empty()) {
+            // NVIDIA shares a single nvidia_icd.json alongside lib32-nvidia-utils
+            if (fs::exists("/usr/lib32/libGLX_nvidia.so.0", ec)) has_32 = true;
+        }
+        DoctorCheckItem it;
+        it.id = "vulkan_icd";
+        it.name = "Vulkan 64/32 位驱动";
+        if (icds.empty()) {
+            it.status = "fail";
+            it.detail = "未发现 /usr/share/vulkan/icd.d/*.json";
+            it.fix_hint = "请确认已安装 vulkan-radeon / vulkan-intel / nvidia-utils";
+        } else if (!has_32) {
+            it.status = "warn";
+            it.detail = "已检测到 " + std::to_string(icds.size()) + " 个 ICD，但未确认 32 位 Vulkan 运行时";
+            it.fix_hint = "确保启用 [multilib] 并安装 lib32-vulkan-*（影响 Steam/Proton 32 位游戏）";
+        } else {
+            it.status = "ok";
+            it.detail = "已就绪（" + std::to_string(icds.size()) + " 个 ICD，含 32 位兼容库）";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 3. PipeWire Audio Stack
+    {
+        bool has_wp = has_executable("wpctl");
+        bool pw_up = proc_running_name("pipewire") && proc_running_name("wireplumber");
+        DoctorCheckItem it;
+        it.id = "pipewire";
+        it.name = "PipeWire 音频与 WirePlumber";
+        if (has_wp && pw_up) {
+            it.status = "ok";
+            it.detail = "PipeWire 与 WirePlumber 运行正常";
+        } else if (has_wp) {
+            it.status = "warn";
+            it.detail = "wpctl 已安装，但用户态 pipewire/wireplumber 守护未运行";
+            it.fix_hint = "运行 systemctl --user restart pipewire wireplumber";
+        } else {
+            it.status = "fail";
+            it.detail = "缺少 WirePlumber (wpctl) 组件";
+            it.fix_hint = "请通过 pacman 安装 pipewire pipewire-pulse wireplumber";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 4. Polkit & XDG Portals
+    {
+        bool pk_up = proc_running_pattern("polkit-gnome-authentication-agent-1");
+        bool pt_up = proc_running_pattern("xdg-desktop-portal");
+        DoctorCheckItem it;
+        it.id = "portals_polkit";
+        it.name = "权限弹窗与 Portal 授权";
+        if (pk_up && pt_up) {
+            it.status = "ok";
+            it.detail = "Polkit 提权弹窗与 xdg-desktop-portal 运行中";
+        } else {
+            it.status = "warn";
+            it.detail = std::string(pk_up ? "Polkit 正常" : "Polkit Agent 未运行") + " · " +
+                        (pt_up ? "Portal 正常" : "xdg-desktop-portal 未运行");
+            it.fix_hint = "可在「权限与安全」页点击重启 Polkit 或刷新 Portal";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 5. Fcitx5 IME & Mako Notifications
+    {
+        bool ime_up = proc_running_name("fcitx5");
+        bool mako_up = proc_running_name("mako");
+        DoctorCheckItem it;
+        it.id = "ime_notify";
+        it.name = "中文输入法与通知服务";
+        if (ime_up && mako_up) {
+            it.status = "ok";
+            it.detail = "Fcitx5 Wayland 与 Mako 通知守护均在运行";
+        } else {
+            it.status = "warn";
+            it.detail = std::string(ime_up ? "Fcitx5 正常" : "Fcitx5 未运行") + " · " +
+                        (mako_up ? "Mako 正常" : "Mako 未运行");
+            it.fix_hint = "可在「外观与输入法」点重启输入法，或执行 ./scripts/dev-deploy.sh --full";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 6. zram & Power Profiles
+    {
+        bool zram = !trim_copy(run_cmd_capture("swapon --noheadings --show=NAME 2>/dev/null")).empty();
+        bool ppd = has_executable("powerprofilesctl");
+        DoctorCheckItem it;
+        it.id = "mem_power";
+        it.name = "zram 内存压缩与电源调度";
+        if (zram && ppd) {
+            it.status = "ok";
+            it.detail = "zram 已激活 · power-profiles-daemon 可用";
+        } else {
+            it.status = "warn";
+            it.detail = std::string(zram ? "zram 已激活" : "zram 未激活") + " · " +
+                        (ppd ? "电源调度可用" : "缺少 powerprofilesctl");
+            it.fix_hint = "检查 systemd-zram-setup@zram0 与 power-profiles-daemon 服务状态";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    // 7. Network & Steam
+    {
+        TelemetrySnapshot tel = collect_telemetry();
+        bool has_steam = has_executable("steam");
+        bool has_net = (tel.net != "未连接" && !tel.net.empty());
+        DoctorCheckItem it;
+        it.id = "net_steam";
+        it.name = "网络连接与 Steam 就绪度";
+        if (has_net && has_steam) {
+            it.status = "ok";
+            it.detail = "网络 (" + tel.net + ") · Steam 客户端已安装";
+        } else if (has_net) {
+            it.status = "warn";
+            it.detail = "网络 (" + tel.net + ") · 专有 Steam 尚未安装（开源合规定制）";
+            it.fix_hint = "在应用商店点击「Steam」一键在线安装即可畅玩";
+        } else {
+            it.status = "warn";
+            it.detail = std::string("当前网络未连接") + (has_steam ? " · Steam 已安装" : " · Steam 未安装");
+            it.fix_hint = "请在「Wi-Fi 与网络」连接网络或配置系统代理";
+        }
+        checks.push_back(std::move(it));
+    }
+
+    return checks;
+}
+
+std::string build_redacted_diagnostic_report() {
+    auto checks = run_system_health_checks();
+    std::time_t now = std::time(nullptr);
+    std::tm tmv{};
+    localtime_r(&now, &tmv);
+    char tbuf[64]{};
+    std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S %Z", &tmv);
+
+    TelemetrySnapshot tel = collect_telemetry();
+    ProxyConfig proxy = load_proxy_config();
+
+    std::ostringstream report;
+    report << "=====================================================\n"
+           << "SpinelOS Doctor Diagnostic Report (Redacted)\n"
+           << "Generated: " << tbuf << "\n"
+           << "Kernel:    " << tel.kernel << "\n"
+           << "GPU:       " << tel.gpu << "\n"
+           << "Memory:    " << tel.mem << "\n"
+           << "Mode:      " << (tel.is_live ? "Live ISO" : "Installed Disk") << "\n"
+           << "Proxy:     " << (proxy.enabled ? ("enabled (" + proxy.http_proxy + " / " + proxy.socks_proxy + ")") : "disabled") << "\n"
+           << "=====================================================\n\n"
+           << "[Health Checks]\n";
+    for (const auto &c : checks) {
+        report << " - [" << c.status << "] " << c.name << ": " << c.detail << "\n";
+        if (!c.fix_hint.empty()) {
+            report << "     hint: " << c.fix_hint << "\n";
+        }
+    }
+    report << "\n" << collect_logs_bundle_text("system")
+           << "\n\n" << collect_logs_bundle_text("compositor")
+           << "\n\n" << collect_logs_bundle_text("shell")
+           << "\n\n" << collect_logs_bundle_text("apps") << "\n";
+    return redact_sensitive_text(report.str());
+}
+
+void push_doctor_report(AppState *state) {
+    if (!state || !state->settings_view) return;
+    auto checks = run_system_health_checks();
+    int ok_c = 0, warn_c = 0, fail_c = 0;
+    std::ostringstream js;
+    js << "window.__spinelDoctorData && window.__spinelDoctorData({\"checks\":[";
+    for (size_t i = 0; i < checks.size(); ++i) {
+        if (i > 0) js << ",";
+        const auto &c = checks[i];
+        if (c.status == "ok") ++ok_c;
+        else if (c.status == "warn") ++warn_c;
+        else ++fail_c;
+        js << "{"
+           << "\"id\":\"" << json_escape(c.id) << "\","
+           << "\"name\":\"" << json_escape(c.name) << "\","
+           << "\"status\":\"" << json_escape(c.status) << "\","
+           << "\"detail\":\"" << json_escape(c.detail) << "\","
+           << "\"fix_hint\":\"" << json_escape(c.fix_hint) << "\""
+           << "}";
+    }
+    js << "],\"ok_count\":" << ok_c
+       << ",\"warn_count\":" << warn_c
+       << ",\"fail_count\":" << fail_c << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void export_diagnostic_report(AppState *state) {
+    std::time_t now = std::time(nullptr);
+    std::tm tmv{};
+    localtime_r(&now, &tmv);
+    char fname[64]{};
+    std::strftime(fname, sizeof(fname), "SpinelOS-Doctor-%Y%m%d-%H%M%S.txt", &tmv);
+
+    fs::path out_path = fs::path(home_dir()) / "Desktop" / fname;
+    bool ok = write_text_file(out_path.string(), build_redacted_diagnostic_report());
+    append_app_log(ok ? ("[Doctor] 已导出脱敏诊断报告: " + out_path.string()) : "[Doctor] 导出诊断报告失败");
+    if (state && state->settings_view) {
+        eval_js(state->settings_view,
+                "window.__spinelDoctorExported && window.__spinelDoctorExported(" +
+                    std::string(ok ? "true" : "false") + ",\"" + json_escape(out_path.string()) + "\");");
+    }
 }
 
 namespace {

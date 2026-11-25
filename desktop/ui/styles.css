@@ -2313,3 +2313,54 @@ body.low-fx #top-bar {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.doctor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.doctor-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doctor-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.doc-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.doc-ok {
+  background: rgba(16, 185, 129, 0.16);
+  color: #10b981;
+}
+
+.doc-warn {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+}
+
+.doc-fail {
+  background: rgba(244, 63, 94, 0.18);
+  color: #f43f5e;
+}
+
+.doctor-hint {
+  font-size: 11px;
+  color: var(--accent);
+}
