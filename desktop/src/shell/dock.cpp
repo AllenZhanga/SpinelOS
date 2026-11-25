@@ -220,6 +220,12 @@ DockPinSpec resolve_pin_spec_from_item(const NativeShellState *ns, const DockIte
     if (hay.find("spinelos 系统设置") != std::string::npos) {
         return {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}};
     }
+    if (hay.find("系统监视器") != std::string::npos || hay.find("spinel monitor") != std::string::npos) {
+        return {"系统监视器", "monitor:open:procs", "settings", {}, {"系统监视器"}};
+    }
+    if (hay.find("spinel doctor") != std::string::npos) {
+        return {"Spinel Doctor", "doctor:open", "settings", {}, {"spinel doctor"}};
+    }
     if (hay.find("安装 spinel") != std::string::npos) {
         return {"安装 SpinelOS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}};
     }

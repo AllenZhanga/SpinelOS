@@ -180,8 +180,8 @@ void rebuild_launcher_index(NativeShellState *ns) {
         {"系统设置 · 游戏性能预设", "MangoHud / GameMode / 帧率上限 / FSR", "settings perf mangohud gamemode fsr", "settings:open:perf", "", "settings"},
         {"系统设置 · 主题壁纸与输入法", "切换浅深色主题、自定义壁纸与 Fcitx5 拼音", "settings theme wallpaper appearance ime fcitx5 rime", "settings:open:appearance", "", "settings"},
         {"系统设置 · 权限与安全", "Flatpak 应用权限与 Portal 弹窗管理", "settings permissions security flatpak polkit", "settings:open:perms", "", "settings"},
-        {"系统设置 · 进程与内存监控", "查看系统 PSS 内存与实时 CPU 占用", "settings process monitor memory cpu", "settings:open:procs", "", "settings"},
-        {"系统设置 · 日志与诊断", "导出与排查桌面及启动日志", "settings logs debug diagnostic", "settings:open:logs", "", "settings"}
+        {"系统监视器 · 进程与资源监控", "查看实时 CPU/PSS 内存占用、搜索并结束进程", "monitor activity process cpu memory kill task", "monitor:open:procs", "", "settings"},
+        {"系统监视器 · 系统日志与诊断", "查看应用、Steam、桌面壳与系统内核日志", "monitor console logs journalctl dmesg debug", "monitor:open:logs", "", "settings"}
     };
 
     if (ns->telemetry.is_live) {

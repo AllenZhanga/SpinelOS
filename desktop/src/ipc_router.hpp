@@ -28,6 +28,7 @@ struct IpcHostActions {
     void (*open_welcome)(AppState *) = nullptr;
     void (*close_welcome)(AppState *) = nullptr;
     void (*open_doctor)(AppState *) = nullptr;
+    void (*open_monitor)(AppState *, const std::string &tab) = nullptr;
     void (*store_refresh)(AppState *) = nullptr;
     void (*store_action)(AppState *, const std::string &action, const std::string &payload) = nullptr;
     void (*store_cancel)(AppState *) = nullptr;

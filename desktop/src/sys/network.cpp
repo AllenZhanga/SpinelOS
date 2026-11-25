@@ -30,6 +30,7 @@ gboolean run_js_idle(gpointer data) {
     std::unique_ptr<JsIdleCall> call(static_cast<JsIdleCall *>(data));
     if (call->state->shutting_down.load()) return G_SOURCE_REMOVE;
     eval_js(call->state->settings_view, call->script);
+    eval_js(call->state->monitor_view, call->script);
     if (call->also_bar) {
         eval_js(call->state->bar_view, call->script);
         eval_js(call->state->desktop_view, call->script);

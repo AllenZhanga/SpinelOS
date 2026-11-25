@@ -2364,3 +2364,11 @@ body.low-fx #top-bar {
   font-size: 11px;
   color: var(--accent);
 }
+
+#app-monitor .proc-list {
+  max-height: calc(100vh - 196px);
+}
+
+#app-monitor .log-box {
+  height: calc(100vh - 152px);
+}

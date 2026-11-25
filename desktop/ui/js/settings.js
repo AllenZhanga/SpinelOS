@@ -17,9 +17,7 @@
       shortcuts: "键盘与快捷键",
       perf: "游戏性能",
       appearance: "外观与输入法",
-      perms: "权限与安全",
-      procs: "进程监控",
-      logs: "系统日志"
+      perms: "权限与安全"
     };
     const tabs = Object.keys(titles);
     const target = tabs.includes(tab) ? tab : "wifi";
@@ -32,10 +30,6 @@
     document.querySelectorAll("#app-settings [data-cmd^='settings:tab:']").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-cmd") === `settings:tab:${target}`);
     });
-    if (procTimerId) {
-      clearInterval(procTimerId);
-      procTimerId = null;
-    }
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
     else if (target === "display") sendCommand("settings:display-scan");
@@ -48,16 +42,42 @@
       sendCommand("ime:status");
     }
     else if (target === "perms") sendCommand("settings:perms-get");
-    else if (target === "procs") {
-      sendCommand("settings:procs-get");
-      procTimerId = setInterval(() => sendCommand("settings:procs-get"), 2000);
+  }
+
+  function switchMonitorTab(tab) {
+    const target = tab === "logs" ? "logs" : "procs";
+    const procsView = document.getElementById("monitor-view-procs");
+    const logsView = document.getElementById("monitor-view-logs");
+    if (procsView) procsView.classList.toggle("hidden", target !== "procs");
+    if (logsView) logsView.classList.toggle("hidden", target !== "logs");
+
+    const titleEl = document.getElementById("monitor-page-title");
+    if (titleEl) titleEl.textContent = target === "logs" ? "系统监视器 · 系统日志" : "系统监视器 · 进程监控";
+
+    document.querySelectorAll("#monitor-tab-group [data-monitor-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-monitor-tab") === target);
+    });
+
+    if (procTimerId) {
+      clearInterval(procTimerId);
+      procTimerId = null;
     }
-    else if (target === "logs") {
-      sendCommand(`settings:logs:${activeLogSource}`);
+    if (target === "procs") {
+      sendCommand("monitor:procs-get");
+      procTimerId = setInterval(() => sendCommand("monitor:procs-get"), 2000);
+    } else {
+      sendCommand(`monitor:logs:${activeLogSource}`);
     }
   }
 
+  document.querySelectorAll("#monitor-tab-group [data-monitor-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchMonitorTab(btn.getAttribute("data-monitor-tab") || "procs");
+    });
+  });
+
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
+  window.__spinelOpenMonitor = (tab) => switchMonitorTab(tab);
 
   /* ---------------- Permissions & Security ---------------- */
   window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);
@@ -511,7 +531,8 @@
     if (!data) return;
     if (data.source) activeLogSource = data.source;
     document.querySelectorAll("#logs-source-tabs .pill-btn").forEach((b) => {
-      b.classList.toggle("active", b.getAttribute("data-cmd") === `settings:logs:${activeLogSource}`);
+      const cmd = b.getAttribute("data-cmd") || "";
+      b.classList.toggle("active", cmd === `monitor:logs:${activeLogSource}` || cmd === `settings:logs:${activeLogSource}`);
     });
     const box = document.getElementById("sys-logs-box");
     if (box) {
@@ -564,10 +585,10 @@
   };
 
   document.getElementById("btn-logs-refresh")?.addEventListener("click", () => {
-    sendCommand(`settings:logs:${activeLogSource}`);
+    sendCommand(`monitor:logs:${activeLogSource}`);
   });
   document.getElementById("btn-logs-clear")?.addEventListener("click", () => {
-    sendCommand(`settings:logs-clear:${activeLogSource}`);
+    sendCommand(`monitor:logs-clear:${activeLogSource}`);
   });
   document.getElementById("btn-logs-copy")?.addEventListener("click", () => {
     const text = document.getElementById("sys-logs-box")?.textContent || "";
@@ -1081,4 +1102,5 @@
   };
 
   UI.hooks.switchSettingsTab = switchSettingsTab;
+  UI.hooks.switchMonitorTab = switchMonitorTab;
 })();

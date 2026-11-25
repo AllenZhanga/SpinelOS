@@ -459,6 +459,14 @@ void test_ipc_router() {
     mock_actions.open_doctor = +[](AppState *) { doctor_opened = true; };
     EXPECT(dispatch_ipc_command(&dummy, "doctor:open", mock_actions, &reply));
     EXPECT(doctor_opened);
+    static std::string monitor_tab;
+    mock_actions.open_monitor = +[](AppState *, const std::string &t) { monitor_tab = t; };
+    EXPECT(dispatch_ipc_command(&dummy, "monitor:open", mock_actions, &reply));
+    EXPECT(monitor_tab == "procs");
+    EXPECT(dispatch_ipc_command(&dummy, "monitor:open:logs", mock_actions, &reply));
+    EXPECT(monitor_tab == "logs");
+    EXPECT(dispatch_ipc_command(&dummy, "settings:open:procs", mock_actions, &reply));
+    EXPECT(monitor_tab == "procs");
 
     // Network IPv4 & Netmask validation + safe IPC dispatch
     EXPECT(is_valid_ipv4_addr("192.168.31.189"));

@@ -1,7 +1,7 @@
 (() => {
   const params = new URLSearchParams(window.location.search);
   const mode = params.get("mode") || "desktop";
-  const initialTab = params.get("tab") || "wifi";
+  const initialTab = params.get("tab") || (mode === "monitor" ? "procs" : "wifi");
 
   const modeRoots = {
     bar: "top-bar",
@@ -13,7 +13,8 @@
     settings: "app-settings",
     installer: "app-installer",
     welcome: "app-welcome",
-    doctor: "app-doctor"
+    doctor: "app-doctor",
+    monitor: "app-monitor"
   };
 
   Object.values(modeRoots).forEach((id) => {

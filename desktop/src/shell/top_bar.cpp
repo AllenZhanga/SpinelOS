@@ -94,6 +94,12 @@ void sync_top_bar_app_menus(NativeShellState *ns,
         if (hay.find("系统设置") != std::string::npos || hay.find("settings") != std::string::npos) {
             profile = "settings";
             out_display_name = "系统设置";
+        } else if (hay.find("系统监视器") != std::string::npos || hay.find("spinel monitor") != std::string::npos) {
+            profile = "monitor";
+            out_display_name = "系统监视器";
+        } else if (hay.find("spinel doctor") != std::string::npos) {
+            profile = "doctor";
+            out_display_name = "Spinel Doctor";
         } else if (hay.find("游戏与启动中心") != std::string::npos || hay.find("app-games") != std::string::npos) {
             profile = "games";
             out_display_name = "游戏中心";
@@ -192,14 +198,36 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"声音设备与电源", "settings:open:audio"},
             {"键盘与快捷键", "settings:open:shortcuts"},
             {"游戏性能优化", "settings:open:perf"},
-            {"进程与资源监控", "settings:open:procs"},
             {"外观主题与输入法", "settings:open:appearance"},
-            {"应用权限与安全", "settings:open:perms"},
-            {"Spinel Doctor 健康体检", "doctor:open"},
-            {"系统日志与排障", "settings:open:logs"}
+            {"应用权限与安全", "settings:open:perms"}
+        });
+        add_topbar_menu(ns, "工具", {
+            {"系统监视器 (进程与日志)", "monitor:open:procs"},
+            {"Spinel Doctor 健康体检", "doctor:open"}
         });
         add_topbar_menu(ns, "窗口", {
             {"关闭系统设置", close_cmd}
+        });
+    } else if (profile == "monitor") {
+        add_topbar_menu(ns, "监视器", {
+            {"进程与资源监控", "monitor:open:procs"},
+            {"刷新进程列表", "monitor:procs-get"},
+            {"系统日志与诊断", "monitor:open:logs"},
+            {nullptr, ""},
+            {"Spinel Doctor 健康体检", "doctor:open"}
+        });
+        add_topbar_menu(ns, "窗口", {
+            {"关闭系统监视器", close_cmd}
+        });
+    } else if (profile == "doctor") {
+        add_topbar_menu(ns, "体检", {
+            {"重新体检", "settings:doctor-scan"},
+            {"导出脱敏诊断报告", "settings:doctor-export"},
+            {nullptr, ""},
+            {"打开系统监视器", "monitor:open:procs"}
+        });
+        add_topbar_menu(ns, "窗口", {
+            {"关闭 Spinel Doctor", close_cmd}
         });
     } else if (profile == "browser") {
         add_topbar_menu(ns, "文件", {
@@ -221,7 +249,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
         });
         add_topbar_menu(ns, "工具", {
             {"网络代理设置...", "settings:open:wifi"},
-            {"查看系统日志", "settings:open:logs"}
+            {"系统监视器与日志...", "monitor:open:logs"}
         });
     } else if (profile == "files") {
         add_topbar_menu(ns, "文件", {
@@ -300,9 +328,9 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         {"区域截图 (Print/Ctrl+Shift+4)", "system:screenshot:area"},
         {"游戏与启动中心", "games:open"},
         {"应用商店", "store:open"},
-        {"进程与资源监控", "settings:open:procs"},
+        {"系统监视器（进程与日志）", "monitor:open:procs"},
+        {"Spinel Doctor 健康体检", "doctor:open"},
         {"权限与安全...", "settings:open:perms"},
-        {"查看系统日志", "settings:open:logs"},
         {nullptr, ""},
         {"锁定屏幕", "system:lock"},
         {"睡眠", "system:suspend"},
@@ -328,11 +356,11 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_set_halign(right, GTK_ALIGN_END);
     gtk_widget_set_valign(right, GTK_ALIGN_CENTER);
 
-    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "settings:open:procs");
+    GtkWidget *mem_btn = make_cmd_button(state, nullptr, "spinel-bar-btn", "monitor:open:procs");
     ns->bar_mem_lbl = gtk_label_new("--");
     gtk_widget_add_css_class(ns->bar_mem_lbl, "spinel-bar-mem");
     gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
-    gtk_widget_set_tooltip_text(mem_btn, "内存占用（点击打开进程监控）");
+    gtk_widget_set_tooltip_text(mem_btn, "内存占用（点击打开系统监视器）");
 
     auto rebuild_clip_popover = +[](NativeShellState *n) {
         if (!n || !n->clip_list_box) return;

@@ -159,7 +159,9 @@ void build_desktop_popover(NativeShellState *ns) {
         {nullptr, nullptr},
         {"更换壁纸与外观...", "settings:open:appearance"},
         {"显示与缩放设置...", "settings:open:display"},
-        {"查看系统日志与诊断...", "settings:open:logs"},
+        {"系统监视器 (进程与日志)...", "monitor:open:procs"},
+        {"查看系统日志...", "monitor:open:logs"},
+        {"Spinel Doctor 健康体检...", "doctor:open"},
         {"原生日志窗口 (排障)", "logs:native"},
         {"刷新桌面", "telemetry:refresh"}
     };

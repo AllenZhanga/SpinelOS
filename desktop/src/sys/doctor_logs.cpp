@@ -392,7 +392,7 @@ pid_t g_clip_watcher_pid = -1;
 /* ==================== Logs & Native Log Window ==================== */
 
 void push_system_logs(AppState *state, const std::string &source) {
-    if (!state || !state->settings_view) return;
+    if (!state || (!state->monitor_view && !state->settings_view)) return;
     std::string src = (source == "shell" || source == "compositor" || source == "system") ? source : "apps";
     std::thread([state, src]() {
         std::string txt = collect_logs_bundle_text(src);
@@ -1033,7 +1033,7 @@ void reload_desktop_portals(AppState *state) {
 }
 
 void push_process_list(AppState *state) {
-    if (!state || !state->settings_view) return;
+    if (!state || (!state->monitor_view && !state->settings_view)) return;
     static unsigned long long prev_total = 0;
     static unsigned long long prev_idle = 0;
     static std::map<int, unsigned long long> prev_proc_ticks;
@@ -1158,14 +1158,17 @@ void push_process_list(AppState *state) {
            << "}";
     }
     js << "]});";
+    eval_js(state->monitor_view, js.str());
     eval_js(state->settings_view, js.str());
 }
 
 void kill_process_by_pid(AppState *state, int pid, bool force) {
     if (pid <= 1 || pid == getpid()) {
-        if (state && state->settings_view) {
-            eval_js(state->settings_view,
-                    "window.__spinelProcsFeedback && window.__spinelProcsFeedback(false, \"无法结束系统核心自身进程。\");");
+        if (state) {
+            const char *self_err =
+                "window.__spinelProcsFeedback && window.__spinelProcsFeedback(false, \"无法结束系统核心自身进程。\");";
+            eval_js(state->monitor_view, self_err);
+            eval_js(state->settings_view, self_err);
         }
         return;
     }
@@ -1176,10 +1179,12 @@ void kill_process_by_pid(AppState *state, int pid, bool force) {
         ? ("已向进程 PID " + std::to_string(pid) + (force ? " 发送强制结束 (SIGKILL)" : " 发送结束信号 (SIGTERM)"))
         : ("无法结束 PID " + std::to_string(pid) + "（可能需要管理员权限或进程已退出）");
     append_app_log("[Proc] " + msg);
-    if (state && state->settings_view) {
-        eval_js(state->settings_view,
-                "window.__spinelProcsFeedback && window.__spinelProcsFeedback(" +
-                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    if (state) {
+        std::string script =
+            "window.__spinelProcsFeedback && window.__spinelProcsFeedback(" +
+            std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");";
+        eval_js(state->monitor_view, script);
+        eval_js(state->settings_view, script);
     }
     if (state) {
         std::thread([state]() {

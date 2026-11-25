@@ -258,6 +258,19 @@ void open_doctor_window(AppState *state) {
     }
 }
 
+void open_monitor_window(AppState *state, const std::string &tab) {
+    std::string clean_tab = (tab == "logs") ? "logs" : "procs";
+    bool existed = (state->monitor_win != nullptr);
+    ensure_app_window(state, &state->monitor_win, &state->monitor_view,
+                      "系统监视器 · Spinel Monitor", "?mode=monitor&tab=" + clean_tab, 1020, 680);
+    if (existed) {
+        eval_js(state->monitor_view,
+                "window.__spinelOpenMonitor && window.__spinelOpenMonitor('" + clean_tab + "');");
+    }
+    push_theme_state(state);
+    push_telemetry_to_view(state->monitor_view);
+}
+
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
     if (!jsc_value_is_string(value)) return;
@@ -297,6 +310,9 @@ void open_settings_window(AppState *, const std::string &tab) {
 }
 void open_welcome_window(AppState *) { launch_webui_cmd("welcome:open"); }
 void open_doctor_window(AppState *) { launch_webui_cmd("doctor:open"); }
+void open_monitor_window(AppState *, const std::string &tab) {
+    launch_webui_cmd("monitor:open:" + (tab == "logs" ? std::string("logs") : std::string("procs")));
+}
 
 #endif  // SPINEL_HAS_WEBKIT
 
@@ -317,6 +333,9 @@ void push_all_telemetry(AppState *state) {
     }
     if (state->doctor_win && gtk_widget_get_visible(GTK_WIDGET(state->doctor_win))) {
         push_telemetry_to_view(state->doctor_view);
+    }
+    if (state->monitor_win && gtk_widget_get_visible(GTK_WIDGET(state->monitor_win))) {
+        push_telemetry_to_view(state->monitor_view);
     }
 #else
     native_shell_sync_telemetry(state);
@@ -492,6 +511,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     actions.open_settings = open_settings_window;
     actions.open_welcome = open_welcome_window;
     actions.open_doctor = open_doctor_window;
+    actions.open_monitor = open_monitor_window;
     actions.push_all_telemetry = push_all_telemetry;
     actions.confirm_power = confirm_power_action;
 

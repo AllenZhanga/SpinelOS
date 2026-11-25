@@ -616,12 +616,20 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},
+        {"monitor:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_process_list(s);
+        }},
         {"settings:devices-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_devices_state(s);
         }},
         {"doctor:open", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
             if (a.open_doctor) a.open_doctor(s);
+        }},
+        {"monitor:open", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            native_shell_set_cc_visible(s, false);
+            std::string tab = r.param("tab", r.param("id", "procs"));
+            if (a.open_monitor) a.open_monitor(s, tab == "logs" ? "logs" : "procs");
         }},
         {"devices:audio-disable", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             disable_audio_device(s, r.legacy_raw);
@@ -660,11 +668,21 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"settings:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             std::string tab = arg_or_param(r, "settings:open:", {"tab", "id"});
+            if (tab == "procs" || tab == "logs") {
+                native_shell_set_cc_visible(s, false);
+                if (a.open_monitor) a.open_monitor(s, tab);
+                return;
+            }
             if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "devices" || tab == "audio" || tab == "shortcuts" ||
-                tab == "perf" || tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
+                tab == "perf" || tab == "appearance" || tab == "perms") {
                 native_shell_set_cc_visible(s, false);
                 if (a.open_settings) a.open_settings(s, tab);
             }
+        }},
+        {"monitor:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            std::string tab = arg_or_param(r, "monitor:open:", {"tab", "id"});
+            native_shell_set_cc_visible(s, false);
+            if (a.open_monitor) a.open_monitor(s, tab == "logs" ? "logs" : "procs");
         }},
         {"devices:mount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             mount_block_device(s, arg_or_param(r, "devices:mount:", {"dev", "path"}));
@@ -752,8 +770,14 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:logs:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             push_system_logs(s, arg_or_param(r, "settings:logs:", {"source"}));
         }},
+        {"monitor:logs:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            push_system_logs(s, arg_or_param(r, "monitor:logs:", {"source"}));
+        }},
         {"settings:logs-clear:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             clear_system_logs(s, arg_or_param(r, "settings:logs-clear:", {"source"}));
+        }},
+        {"monitor:logs-clear:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            clear_system_logs(s, arg_or_param(r, "monitor:logs-clear:", {"source"}));
         }},
         {"perms:reset:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             reset_flatpak_app_perms(s, arg_or_param(r, "perms:reset:", {"app", "id"}));

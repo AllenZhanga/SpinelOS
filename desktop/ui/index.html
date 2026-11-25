@@ -22,7 +22,7 @@
       <button class="menu-link" data-cmd="settings:open:appearance">外观</button>
     </div>
     <div class="bar-right">
-      <button id="bar-mem" class="bar-stat-btn" data-cmd="games:open" title="内存占用: 检测中">
+      <button id="bar-mem" class="bar-stat-btn" data-cmd="monitor:open:procs" title="内存占用: 检测中（点击打开系统监视器）">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true">
           <rect x="2" y="4" width="12" height="8" rx="1.6"/>
           <path d="M5 7v2M8 7v2M11 7v2" stroke-linecap="round"/>
@@ -375,14 +375,6 @@
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:perms">
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
-        </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:procs">
-          <span class="settings-nav-ico ico-amber"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5h2.5l1.6-4.5 2.4 8 1.8-4.8L11.8 8.5H14"/></svg></span>
-          <span>进程监控</span>
-        </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:logs">
-          <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h4"/></svg></span>
-          <span>系统日志</span>
         </button>
       </nav>
       <div class="settings-sidebar-foot">SpinelOS Gaming</div>
@@ -895,7 +887,8 @@
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
           <div class="footer-actions" style="margin-top: 8px;">
             <button class="btn small" data-cmd="welcome:open">首次开机向导</button>
-            <button class="btn small" data-cmd="settings:tab:logs">查看系统日志</button>
+            <button class="btn small" data-cmd="monitor:open:logs">打开系统监视器</button>
+            <button class="btn small" data-cmd="doctor:open">Spinel Doctor 体检</button>
             <button class="btn small" data-cmd="installer:open">打开磁盘安装 / 重装工具</button>
             <button class="btn small" data-cmd="power:reboot">重启系统</button>
             <button class="btn small danger" data-cmd="power:shutdown">关机</button>
@@ -958,8 +951,24 @@
         </div>
       </div>
     </div>
+    </div>
+  </section>
 
-    <div id="tab-procs" class="win-body hidden">
+  <!-- 5a. Standalone System Monitor & Logs Window (?mode=monitor) -->
+  <section id="app-monitor" class="app-window hidden">
+    <header class="win-toolbar">
+      <div class="bt-head-left">
+        <h2 id="monitor-page-title">系统监视器 · 进程监控</h2>
+        <div class="pill-group" id="monitor-tab-group">
+          <button type="button" class="pill-btn active" data-monitor-tab="procs">进程监控</button>
+          <button type="button" class="pill-btn" data-monitor-tab="logs">系统日志</button>
+        </div>
+      </div>
+      <div class="footer-actions">
+        <button type="button" class="btn small primary" data-cmd="doctor:open">Spinel Doctor 健康体检</button>
+      </div>
+    </header>
+    <div id="monitor-view-procs" class="win-body">
       <div class="section-head">
         <div class="bt-head-left">
           <span class="status-chip" id="procs-cpu-chip">CPU: --%</span>
@@ -972,7 +981,7 @@
             <button type="button" class="pill-btn active" data-proc-sort="cpu">按 CPU</button>
             <button type="button" class="pill-btn" data-proc-sort="mem">按内存</button>
           </div>
-          <button type="button" class="btn small" data-cmd="settings:procs-get">刷新</button>
+          <button type="button" class="btn small" data-cmd="monitor:procs-get">刷新</button>
         </div>
       </div>
       <div id="procs-feedback" class="feedback-banner hidden"></div>
@@ -990,24 +999,22 @@
       </div>
     </div>
 
-    <div id="tab-logs" class="win-body hidden">
+    <div id="monitor-view-logs" class="win-body hidden">
       <div class="section-head">
         <div class="pill-group" id="logs-source-tabs">
-          <button class="pill-btn active" data-cmd="settings:logs:apps">应用与 Steam</button>
-          <button class="pill-btn" data-cmd="settings:logs:shell">桌面壳 (spinel-shell)</button>
-          <button class="pill-btn" data-cmd="settings:logs:compositor">合成器 (labwc)</button>
-          <button class="pill-btn" data-cmd="settings:logs:system">系统与内核</button>
+          <button class="pill-btn active" data-cmd="monitor:logs:apps">应用与 Steam</button>
+          <button class="pill-btn" data-cmd="monitor:logs:shell">桌面壳 (spinel-shell)</button>
+          <button class="pill-btn" data-cmd="monitor:logs:compositor">合成器 (labwc)</button>
+          <button class="pill-btn" data-cmd="monitor:logs:system">系统与内核</button>
         </div>
         <div class="footer-actions">
-          <button type="button" class="btn small primary" data-cmd="doctor:open">Spinel Doctor 健康体检</button>
           <button class="btn small" id="btn-logs-refresh">刷新</button>
           <button class="btn small" id="btn-logs-copy">复制全部</button>
           <button class="btn small" id="btn-logs-clear">清空应用日志</button>
           <button class="btn small ghost" data-cmd="logs:native">独立原生弹窗</button>
         </div>
       </div>
-      <pre id="sys-logs-box" class="log-box selectable" style="height: 440px;">正在读取系统日志...</pre>
-    </div>
+      <pre id="sys-logs-box" class="log-box selectable">正在读取系统日志...</pre>
     </div>
   </section>
 
