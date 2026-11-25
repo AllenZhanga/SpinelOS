@@ -370,6 +370,21 @@ else
   arch-chroot /mnt bash -c "pacman-key --init && pacman-key --populate archlinux" || true
 fi
 
+# Enable [multilib] (Steam / 32-bit Vulkan & Proton libs) and parallel downloads
+if [[ -f /mnt/etc/pacman.conf ]]; then
+  sed -i 's/^#*\s*ParallelDownloads\s*=.*/ParallelDownloads = 8/' /mnt/etc/pacman.conf
+  if ! grep -q '^ParallelDownloads' /mnt/etc/pacman.conf; then
+    sed -i '/^\[options\]/a ParallelDownloads = 8' /mnt/etc/pacman.conf
+  fi
+  if ! grep -q '^\[multilib\]' /mnt/etc/pacman.conf; then
+    if grep -q '^#\[multilib\]' /mnt/etc/pacman.conf; then
+      sed -i '/^#\[multilib\]/{s/^#//;n;s/^#//}' /mnt/etc/pacman.conf
+    else
+      printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /mnt/etc/pacman.conf
+    fi
+  fi
+fi
+
 progress 82 "正在重建标准硬盘 initramfs 与快照配置..."
 if [[ "$FS_TYPE" == "btrfs" ]] && [[ -x /mnt/usr/bin/snapper ]]; then
   arch-chroot /mnt bash -c 'umount /.snapshots 2>/dev/null || true; rm -rf /.snapshots; snapper --no-dbus -c root create-config / 2>/dev/null || true; btrfs subvolume delete /.snapshots 2>/dev/null || rm -rf /.snapshots; mkdir -p /.snapshots; mount -a 2>/dev/null || true'

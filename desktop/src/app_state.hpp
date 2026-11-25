@@ -51,8 +51,10 @@ struct AppState {
 
     std::atomic<bool> install_running{false};
     std::atomic<bool> store_busy{false};
+    std::atomic<bool> store_cancel_requested{false};
     std::atomic<bool> shutting_down{false};
     std::atomic<pid_t> install_pid{-1};
+    std::atomic<pid_t> store_child_pgid{-1};
     std::thread install_thread;
     std::thread store_thread;
 

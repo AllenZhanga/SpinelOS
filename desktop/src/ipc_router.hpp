@@ -29,6 +29,7 @@ struct IpcHostActions {
     void (*close_welcome)(AppState *) = nullptr;
     void (*store_refresh)(AppState *) = nullptr;
     void (*store_action)(AppState *, const std::string &action, const std::string &payload) = nullptr;
+    void (*store_cancel)(AppState *) = nullptr;
     void (*store_launch)(AppState *, const std::string &id) = nullptr;
     void (*installer_scan)(AppState *) = nullptr;
     void (*installer_start)(AppState *, const std::string &payload) = nullptr;

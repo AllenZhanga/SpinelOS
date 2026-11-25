@@ -413,6 +413,13 @@
         state.pendingStoreOp = null;
         hooks.executeStoreOp?.(cur.action, cur.op, pwd);
       }
+    } else if (cmd === "store:cancel") {
+      const cancelBtn = document.getElementById("btn-store-cancel");
+      if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = "正在终止...";
+      }
+      sendCommand("store:cancel");
     } else if (cmd === "store:log-hide") {
       document.getElementById("store-log-wrap")?.classList.add("hidden");
     } else if (cmd === "ov:close") {

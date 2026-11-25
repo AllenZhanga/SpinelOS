@@ -401,12 +401,15 @@ void test_ipc_router() {
     // Mock dispatch verification (legacy + JSON + unknown method)
     static std::string last_tab;
     static std::string last_store_focus;
+    static bool cancel_called;
     last_tab.clear();
     last_store_focus.clear();
+    cancel_called = false;
 
     IpcHostActions mock_actions;
     mock_actions.open_settings = +[](AppState *, const std::string &tab) { last_tab = tab; };
     mock_actions.open_store = +[](AppState *, const std::string &focus) { last_store_focus = focus; };
+    mock_actions.store_cancel = +[](AppState *) { cancel_called = true; };
 
     AppState dummy;
     std::string reply;
@@ -436,6 +439,10 @@ void test_ipc_router() {
     EXPECT(saved_perf.fsr == true);
     EXPECT(saved_perf.gamemode == false);
     EXPECT(saved_perf.render_res == "900p");
+
+    reply.clear();
+    EXPECT(dispatch_ipc_command(&dummy, "store:cancel", mock_actions, &reply));
+    EXPECT(cancel_called);
 }
 
 }  // namespace

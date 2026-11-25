@@ -392,6 +392,9 @@ bool dispatch_ipc_command(AppState *state,
         {"store:keyring-fix", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             if (a.store_action) a.store_action(s, "keyring-fix", r.legacy_raw);
         }},
+        {"store:cancel", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
+            if (a.store_cancel) a.store_cancel(s);
+        }},
         {"installer:open", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
             if (a.open_installer) a.open_installer(s);

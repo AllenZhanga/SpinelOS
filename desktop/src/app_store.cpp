@@ -4,15 +4,21 @@
 #include "steam_library.hpp"
 #include "system_control.hpp"
 
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -32,13 +38,13 @@ struct StoreAppEntry {
 
 constexpr StoreAppEntry kCatalog[] = {
     {"steam", "Steam 客户端", "游戏平台", "pacman", "steam",
-     "Valve 官方 PC 游戏与 Proton 平台（自动配合系统代理与 32 位图形库运行）", "steam", "一键安装"},
+     "Valve 官方 PC 游戏与 Proton 平台（自动启用 multilib 与系统代理）", "steam", "一键安装"},
     {"chrome", "Google Chrome", "浏览器", "flatpak", "com.google.Chrome",
-     "Google 官方浏览器，支持账号同步、硬件视频解码与扩展生态", "flatpak run com.google.Chrome", "Flatpak 免密"},
+     "Google 官方浏览器（Flathub 海外源，国内直连较慢建议开启代理）", "flatpak run com.google.Chrome", "Flatpak · 需代理"},
     {"chromium", "Chromium", "浏览器", "pacman", "chromium",
-     "官方软件源高速开源浏览器，国内镜像源直接拉取", "chromium --ozone-platform-hint=auto", "Pacman 原生"},
+     "官方软件源高速开源浏览器，国内镜像源极速直下", "chromium --ozone-platform-hint=auto", "Pacman 高速"},
     {"firefox", "Firefox", "浏览器", "pacman", "firefox",
-     "Mozilla 开源隐私浏览器，原生 Wayland 流畅滚动", "firefox", "Pacman 原生"},
+     "Mozilla 开源隐私浏览器，国内镜像极速直下", "firefox", "Pacman 高速"},
     {"heroic", "Heroic Games Launcher", "游戏平台", "flatpak", "com.heroicgameslauncher.hgl",
      "Epic Games、GOG 与 Amazon Prime 游戏库跨平台启动器", "flatpak run com.heroicgameslauncher.hgl", "Flatpak 免密"},
     {"lutris", "Lutris", "游戏平台", "pacman", "lutris",
@@ -150,10 +156,45 @@ void emit_store_done(AppState *state, int exit_code, const std::string &target_i
     g_idle_add(on_store_idle, new StoreIdleMsg{state, "", true, exit_code, target_id, action});
 }
 
+std::vector<std::pair<std::string, std::string>> build_proxy_env_pairs() {
+    ProxyConfig pc = load_proxy_config();
+    if (!pc.enabled || (pc.http_proxy.empty() && pc.socks_proxy.empty())) return {};
+    std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
+    std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
+    return {
+        {"http_proxy", hv},
+        {"https_proxy", hv},
+        {"all_proxy", av},
+        {"no_proxy", pc.no_proxy}
+    };
+}
+
+void append_proxy_env_prefix(std::vector<std::string> &cmd) {
+    auto envs = build_proxy_env_pairs();
+    if (envs.empty()) return;
+    cmd.push_back("env");
+    for (const auto &[k, v] : envs) {
+        cmd.push_back(k + "=" + v);
+    }
+}
+
+bool is_multilib_enabled() {
+    std::ifstream in("/etc/pacman.conf");
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string t = trim_copy(line);
+        if (t == "[multilib]") return true;
+    }
+    return false;
+}
+
 int run_streaming_command(AppState *state,
                           const std::vector<std::string> &args,
-                          const std::string &stdin_data = "") {
+                          const std::string &stdin_data = "",
+                          const std::vector<std::pair<std::string, std::string>> &env_overrides = {}) {
     if (args.empty()) return 1;
+    if (state && state->store_cancel_requested.load()) return 130;
+
     int stdin_pipe[2]{-1, -1};
     int stdout_pipe[2]{-1, -1};
     if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
@@ -170,6 +211,7 @@ int run_streaming_command(AppState *state,
     }
 
     if (pid == 0) {
+        setpgid(0, 0);
         dup2(stdin_pipe[0], STDIN_FILENO);
         dup2(stdout_pipe[1], STDOUT_FILENO);
         dup2(stdout_pipe[1], STDERR_FILENO);
@@ -178,12 +220,24 @@ int run_streaming_command(AppState *state,
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
 
+        for (const auto &[k, v] : env_overrides) {
+            setenv(k.c_str(), v.c_str(), 1);
+        }
+
         std::vector<char *> argv;
         argv.reserve(args.size() + 1);
         for (const auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
         argv.push_back(nullptr);
         execvp(args[0].c_str(), argv.data());
         _exit(127);
+    }
+
+    setpgid(pid, pid);
+    if (state) {
+        state->store_child_pgid.store(pid);
+        if (state->store_cancel_requested.load()) {
+            kill(-pid, SIGTERM);
+        }
     }
 
     close(stdin_pipe[0]);
@@ -218,8 +272,14 @@ int run_streaming_command(AppState *state,
     }
 
     int status = 0;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    if (state) {
+        pid_t expected = pid;
+        state->store_child_pgid.compare_exchange_strong(expected, -1);
+    }
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
 }
 
 const StoreAppEntry *find_catalog_entry(const std::string &id) {
@@ -317,10 +377,31 @@ void start_store_action(AppState *state, const std::string &action, const std::s
     if (state->store_thread.joinable()) {
         state->store_thread.join();
     }
+    state->store_cancel_requested.store(false);
+    state->store_child_pgid.store(-1);
     state->store_busy.store(true);
 
     state->store_thread = std::thread([state, action, app_id, backend, pkg, password, is_sys_maint]() {
         int rc = 1;
+        auto proxy_envs = build_proxy_env_pairs();
+        auto make_sudo_cmd = [](bool nopass) {
+            return nopass ? std::vector<std::string>{"sudo", "-n"}
+                          : std::vector<std::string>{"sudo", "-S", "-p", ""};
+        };
+        auto ensure_multilib = [&](const std::vector<std::string> &base_sudo, const std::string &pwd_in) {
+            if (is_multilib_enabled()) return true;
+            emit_store_line(state, "==> 检测到 [multilib] 尚未开启，正在自动启用 32 位游戏软件源...");
+            std::vector<std::string> mcmd = base_sudo;
+            mcmd.insert(mcmd.end(), {
+                "sh", "-c",
+                "if grep -q '^#\\[multilib\\]' /etc/pacman.conf; then "
+                "sed -i '/^#\\[multilib\\]/{s/^#//;n;s/^#//}' /etc/pacman.conf; "
+                "elif ! grep -q '^\\[multilib\\]' /etc/pacman.conf; then "
+                "printf '\\n[multilib]\\nInclude = /etc/pacman.d/mirrorlist\\n' >> /etc/pacman.conf; fi"
+            });
+            return run_streaming_command(state, mcmd, pwd_in) == 0;
+        };
+
         if (is_sys_maint) {
             bool nopass = check_sudo_nopasswd();
             if (!nopass && password.empty()) {
@@ -328,25 +409,19 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 emit_store_done(state, 2, app_id, action);
                 return;
             }
-            std::vector<std::string> base_sudo = nopass
-                ? std::vector<std::string>{"sudo", "-n"}
-                : std::vector<std::string>{"sudo", "-S", "-p", ""};
+            std::vector<std::string> base_sudo = make_sudo_cmd(nopass);
             std::string pwd_in = nopass ? "" : password;
 
             if (action == "sys-update") {
+                ensure_multilib(base_sudo, pwd_in);
                 std::vector<std::string> cmd = base_sudo;
-                ProxyConfig pc = load_proxy_config();
-                if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
-                    std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
-                    std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
-                    cmd.insert(cmd.end(), {"env", "http_proxy=" + hv, "https_proxy=" + hv, "all_proxy=" + av, "no_proxy=" + pc.no_proxy});
-                }
+                append_proxy_env_prefix(cmd);
                 cmd.insert(cmd.end(), {"pacman", "-Syu", "--noconfirm"});
                 emit_store_line(state, "==> 正在全面更新 SpinelOS 系统软件包...");
                 rc = run_streaming_command(state, cmd, pwd_in);
-                if (rc == 0 && has_flatpak_cli()) {
+                if (rc == 0 && !state->store_cancel_requested.load() && has_flatpak_cli()) {
                     emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");
-                    run_streaming_command(state, {"flatpak", "update", "-y", "--noninteractive"});
+                    run_streaming_command(state, {"flatpak", "update", "-y", "--noninteractive"}, "", proxy_envs);
                 }
             } else if (action == "mirror-test") {
                 if (!has_executable("reflector")) {
@@ -360,10 +435,9 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                     });
                     emit_store_line(state, "==> 正在测速中国区 HTTPS 镜像站（约需 10~20 秒）...");
                     rc = run_streaming_command(state, cmd, pwd_in);
-                    if (rc == 0) {
-                        std::vector<std::string> sync_cmd = nopass
-                            ? std::vector<std::string>{"sudo", "-n", "pacman", "-Syy", "--noconfirm"}
-                            : std::vector<std::string>{"sudo", "-S", "-p", "", "pacman", "-Syy", "--noconfirm"};
+                    if (rc == 0 && !state->store_cancel_requested.load()) {
+                        std::vector<std::string> sync_cmd = base_sudo;
+                        sync_cmd.insert(sync_cmd.end(), {"pacman", "-Syy", "--noconfirm"});
                         emit_store_line(state, "==> 测速完成，正在刷新软件包索引...");
                         rc = run_streaming_command(state, sync_cmd, pwd_in);
                     }
@@ -373,7 +447,7 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 cmd1.insert(cmd1.end(), {"pacman", "-Sy", "--noconfirm", "archlinux-keyring"});
                 emit_store_line(state, "==> 正在更新系统签名密钥环...");
                 rc = run_streaming_command(state, cmd1, pwd_in);
-                if (rc == 0) {
+                if (rc == 0 && !state->store_cancel_requested.load()) {
                     std::vector<std::string> cmd2 = base_sudo;
                     cmd2.insert(cmd2.end(), {"pacman-key", "--populate", "archlinux"});
                     emit_store_line(state, "==> 正在重新校验并信任密钥环...");
@@ -382,22 +456,25 @@ void start_store_action(AppState *state, const std::string &action, const std::s
             }
         } else if (backend == "flatpak") {
             if (action == "install") {
+                if (proxy_envs.empty()) {
+                    emit_store_line(state, "[提示] Flathub 为海外软件源，国内直连较慢；可随时点击「停止下载」，并在「系统设置 → 网络」开启代理或优先安装 Chromium / Firefox。");
+                }
                 emit_store_line(state, "==> 确保 Flathub 用户仓库已配置...");
                 rc = run_streaming_command(state, {
                     "flatpak", "remote-add", "--user", "--if-not-exists",
                     "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"
-                });
-                if (rc == 0) {
+                }, "", proxy_envs);
+                if (rc == 0 && !state->store_cancel_requested.load()) {
                     emit_store_line(state, "==> 正在从 Flathub 安装 " + pkg + " ...");
                     rc = run_streaming_command(state, {
                         "flatpak", "install", "--user", "-y", "--noninteractive", "flathub", pkg
-                    });
+                    }, "", proxy_envs);
                 }
             } else {
                 emit_store_line(state, "==> 正在卸载 Flatpak 应用 " + pkg + " ...");
                 rc = run_streaming_command(state, {
                     "flatpak", "uninstall", "--user", "-y", "--noninteractive", pkg
-                });
+                }, "", proxy_envs);
             }
         } else {
             bool nopass = check_sudo_nopasswd();
@@ -406,19 +483,13 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 emit_store_done(state, 2, app_id, action);
                 return;
             }
-            std::vector<std::string> cmd = nopass
-                ? std::vector<std::string>{"sudo", "-n"}
-                : std::vector<std::string>{"sudo", "-S", "-p", ""};
-            ProxyConfig pc = load_proxy_config();
-            if (pc.enabled && (!pc.http_proxy.empty() || !pc.socks_proxy.empty())) {
-                std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
-                std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
-                cmd.push_back("env");
-                cmd.push_back("http_proxy=" + hv);
-                cmd.push_back("https_proxy=" + hv);
-                cmd.push_back("all_proxy=" + av);
-                cmd.push_back("no_proxy=" + pc.no_proxy);
+            std::vector<std::string> base_sudo = make_sudo_cmd(nopass);
+            std::string pwd_in = nopass ? "" : password;
+            if (action == "install" && pkg == "steam") {
+                ensure_multilib(base_sudo, pwd_in);
             }
+            std::vector<std::string> cmd = base_sudo;
+            append_proxy_env_prefix(cmd);
             cmd.push_back("pacman");
 
             if (action == "install") {
@@ -428,11 +499,44 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 emit_store_line(state, "==> 正在卸载软件包 " + pkg + " ...");
                 cmd.insert(cmd.end(), {"-Rns", "--noconfirm", pkg});
             }
-            rc = run_streaming_command(state, cmd, nopass ? "" : password);
+            rc = run_streaming_command(state, cmd, pwd_in);
         }
 
+        if (state->store_cancel_requested.load()) {
+            emit_store_line(state, "[已终止] 用户已取消当前操作。");
+            emit_store_done(state, 130, app_id, "cancel");
+            return;
+        }
         emit_store_done(state, rc, app_id, action);
     });
+}
+
+void cancel_store_action(AppState *state) {
+    if (!state || !state->store_busy.load()) return;
+    state->store_cancel_requested.store(true);
+    pid_t pgid = state->store_child_pgid.load();
+    if (pgid <= 1) {
+        emit_store_line(state, "[已取消] 已请求中止当前任务。");
+        return;
+    }
+
+    emit_store_line(state, "[已取消] 正在终止下载/安装进程...");
+    if (kill(-pgid, SIGTERM) != 0 && errno == EPERM && check_sudo_nopasswd()) {
+        std::string out;
+        int rc = 1;
+        run_argv_capture({"sudo", "-n", "kill", "-TERM", "--", "-" + std::to_string(pgid)}, out, rc);
+    }
+
+    std::thread([state, pgid]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
+        if (!state->shutting_down.load() && state->store_child_pgid.load() == pgid) {
+            if (kill(-pgid, SIGKILL) != 0 && errno == EPERM && check_sudo_nopasswd()) {
+                std::string out;
+                int rc = 1;
+                run_argv_capture({"sudo", "-n", "kill", "-KILL", "--", "-" + std::to_string(pgid)}, out, rc);
+            }
+        }
+    }).detach();
 }
 
 void launch_store_app(AppState *state, const std::string &app_id) {

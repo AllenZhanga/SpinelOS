@@ -277,6 +277,14 @@
     const ss = state.storeState;
     const customBtn = document.getElementById("btn-store-custom");
     if (customBtn) customBtn.disabled = ss.busy;
+    const cancelBtn = document.getElementById("btn-store-cancel");
+    if (cancelBtn) {
+      cancelBtn.classList.toggle("hidden", !ss.busy);
+      if (!ss.busy) {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = "停止下载";
+      }
+    }
     document.querySelectorAll("[data-store-sys]").forEach((b) => { b.disabled = ss.busy; });
 
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
@@ -340,24 +348,47 @@
         launchBtn.setAttribute("data-cmd", `store:launch:${app.id}`);
         const rmBtn = document.createElement("button");
         rmBtn.className = "btn small danger";
-        rmBtn.textContent = (isActiveTarget && ss.active_action === "remove") ? "卸载中..." : "卸载";
-        rmBtn.disabled = ss.busy;
-        if (ss.busy && !isActiveTarget) rmBtn.title = "请等待当前操作完成";
-        rmBtn.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          requestStoreOp("remove", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
-        });
+        if (isActiveTarget && ss.active_action === "remove") {
+          rmBtn.textContent = "停止卸载";
+          rmBtn.disabled = false;
+          rmBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            rmBtn.disabled = true;
+            rmBtn.textContent = "正在终止...";
+            sendCommand("store:cancel");
+          });
+        } else {
+          rmBtn.textContent = "卸载";
+          rmBtn.disabled = ss.busy;
+          if (ss.busy) rmBtn.title = "请等待当前操作完成";
+          rmBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            requestStoreOp("remove", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
+          });
+        }
         actions.append(launchBtn, rmBtn);
       } else {
         const instBtn = document.createElement("button");
-        instBtn.className = "btn primary small";
-        instBtn.textContent = isActiveTarget ? "安装中..." : "下载安装";
-        instBtn.disabled = ss.busy;
-        if (ss.busy && !isActiveTarget) instBtn.title = "请等待当前队列完成";
-        instBtn.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          requestStoreOp("install", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
-        });
+        if (isActiveTarget) {
+          instBtn.className = "btn small danger";
+          instBtn.textContent = "停止下载";
+          instBtn.disabled = false;
+          instBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            instBtn.disabled = true;
+            instBtn.textContent = "正在终止...";
+            sendCommand("store:cancel");
+          });
+        } else {
+          instBtn.className = "btn primary small";
+          instBtn.textContent = "下载安装";
+          instBtn.disabled = ss.busy;
+          if (ss.busy) instBtn.title = "请等待当前队列完成";
+          instBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            requestStoreOp("install", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
+          });
+        }
         actions.append(instBtn);
       }
 
@@ -472,9 +503,13 @@
     state.storeState.active_action = "";
     const logTitle = document.getElementById("store-log-title");
     if (logTitle) {
-      logTitle.textContent = ok
-        ? `${action === "install" ? "安装完成" : "卸载完成"}: ${targetId}`
-        : `操作未完成: ${targetId}（请查看下方输出）`;
+      if (action === "cancel") {
+        logTitle.textContent = `已终止下载: ${targetId}`;
+      } else {
+        logTitle.textContent = ok
+          ? `${action === "install" ? "安装完成" : "卸载完成"}: ${targetId}`
+          : `操作未完成: ${targetId}（请查看下方输出）`;
+      }
     }
     renderStoreApps();
   };

@@ -489,6 +489,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_store_catalog(s);
     };
     actions.store_action = start_store_action;
+    actions.store_cancel = cancel_store_action;
     actions.store_launch = launch_store_app;
     actions.installer_scan = push_installer_env;
     actions.installer_start = start_disk_install;

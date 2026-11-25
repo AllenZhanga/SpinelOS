@@ -1098,7 +1098,10 @@
       <div id="store-log-wrap" class="glass store-log-card hidden">
         <div class="sub-panel-head">
           <strong id="store-log-title">下载与安装输出</strong>
-          <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+          <div class="footer-actions">
+            <button type="button" class="btn small danger hidden" id="btn-store-cancel" data-cmd="store:cancel">停止下载</button>
+            <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+          </div>
         </div>
         <pre id="store-log-box" class="log-box"></pre>
       </div>
