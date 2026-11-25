@@ -44,6 +44,8 @@ elif [ -d /sys/module/nvidia ]; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GBM_BACKEND=nvidia-drm
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
+  export PROTON_ENABLE_NVAPI="${PROTON_ENABLE_NVAPI:-1}"
+  export VKD3D_CONFIG="${VKD3D_CONFIG:-dxr,dxr11}"
 elif [ "${IS_VM}" -eq 1 ]; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export WLR_NO_HARDWARE_CURSORS=1

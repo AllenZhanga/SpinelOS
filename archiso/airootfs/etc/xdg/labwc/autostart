@@ -5,7 +5,7 @@ fi
 
 # Export Wayland environment for systemd user services & Portals, then reload portal gateway
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then
-  dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME XMODIFIERS QT_IM_MODULE SDL_IM_MODULE 2>/dev/null || true
+  dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME XMODIFIERS QT_IM_MODULE SDL_IM_MODULE PROTON_ENABLE_NVAPI VKD3D_CONFIG 2>/dev/null || true
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true
