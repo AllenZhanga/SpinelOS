@@ -722,6 +722,264 @@ void toggle_exec_permission(FilesWin *fw, const fs::path &p, bool enable_exec) {
     refresh_current_dir(fw);
 }
 
+std::string sanitize_app_slug(const std::string &raw) {
+    std::string out;
+    for (char ch : to_lower_copy(raw)) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || c == '-') out += ch;
+        else if (c == '_' || c == '.' || c == ' ') {
+            if (!out.empty() && out.back() != '-') out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    if (out.empty()) out = "custom-app";
+    return out;
+}
+
+std::string guess_friendly_app_name(const fs::path &target) {
+    std::string name = target.filename().string();
+    std::string lower = to_lower_copy(name);
+    for (const char *sfx : {".appimage", ".x86_64", ".amd64", ".sh", ".run", ".bin"}) {
+        std::string s(sfx);
+        if (lower.size() > s.size() && lower.compare(lower.size() - s.size(), s.size(), s) == 0) {
+            name = name.substr(0, name.size() - s.size());
+            lower = to_lower_copy(name);
+        }
+    }
+    if (name.empty()) name = "Custom App";
+    if (std::islower(static_cast<unsigned char>(name[0]))) {
+        name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
+    }
+    return name;
+}
+
+std::string sanitize_url_scheme(const std::string &raw) {
+    std::string s = trim_copy(to_lower_copy(raw));
+    auto colon = s.find("://");
+    if (colon != std::string::npos) s = s.substr(0, colon);
+    std::string out;
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || c == '+' || c == '-' || c == '.') out += ch;
+    }
+    return out;
+}
+
+std::string find_nearby_app_icon(const fs::path &exe_path) {
+    std::error_code ec;
+    fs::path dir = exe_path.parent_path();
+    std::string stem_low = to_lower_copy(exe_path.stem().string());
+    const std::vector<fs::path> probe_dirs = {dir, dir / "resources", dir / "icons"};
+    std::string fallback;
+    for (const auto &d : probe_dirs) {
+        if (!fs::is_directory(d, ec)) continue;
+        for (const auto &ent : fs::directory_iterator(d, ec)) {
+            if (!ent.is_regular_file(ec)) continue;
+            std::string fn = ent.path().filename().string();
+            std::string fn_low = to_lower_copy(fn);
+            std::string ext = to_lower_copy(ent.path().extension().string());
+            if (fn == ".DirIcon" || ext == ".png" || ext == ".svg") {
+                if (!stem_low.empty() && fn_low.find(stem_low) != std::string::npos) {
+                    return ent.path().string();
+                }
+                if (fn == ".DirIcon" || fn_low == "icon.png" || fn_low == "icon.svg") {
+                    return ent.path().string();
+                }
+                if (fallback.empty()) fallback = ent.path().string();
+            }
+        }
+    }
+    return !fallback.empty() ? fallback : "application-x-executable";
+}
+
+fs::path user_desktop_entry_path(const fs::path &exe_path) {
+    return fs::path(home_dir()) / ".local/share/applications" /
+           ("spinelos-user-" + sanitize_app_slug(exe_path.filename().string()) + ".desktop");
+}
+
+void notify_shell_apps_changed() {
+    GError *err = nullptr;
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &err);
+    if (err) g_error_free(err);
+    if (bus) {
+        g_dbus_connection_call(
+            bus, "org.spinelos.shell", "/org/spinelos/shell", "org.gtk.Actions",
+            "Activate",
+            g_variant_new("(sava{sv})", "sync-desktop", nullptr, nullptr),
+            nullptr, G_DBUS_CALL_FLAGS_NONE, 1000, nullptr, nullptr, nullptr);
+        g_object_unref(bus);
+    }
+}
+
+void do_remove_from_app_center(FilesWin *fw, const fs::path &target) {
+    std::error_code ec;
+    fs::path desk = user_desktop_entry_path(target);
+    fs::remove(desk, ec);
+    fs::path apps_dir = fs::path(home_dir()) / ".local/share/applications";
+    if (has_executable("update-desktop-database")) {
+        std::string out;
+        int rc = 1;
+        run_argv_capture({"update-desktop-database", apps_dir.string()}, out, rc);
+    }
+    notify_shell_apps_changed();
+    if (fw->status_label) {
+        gtk_label_set_text(GTK_LABEL(fw->status_label),
+                           ("已从应用中心移除: " + target.filename().string()).c_str());
+    }
+}
+
+void do_add_to_app_center(FilesWin *fw, const fs::path &target) {
+    GtkWindow *dlg = GTK_WINDOW(gtk_window_new());
+    gtk_window_set_title(dlg, "添加到应用中心与启动器");
+    gtk_window_set_transient_for(dlg, fw->win);
+    gtk_window_set_modal(dlg, TRUE);
+    gtk_window_set_default_size(dlg, 430, -1);
+    gtk_widget_add_css_class(GTK_WIDGET(dlg), "sf-win");
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+
+    GtkWidget *name_lbl = gtk_label_new("应用名称");
+    gtk_widget_set_halign(name_lbl, GTK_ALIGN_START);
+    GtkWidget *name_entry = gtk_entry_new();
+    gtk_widget_add_css_class(name_entry, "sf-entry");
+    gtk_editable_set_text(GTK_EDITABLE(name_entry), guess_friendly_app_name(target).c_str());
+
+    GtkWidget *scheme_lbl = gtk_label_new("URL 协议（选填，例如 antigravity，用于浏览器登录回调）");
+    gtk_widget_set_halign(scheme_lbl, GTK_ALIGN_START);
+    gtk_widget_add_css_class(scheme_lbl, "sf-muted");
+    GtkWidget *scheme_entry = gtk_entry_new();
+    gtk_widget_add_css_class(scheme_entry, "sf-entry");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(scheme_entry), "留空则只创建普通应用快捷方式");
+
+    GtkWidget *term_chk = gtk_check_button_new_with_label("在终端中运行（CLI 脚本或命令行程序勾选）");
+    std::string ext_low = to_lower_copy(target.extension().string());
+    if (ext_low == ".sh") gtk_check_button_set_active(GTK_CHECK_BUTTON(term_chk), TRUE);
+
+    GtkWidget *btns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(btns, GTK_ALIGN_END);
+    GtkWidget *cancel_btn = gtk_button_new_with_label("取消");
+    gtk_widget_add_css_class(cancel_btn, "sf-tool-btn");
+    GtkWidget *ok_btn = gtk_button_new_with_label("添加到应用中心");
+    gtk_widget_add_css_class(ok_btn, "sf-tool-btn");
+    gtk_widget_add_css_class(ok_btn, "is-on");
+    gtk_box_append(GTK_BOX(btns), cancel_btn);
+    gtk_box_append(GTK_BOX(btns), ok_btn);
+
+    gtk_box_append(GTK_BOX(box), name_lbl);
+    gtk_box_append(GTK_BOX(box), name_entry);
+    gtk_box_append(GTK_BOX(box), scheme_lbl);
+    gtk_box_append(GTK_BOX(box), scheme_entry);
+    gtk_box_append(GTK_BOX(box), term_chk);
+    gtk_box_append(GTK_BOX(box), btns);
+    gtk_window_set_child(dlg, box);
+
+    struct AddAppCtx {
+        FilesWin *fw;
+        GtkWindow *dlg;
+        GtkWidget *name_entry;
+        GtkWidget *scheme_entry;
+        GtkWidget *term_chk;
+        fs::path target;
+    };
+    auto *ctx = new AddAppCtx{fw, dlg, name_entry, scheme_entry, term_chk, target};
+
+    g_signal_connect(cancel_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        gtk_window_close(static_cast<AddAppCtx *>(d)->dlg);
+    }), ctx);
+
+    auto submit_cb = +[](GtkWidget *, gpointer d) {
+        auto *c = static_cast<AddAppCtx *>(d);
+        std::string app_name = trim_copy(gtk_editable_get_text(GTK_EDITABLE(c->name_entry)));
+        if (app_name.empty()) app_name = guess_friendly_app_name(c->target);
+        for (char &ch : app_name) {
+            if (ch == '\n' || ch == '\r') ch = ' ';
+        }
+        std::string scheme = sanitize_url_scheme(gtk_editable_get_text(GTK_EDITABLE(c->scheme_entry)));
+        bool in_term = gtk_check_button_get_active(GTK_CHECK_BUTTON(c->term_chk)) == TRUE;
+
+        std::error_code ec;
+        auto st = fs::symlink_status(c->target, ec);
+        if (!ec) {
+            fs::permissions(c->target, st.permissions() | fs::perms::owner_exec | fs::perms::group_exec, ec);
+        }
+
+        fs::path apps_dir = fs::path(home_dir()) / ".local/share/applications";
+        fs::create_directories(apps_dir, ec);
+        fs::path desk_path = user_desktop_entry_path(c->target);
+        std::string desk_id = desk_path.filename().string();
+
+        std::string exe_str = c->target.string();
+        std::string quoted_exe;
+        quoted_exe.reserve(exe_str.size() + 4);
+        quoted_exe += '"';
+        for (char ch : exe_str) {
+            if (ch == '"' || ch == '\\') quoted_exe += '\\';
+            quoted_exe += ch;
+        }
+        quoted_exe += '"';
+
+        std::string icon = find_nearby_app_icon(c->target);
+        std::ostringstream oss;
+        oss << "[Desktop Entry]\n"
+            << "Name=" << app_name << "\n"
+            << "Exec=" << quoted_exe << " %U\n"
+            << "Path=" << c->target.parent_path().string() << "\n"
+            << "Icon=" << icon << "\n"
+            << "Terminal=" << (in_term ? "true" : "false") << "\n"
+            << "Type=Application\n"
+            << "Categories=Utility;Application;\n"
+            << "StartupWMClass=" << app_name << "\n";
+        if (!scheme.empty()) {
+            oss << "MimeType=x-scheme-handler/" << scheme << ";\n";
+        }
+
+        std::ofstream ofs(desk_path);
+        bool ok = ofs.is_open();
+        if (ok) {
+            ofs << oss.str();
+            ofs.close();
+        }
+        FilesWin *win = c->fw;
+        gtk_window_close(c->dlg);
+
+        if (!ok) {
+            show_error_alert(win, "注册快捷方式失败", "无法写入 " + desk_path.string());
+            return;
+        }
+
+        if (has_executable("update-desktop-database")) {
+            std::string out;
+            int rc = 1;
+            run_argv_capture({"update-desktop-database", apps_dir.string()}, out, rc);
+        }
+        if (!scheme.empty() && has_executable("xdg-mime")) {
+            std::string out;
+            int rc = 1;
+            run_argv_capture({"xdg-mime", "default", desk_id, "x-scheme-handler/" + scheme}, out, rc);
+        }
+        notify_shell_apps_changed();
+        if (win && win->status_label) {
+            std::string msg = "已添加到应用中心与 Alt+Space 启动器: " + app_name;
+            if (!scheme.empty()) msg += "（已绑定 " + scheme + "://）";
+            gtk_label_set_text(GTK_LABEL(win->status_label), msg.c_str());
+        }
+    };
+
+    g_signal_connect(ok_btn, "clicked", G_CALLBACK(submit_cb), ctx);
+    g_signal_connect(name_entry, "activate", G_CALLBACK(submit_cb), ctx);
+    g_signal_connect(scheme_entry, "activate", G_CALLBACK(submit_cb), ctx);
+    g_signal_connect(dlg, "destroy", G_CALLBACK(+[](GtkWidget *, gpointer d) {
+        delete static_cast<AddAppCtx *>(d);
+    }), ctx);
+
+    gtk_window_present(dlg);
+    gtk_widget_grab_focus(name_entry);
+}
+
 void refresh_current_dir(FilesWin *fw);
 
 void run_archive_task(FilesWin *fw,
@@ -873,6 +1131,14 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
                 add_btn("在终端中运行 (bash)", false, [item_path]() { execute_file_in_terminal(item_path, true); });
             }
             add_btn("设为可执行 (+x)", false, [fw, item_path]() { toggle_exec_permission(fw, item_path, true); });
+        }
+        if (is_exec_file || (!is_dir && is_script_or_appimage(item_path))) {
+            bool registered = fs::exists(user_desktop_entry_path(item_path), ec);
+            add_btn(registered ? "更新应用中心快捷方式..." : "添加到应用中心 / 启动器...", false,
+                    [fw, item_path]() { do_add_to_app_center(fw, item_path); });
+            if (registered) {
+                add_btn("从应用中心移除", true, [fw, item_path]() { do_remove_from_app_center(fw, item_path); });
+            }
         }
         add_btn("打开", false, [fw, item_path]() { open_item_action(fw, item_path); });
         if (is_dir) {
