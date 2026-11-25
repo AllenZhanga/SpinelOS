@@ -154,6 +154,7 @@ struct NativeShellState {
     GtkWindow *launcher_backdrop_win = nullptr;
     GtkWindow *launcher_win = nullptr;
     GtkWidget *launcher_entry = nullptr;
+    GtkWidget *launcher_scroll = nullptr;
     GtkWidget *launcher_list = nullptr;
     std::vector<LauncherEntry> launcher_entries;
     bool launcher_was_active = false;

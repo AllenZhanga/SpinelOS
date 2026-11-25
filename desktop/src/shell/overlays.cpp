@@ -216,6 +216,78 @@ void rebuild_launcher_index(NativeShellState *ns) {
     }
 }
 
+void scroll_launcher_row_into_view(NativeShellState *ns, GtkListBoxRow *row) {
+    if (!ns || !ns->launcher_scroll || !ns->launcher_list || !row) return;
+    GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(ns->launcher_scroll));
+    if (!vadj) return;
+
+    double row_top = 0.0;
+    double row_bot = 0.0;
+    graphene_rect_t bounds{};
+    if (gtk_widget_compute_bounds(GTK_WIDGET(row), ns->launcher_list, &bounds) && bounds.size.height > 1.0f) {
+        row_top = static_cast<double>(bounds.origin.y);
+        row_bot = row_top + static_cast<double>(bounds.size.height);
+    } else {
+        int idx = std::max(0, gtk_list_box_row_get_index(row));
+        double est_h = 52.0;
+        row_top = idx * est_h;
+        row_bot = row_top + est_h;
+    }
+
+    const double pad = 6.0;
+    row_top = std::max(0.0, row_top - pad);
+    row_bot += pad;
+
+    double val = gtk_adjustment_get_value(vadj);
+    double page = gtk_adjustment_get_page_size(vadj);
+    double upper = gtk_adjustment_get_upper(vadj);
+    double max_val = std::max(0.0, upper - page);
+    if (page <= 1.0) return;
+
+    if (row_top < val) {
+        gtk_adjustment_set_value(vadj, std::clamp(row_top, 0.0, max_val));
+    } else if (row_bot > val + page) {
+        gtk_adjustment_set_value(vadj, std::clamp(row_bot - page, 0.0, max_val));
+    }
+}
+
+int count_launcher_rows(GtkListBox *list) {
+    int count = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child(GTK_WIDGET(list)); c; c = gtk_widget_get_next_sibling(c)) {
+        ++count;
+    }
+    return count;
+}
+
+int compute_launcher_top_margin(GtkWindow *win) {
+    GdkMonitor *mon = (win && gtk_layer_is_layer_window(win)) ? gtk_layer_get_monitor(win) : nullptr;
+    if (!mon) {
+        if (GdkDisplay *display = gdk_display_get_default()) {
+            if (GListModel *mons = gdk_display_get_monitors(display)) {
+                if (g_list_model_get_n_items(mons) > 0) {
+                    mon = GDK_MONITOR(g_list_model_get_item(mons, 0));
+                    if (mon) {
+                        GdkRectangle geom{};
+                        gdk_monitor_get_geometry(mon, &geom);
+                        g_object_unref(mon);
+                        if (geom.height > 0) {
+                            return std::clamp(static_cast<int>(std::round(geom.height * 0.25)) - 28, 150, 420);
+                        }
+                        return 240;
+                    }
+                }
+            }
+        }
+        return 240;
+    }
+    GdkRectangle geom{};
+    gdk_monitor_get_geometry(mon, &geom);
+    if (geom.height > 0) {
+        return std::clamp(static_cast<int>(std::round(geom.height * 0.25)) - 28, 150, 420);
+    }
+    return 240;
+}
+
 void populate_launcher_results(NativeShellState *ns, const std::string &query) {
     if (!ns || !ns->launcher_list) return;
     while (GtkWidget *c = gtk_widget_get_first_child(ns->launcher_list)) {
@@ -248,31 +320,32 @@ void populate_launcher_results(NativeShellState *ns, const std::string &query) {
     std::stable_sort(matches.begin(), matches.end(), [](const Scored &a, const Scored &b) {
         return a.score > b.score;
     });
-    if (matches.size() > 10) matches.resize(10);
+    if (matches.size() > 24) matches.resize(24);
 
     for (const auto &m : matches) {
         const auto *e = m.entry;
-        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
         GtkWidget *da = gtk_drawing_area_new();
-        gtk_widget_set_size_request(da, 28, 28);
+        gtk_widget_set_size_request(da, 30, 30);
         auto *ctx = new DesktopIconDrawCtx{ns, e->icon_path, e->kind};
         gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_desktop_icon_cb, ctx, free_desktop_icon_ctx);
 
-        GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
+        GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         gtk_widget_set_hexpand(col, TRUE);
         GtkWidget *t = gtk_label_new(e->title.c_str());
-        gtk_widget_add_css_class(t, "spinel-cc-title");
+        gtk_widget_add_css_class(t, "spinel-launcher-title");
         gtk_widget_set_halign(t, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(t), PANGO_ELLIPSIZE_END);
         GtkWidget *s = gtk_label_new(e->subtitle.c_str());
-        gtk_widget_add_css_class(s, "spinel-cc-sub");
+        gtk_widget_add_css_class(s, "spinel-launcher-sub");
         gtk_widget_set_halign(s, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(s), PANGO_ELLIPSIZE_END);
         gtk_box_append(GTK_BOX(col), t);
         gtk_box_append(GTK_BOX(col), s);
 
-        GtkWidget *enter_lbl = gtk_label_new("↵");
-        gtk_widget_add_css_class(enter_lbl, "spinel-cc-badge");
+        GtkWidget *enter_lbl = gtk_label_new("打开 ↵");
+        gtk_widget_add_css_class(enter_lbl, "spinel-launcher-enter");
+        gtk_widget_set_valign(enter_lbl, GTK_ALIGN_CENTER);
 
         gtk_box_append(GTK_BOX(row_box), da);
         gtk_box_append(GTK_BOX(row_box), col);
@@ -282,6 +355,13 @@ void populate_launcher_results(NativeShellState *ns, const std::string &query) {
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
         g_object_set_data_full(G_OBJECT(row), "launcher-cmd", g_strdup(e->cmd.c_str()), g_free);
         gtk_list_box_append(GTK_LIST_BOX(ns->launcher_list), row);
+    }
+
+    if (ns->launcher_scroll) {
+        gtk_widget_set_visible(ns->launcher_scroll, !matches.empty() ? TRUE : FALSE);
+        if (GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(ns->launcher_scroll))) {
+            gtk_adjustment_set_value(vadj, 0.0);
+        }
     }
 
     if (GtkListBoxRow *first = gtk_list_box_get_row_at_index(GTK_LIST_BOX(ns->launcher_list), 0)) {
@@ -300,6 +380,7 @@ void set_launcher_visible(NativeShellState *ns, bool visible) {
         rebuild_launcher_index(ns);
         gtk_editable_set_text(GTK_EDITABLE(ns->launcher_entry), "");
         populate_launcher_results(ns, "");
+        gtk_layer_set_margin(ns->launcher_win, GTK_LAYER_SHELL_EDGE_TOP, compute_launcher_top_margin(ns->launcher_win));
         gtk_layer_set_keyboard_mode(ns->launcher_win, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
         gtk_widget_set_visible(GTK_WIDGET(ns->launcher_win), TRUE);
         gtk_window_present(ns->launcher_win);
@@ -652,10 +733,15 @@ void apply_native_css(NativeShellState *ns) {
     const char *trough_bg = t.is_light ? "rgba(15, 23, 42, 0.14)" : "rgba(255, 255, 255, 0.22)";
     const char *fill_bg = t.is_light ? t.cc_accent.c_str() : "rgba(255, 255, 255, 0.90)";
 
+    const char *launcher_shadow = t.is_light
+        ? "0 10px 26px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08)"
+        : "0 10px 26px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.14)";
+
     std::string css_str;
-    css_str.reserve(4096);
+    css_str.reserve(4608);
     css_str +=
-        "window.spinel-transparent, window.spinel-transparent.background {\n"
+        "window.spinel-transparent, window.spinel-transparent.background,\n"
+        "window.spinel-transparent.csd, window.spinel-transparent decoration {\n"
         "  background-color: transparent;\n"
         "  background-image: none;\n"
         "  box-shadow: none;\n"
@@ -807,24 +893,29 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-launcher-panel {\n"
         "  background-color: " + t.popover_bg + ";\n"
         "  border: 1px solid " + t.cc_border + ";\n"
-        "  border-radius: 18px;\n"
-        "  padding: 12px;\n"
-        "  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.45);\n"
+        "  border-radius: 16px;\n"
+        "  padding: 0;\n"
+        "  box-shadow: " + std::string(launcher_shadow) + ";\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-launcher-search {\n"
-        "  background-color: " + std::string(cc_chip_bg) + ";\n"
-        "  border: 1px solid " + t.bar_border + ";\n"
-        "  border-radius: 12px;\n"
-        "  padding: 6px 12px;\n"
+        "  background: transparent;\n"
+        "  border-bottom: 1px solid " + t.bar_border + ";\n"
+        "  padding: 13px 18px;\n"
         "}\n"
-        ".spinel-launcher-entry {\n"
+        ".spinel-launcher-entry, .spinel-launcher-entry:focus, .spinel-launcher-entry:focus-within {\n"
         "  background: transparent;\n"
         "  border: none;\n"
         "  box-shadow: none;\n"
+        "  outline: none;\n"
         "  color: " + t.bar_fg + ";\n"
-        "  font-size: 15px;\n"
+        "  font-size: 15.5px;\n"
         "  font-weight: 500;\n"
+        "  min-height: 28px;\n"
+        "}\n"
+        ".spinel-launcher-esc {\n"
+        "  font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px;\n"
+        "  background-color: " + std::string(cc_chip_bg) + "; color: " + std::string(cc_sub_fg) + ";\n"
         "}\n"
         ".spinel-launcher-list {\n"
         "  background: transparent;\n"
@@ -832,17 +923,26 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-launcher-list row {\n"
         "  background: transparent;\n"
         "  border-radius: 10px;\n"
-        "  padding: 6px 10px;\n"
-        "  margin: 2px 0;\n"
+        "  padding: 8px 11px;\n"
+        "  margin: 1px 0;\n"
         "}\n"
         ".spinel-launcher-list row:hover { background-color: " + std::string(cc_chip_bg) + "; }\n"
         ".spinel-launcher-list row:selected {\n"
         "  background-color: " + t.cc_accent + ";\n"
         "  color: #ffffff;\n"
         "}\n"
-        ".spinel-launcher-list row:selected .spinel-cc-title,\n"
-        ".spinel-launcher-list row:selected .spinel-cc-sub,\n"
-        ".spinel-launcher-list row:selected .spinel-cc-badge {\n"
+        ".spinel-launcher-title { font-size: 13px; font-weight: 600; color: " + t.bar_fg + "; }\n"
+        ".spinel-launcher-sub { font-size: 11px; color: " + std::string(cc_sub_fg) + "; }\n"
+        ".spinel-launcher-enter {\n"
+        "  font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px;\n"
+        "  background: transparent; color: transparent;\n"
+        "}\n"
+        ".spinel-launcher-list row:selected .spinel-launcher-title,\n"
+        ".spinel-launcher-list row:selected .spinel-launcher-sub {\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-launcher-list row:selected .spinel-launcher-enter {\n"
+        "  background-color: rgba(255, 255, 255, 0.22);\n"
         "  color: #ffffff;\n"
         "}\n";
 
@@ -859,6 +959,7 @@ void apply_native_css(NativeShellState *ns) {
 void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
     GtkWindow *backdrop = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(backdrop, "SpinelLauncherBackdrop");
+    gtk_window_set_decorated(backdrop, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(backdrop), "spinel-transparent");
     gtk_layer_init_for_window(backdrop);
     gtk_layer_set_namespace(backdrop, "spinel-launcher-backdrop");
@@ -884,28 +985,30 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
 
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelLauncher");
+    gtk_window_set_decorated(win, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 580, -1);
+    gtk_window_set_default_size(win, -1, -1);
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-launcher");
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 130);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 240);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
     gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
 
-    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(panel, "spinel-launcher-panel");
-    gtk_widget_set_size_request(panel, 580, -1);
-    gtk_widget_set_margin_top(panel, 6);
-    gtk_widget_set_margin_bottom(panel, 10);
-    gtk_widget_set_margin_start(panel, 10);
-    gtk_widget_set_margin_end(panel, 10);
+    gtk_widget_set_size_request(panel, 620, -1);
+    gtk_widget_set_margin_top(panel, 28);
+    gtk_widget_set_margin_bottom(panel, 48);
+    gtk_widget_set_margin_start(panel, 36);
+    gtk_widget_set_margin_end(panel, 36);
 
-    GtkWidget *search_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *search_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(search_row, "spinel-launcher-search");
     GtkWidget *ico = gtk_drawing_area_new();
-    gtk_widget_set_size_request(ico, 18, 18);
+    gtk_widget_set_size_request(ico, 20, 20);
+    gtk_widget_set_valign(ico, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ico), draw_glyph_cb,
                                    reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Search)), nullptr);
 
@@ -915,8 +1018,9 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "搜索应用、Steam 游戏、系统设置或命令...");
     gtk_widget_set_hexpand(entry, TRUE);
 
-    GtkWidget *esc_hint = gtk_label_new("Esc 关闭");
-    gtk_widget_add_css_class(esc_hint, "spinel-cc-badge");
+    GtkWidget *esc_hint = gtk_label_new("Esc");
+    gtk_widget_add_css_class(esc_hint, "spinel-launcher-esc");
+    gtk_widget_set_valign(esc_hint, GTK_ALIGN_CENTER);
 
     gtk_box_append(GTK_BOX(search_row), ico);
     gtk_box_append(GTK_BOX(search_row), entry);
@@ -925,7 +1029,11 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 360);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 392);
+    gtk_widget_set_margin_top(scroll, 6);
+    gtk_widget_set_margin_bottom(scroll, 8);
+    gtk_widget_set_margin_start(scroll, 8);
+    gtk_widget_set_margin_end(scroll, 8);
 
     GtkWidget *list = gtk_list_box_new();
     gtk_widget_add_css_class(list, "spinel-launcher-list");
@@ -939,6 +1047,7 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
 
     ns->launcher_win = win;
     ns->launcher_entry = entry;
+    ns->launcher_scroll = scroll;
     ns->launcher_list = list;
 
     g_signal_connect(entry, "changed", G_CALLBACK(+[](GtkEditable *ed, gpointer d) {
@@ -960,13 +1069,22 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
             set_launcher_visible(n, false);
             return TRUE;
         }
-        if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Up) {
-            GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(n->launcher_list));
-            int cur = sel ? gtk_list_box_row_get_index(sel) : 0;
-            int next = (keyval == GDK_KEY_Down) ? (cur + 1) : std::max(0, cur - 1);
-            if (GtkListBoxRow *target = gtk_list_box_get_row_at_index(GTK_LIST_BOX(n->launcher_list), next)) {
-                gtk_list_box_select_row(GTK_LIST_BOX(n->launcher_list), target);
-                gtk_widget_grab_focus(GTK_WIDGET(n->launcher_entry));
+        int step = 0;
+        if (keyval == GDK_KEY_Down || keyval == GDK_KEY_KP_Down) step = 1;
+        else if (keyval == GDK_KEY_Up || keyval == GDK_KEY_KP_Up) step = -1;
+        else if (keyval == GDK_KEY_Page_Down || keyval == GDK_KEY_KP_Page_Down) step = 5;
+        else if (keyval == GDK_KEY_Page_Up || keyval == GDK_KEY_KP_Page_Up) step = -5;
+        if (step != 0) {
+            int total = count_launcher_rows(GTK_LIST_BOX(n->launcher_list));
+            if (total > 0) {
+                GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(n->launcher_list));
+                int cur = sel ? gtk_list_box_row_get_index(sel) : 0;
+                int next = std::clamp(cur + step, 0, total - 1);
+                if (GtkListBoxRow *target = gtk_list_box_get_row_at_index(GTK_LIST_BOX(n->launcher_list), next)) {
+                    gtk_list_box_select_row(GTK_LIST_BOX(n->launcher_list), target);
+                    scroll_launcher_row_into_view(n, target);
+                    gtk_widget_grab_focus(GTK_WIDGET(n->launcher_entry));
+                }
             }
             return TRUE;
         }
