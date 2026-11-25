@@ -480,18 +480,23 @@
       if (!data.installed) chip.textContent = "未安装（需 --full 更新）";
       else {
         const engText = data.engine === "rime"
-          ? "Rime 雾凇拼音"
+          ? (data.rime_ice ? "Rime 雾凇拼音" : "Rime 明月拼音 (简体)")
           : (data.engine === "pinyin" ? "内置中文拼音" : "未配置中文方案");
         const rssText = (data.running && data.rss_mb > 0) ? ` · ${data.rss_mb} MB` : "";
         chip.textContent = (data.running ? "运行中 · " : "未启动 · ") + engText + rssText;
       }
     }
-    document.getElementById("btn-ime-pinyin")?.classList.toggle("active", data.engine === "pinyin");
+    const pinyinBtn = document.getElementById("btn-ime-pinyin");
+    if (pinyinBtn) {
+      pinyinBtn.classList.toggle("active", data.engine === "pinyin" || (data.engine === "rime" && !data.rime_ice));
+      pinyinBtn.textContent = data.has_pinyin ? "内置中文拼音 (默认)" : "Rime 明月拼音·简体 (内置)";
+    }
     const rimeBtn = document.getElementById("btn-ime-rime");
     if (rimeBtn) {
-      rimeBtn.classList.toggle("active", data.engine === "rime");
+      rimeBtn.classList.toggle("active", data.engine === "rime" && Boolean(data.rime_ice));
       rimeBtn.classList.toggle("hidden", !data.rime_ice);
     }
+    document.getElementById("btn-ime-config")?.classList.toggle("hidden", !data.has_configtool);
     const iceBtn = document.getElementById("btn-ime-ice");
     if (iceBtn) {
       iceBtn.textContent = data.rime_ice ? "更新雾凇拼音词库" : "安装并启用雾凇拼音 (rime-ice)";

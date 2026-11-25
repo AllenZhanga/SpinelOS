@@ -85,12 +85,12 @@ if [ "$MODE" = "full" ]; then
     zram-generator btrfs-progs snapper reflector \
     spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
-    fcitx5 fcitx5-chinese-addons fcitx5-rime fcitx5-gtk fcitx5-qt fcitx5-configtool
+    fcitx5 fcitx5-rime fcitx5-gtk
   fc-cache -f >/dev/null 2>&1 || true
-  for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp; do
+  for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp fcitx5-chinese-addons fcitx5-configtool fcitx5-qt; do
     if pacman -Qq "$legacy_ime" >/dev/null 2>&1; then
-      echo "==> Removing legacy IME dictionary package $legacy_ime..."
-      sudo pacman -Rns --noconfirm "$legacy_ime" 2>/dev/null || true
+      echo "==> Removing legacy/heavy IME package $legacy_ime (and unneeded QtWebEngine deps)..."
+      sudo pacman -Rns --noconfirm "$legacy_ime" 2>/dev/null || sudo pacman -Rdd --noconfirm "$legacy_ime" 2>/dev/null || true
     fi
   done
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ]; then

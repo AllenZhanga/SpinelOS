@@ -766,13 +766,13 @@
           </div>
           <div class="footer-actions">
             <button class="btn small" data-cmd="ime:restart">重启输入法</button>
-            <button class="btn small" data-cmd="ime:config">打开图形配置</button>
+            <button class="btn small hidden" id="btn-ime-config" data-cmd="ime:config">打开图形配置</button>
           </div>
         </div>
         <div class="part-section">
-          <p class="muted-hint" style="margin-bottom: 10px;">按 <strong>Ctrl+Space</strong> 或 <strong>Shift</strong> 切换中英文，兼容 Wayland 原生应用、浏览器与 Steam（XWayland）。</p>
+          <p class="muted-hint" style="margin-bottom: 10px;">按 <strong>Ctrl+Space</strong> 或 <strong>Shift</strong> 切换中英文，内置 Rime 明月简体拼音（离线即用），兼容 Wayland 原生应用、浏览器与 Steam。</p>
           <div class="footer-actions" style="flex-wrap: wrap;">
-            <button class="pill-btn active" id="btn-ime-pinyin" data-cmd="ime:mode:pinyin">内置中文拼音 (默认)</button>
+            <button class="pill-btn active" id="btn-ime-pinyin" data-cmd="ime:mode:pinyin">Rime 明月拼音·简体 (内置)</button>
             <button class="pill-btn" id="btn-ime-rime" data-cmd="ime:mode:rime">Rime 雾凇拼音 (rime-ice)</button>
             <button class="btn small primary" id="btn-ime-ice" data-cmd="ime:install-rime-ice">安装雾凇拼音词库</button>
           </div>

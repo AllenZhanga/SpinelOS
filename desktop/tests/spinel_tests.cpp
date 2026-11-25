@@ -334,6 +334,18 @@ void test_system_control_configs() {
     mark_welcome_completed();
     EXPECT(is_welcome_completed() == true);
 
+    // Fcitx5 Rime Simplified Chinese offline defaults (zero qt6-webengine dependency)
+    ensure_fcitx5_defaults(true);
+    std::ifstream prof_ifs(fs::path(home_dir()) / ".config/fcitx5/profile");
+    std::ostringstream prof_buf;
+    prof_buf << prof_ifs.rdbuf();
+    EXPECT(prof_buf.str().find("DefaultIM=rime") != std::string::npos);
+
+    std::ifstream rime_ifs(fs::path(home_dir()) / ".local/share/fcitx5/rime/default.custom.yaml");
+    std::ostringstream rime_buf;
+    rime_buf << rime_ifs.rdbuf();
+    EXPECT(rime_buf.str().find("schema: luna_pinyin_simp") != std::string::npos);
+
     // Spinel Doctor checks + log/credential redaction
     std::string raw_secret =
         "Proxy=http://alice:TopSecret99@127.0.0.1:7890\n"

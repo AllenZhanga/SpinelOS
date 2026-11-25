@@ -142,16 +142,33 @@ void write_rime_default_custom(bool prefer_rime_ice) {
     std::error_code ec;
     fs::create_directories(rime_dir, ec);
     fs::path custom = rime_dir / "default.custom.yaml";
-    if (!prefer_rime_ice) {
-        fs::remove(custom, ec);
-        return;
-    }
+    const std::string schema = prefer_rime_ice ? "rime_ice" : "luna_pinyin_simp";
     std::string content =
         "patch:\n"
         "  schema_list:\n"
-        "    - schema: rime_ice\n"
+        "    - schema: " + schema + "\n"
         "  \"menu/page_size\": 7\n";
     write_text_file(custom.string(), content);
+}
+
+bool has_pinyin_addon_installed() {
+    std::error_code ec;
+    return fs::exists("/usr/lib/fcitx5/libpinyin.so", ec) ||
+           fs::exists("/usr/share/fcitx5/addon/pinyin.conf", ec);
+}
+
+bool has_rime_addon_installed() {
+    std::error_code ec;
+    return has_executable("fcitx5-rime") ||
+           fs::exists("/usr/lib/fcitx5/librime.so", ec) ||
+           fs::exists("/usr/share/fcitx5/addon/rime.conf", ec);
+}
+
+std::string default_ime_engine() {
+    if (has_rime_addon_installed() || !has_pinyin_addon_installed()) {
+        return "rime";
+    }
+    return "pinyin";
 }
 
 std::string detect_active_ime_engine() {
@@ -241,35 +258,21 @@ void ensure_fcitx5_defaults(bool is_light) {
     ensure_chromium_ime_flags();
 
     std::string active_im = detect_active_ime_engine();
+    bool has_pinyin = has_pinyin_addon_installed();
     bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
-    if (active_im == "none" || (active_im == "rime" && !has_ice)) {
+    write_rime_default_custom(has_ice);
+
+    if (active_im == "none" || (active_im == "pinyin" && !has_pinyin)) {
         std::string pg_out;
         int pg_rc = 1;
         bool was_running = run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) && pg_rc == 0;
         if (was_running) stop_fcitx5_sync();
-        write_fcitx5_profile("pinyin");
+        write_fcitx5_profile(default_ime_engine());
         if (was_running && has_executable("fcitx5")) {
             spawn_argv_detached({"sh", "-c", "setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true"});
         }
     }
     write_fcitx5_classicui(is_light, !fs::exists(fdir / "conf/classicui.conf", ec));
-    fs::path pyconf = fdir / "conf/pinyin.conf";
-    if (!fs::exists(pyconf, ec)) {
-        write_text_file(pyconf.string(), "PageSize=7\nCloudPinyinEnabled=False\nExtBEnabled=False\n");
-    } else {
-        std::ifstream pifs(pyconf);
-        if (pifs.is_open()) {
-            std::string raw((std::istreambuf_iterator<char>(pifs)), std::istreambuf_iterator<char>());
-            pifs.close();
-            bool has_extb = (raw.rfind("ExtBEnabled=", 0) == 0 || raw.find("\nExtBEnabled=") != std::string::npos);
-            if (!has_extb) {
-                if (!raw.empty() && raw.back() != '\n') raw += '\n';
-                raw += "ExtBEnabled=False\n";
-                write_text_file(pyconf.string(), raw);
-            }
-        }
-    }
-    write_rime_default_custom(has_ice);
 }
 
 void sync_fcitx5_theme(bool is_light) {
@@ -317,9 +320,9 @@ fi
 void push_ime_state(AppState *state) {
     if (!state || !state->settings_view) return;
     bool installed = has_executable("fcitx5");
-    bool rime_ok = has_executable("fcitx5-rime") ||
-                   fs::exists("/usr/lib/fcitx5/librime.so") ||
-                   fs::exists("/usr/share/fcitx5/addon/rime.conf");
+    bool rime_ok = has_rime_addon_installed();
+    bool has_pinyin = has_pinyin_addon_installed();
+    bool has_configtool = has_executable("fcitx5-configtool");
     std::error_code ec;
     bool rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
     std::string pid_out;
@@ -346,6 +349,8 @@ void push_ime_state(AppState *state) {
        << "\"installed\":" << (installed ? "true" : "false") << ","
        << "\"running\":" << (running ? "true" : "false") << ","
        << "\"rime_installed\":" << (rime_ok ? "true" : "false") << ","
+       << "\"has_pinyin\":" << (has_pinyin ? "true" : "false") << ","
+       << "\"has_configtool\":" << (has_configtool ? "true" : "false") << ","
        << "\"rime_ice\":" << (rime_ice ? "true" : "false") << ","
        << "\"rss_mb\":" << rss_mb << ","
        << "\"engine\":\"" << engine << "\""
@@ -363,7 +368,7 @@ void restart_fcitx5_daemon(AppState *state) {
     }
     stop_fcitx5_sync();
     if (detect_active_ime_engine() == "none") {
-        write_fcitx5_profile("pinyin");
+        write_fcitx5_profile(default_ime_engine());
     }
     spawn_argv_detached({"sh", "-c", "setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true"});
     append_app_log("[IME] 已重启 Fcitx5 输入法服务");
@@ -376,17 +381,31 @@ void restart_fcitx5_daemon(AppState *state) {
 }
 
 void set_ime_engine(AppState *state, const std::string &engine) {
+    std::error_code ec;
+    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
     if (engine == "rime") {
-        std::error_code ec;
-        if (!fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec)) {
+        if (!has_ice) {
             install_rime_ice_dict(state);
             return;
         }
+        write_rime_default_custom(true);
+        stop_fcitx5_sync();
+        write_fcitx5_profile("rime");
+        append_app_log("[IME] 切换中文输入法方案为: rime (rime_ice)");
+        restart_fcitx5_daemon(state);
+        if (state && state->settings_view) push_ime_state(state);
+        return;
     }
-    std::string target = (engine == "rime") ? "rime" : "pinyin";
+
+    // "pinyin" / built-in offline Chinese Pinyin: prefer fcitx5-chinese-addons if installed,
+    // otherwise switch Rime cleanly to built-in Simplified Luna Pinyin (luna_pinyin_simp).
+    std::string target = has_pinyin_addon_installed() ? "pinyin" : "rime";
+    if (target == "rime") {
+        write_rime_default_custom(false);
+    }
     stop_fcitx5_sync();
     write_fcitx5_profile(target);
-    append_app_log("[IME] 切换中文输入法方案为: " + target);
+    append_app_log("[IME] 切换中文输入法方案为: " + target + (target == "rime" ? " (luna_pinyin_simp)" : ""));
     restart_fcitx5_daemon(state);
     if (state && state->settings_view) {
         push_ime_state(state);

@@ -95,10 +95,7 @@ noto-fonts-cjk
 noto-fonts-emoji
 ttf-dejavu
 
-# Input Method (Fcitx5 Wayland + Chinese Pinyin & optional Rime-Ice)
+# Input Method (Fcitx5 Wayland + GTK + Rime Simplified Pinyin, zero Qt6WebEngine)
 fcitx5
-fcitx5-chinese-addons
 fcitx5-rime
 fcitx5-gtk
-fcitx5-qt
-fcitx5-configtool
