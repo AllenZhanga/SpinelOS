@@ -587,7 +587,11 @@
     if (!data) return;
     detectedGateway = data.gateway || "";
     const chip = document.getElementById("proxy-status-chip");
-    if (chip) chip.textContent = data.enabled ? "已启用" : "已关闭";
+    if (chip) {
+      chip.textContent = data.enabled
+        ? "已启用"
+        : (data.external_proxy ? `外部代理生效 (${data.external_proxy})` : "已关闭");
+    }
     const hint = document.getElementById("proxy-gw-hint");
     if (hint) {
       hint.textContent = detectedGateway

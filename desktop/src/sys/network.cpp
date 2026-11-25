@@ -410,10 +410,13 @@ void sync_process_proxy_env() {
 void push_proxy_config(AppState *state) {
     if (!state || !state->settings_view) return;
     ProxyConfig cfg = load_proxy_config();
+    ProxyConfig eff = resolve_effective_proxy();
+    std::string ext_addr = (!cfg.enabled && eff.enabled) ? (!eff.http_proxy.empty() ? eff.http_proxy : eff.socks_proxy) : "";
     std::string gw = run_cmd_capture("ip route 2>/dev/null | awk '/default/ {print $3; exit}'");
     std::ostringstream js;
     js << "window.__spinelProxyConfig && window.__spinelProxyConfig({"
        << "\"enabled\":" << (cfg.enabled ? "true" : "false") << ","
+       << "\"external_proxy\":\"" << json_escape(ext_addr) << "\","
        << "\"http_proxy\":\"" << json_escape(cfg.http_proxy) << "\","
        << "\"socks_proxy\":\"" << json_escape(cfg.socks_proxy) << "\","
        << "\"no_proxy\":\"" << json_escape(cfg.no_proxy) << "\","

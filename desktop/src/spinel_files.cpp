@@ -2,76 +2,27 @@
 
 #include <gtk/gtk.h>
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iomanip>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
-
-struct FilesTheme {
-    std::string id;
-    bool is_light = false;
-    std::string fg = "#f1f5f9";
-    std::string muted = "#94a3b8";
-    std::string accent = "#38bdf8";
-};
-
-FilesTheme load_active_files_theme() {
-    std::string id = trim_copy(read_first_line(
-        (fs::path(home_dir()) / ".config/spinelos/theme.conf").string(), ""
-    ));
-    if (id.empty()) {
-        std::string legacy = trim_copy(read_first_line(
-            (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), ""
-        ));
-        if (legacy == "obsidian-purple") id = "obsidian-neon";
-        else if (legacy == "emerald-aurora") id = "emerald-nordic";
-        else id = "tahoe-light";
-    }
-
-    FilesTheme th;
-    th.id = id;
-    if (id == "tahoe-light") {
-        th.is_light = true;
-        th.fg = "#0f172a";
-        th.muted = "#64748b";
-        th.accent = "#0a84ff";
-    } else if (id == "emerald-nordic") {
-        th.fg = "#ecfdf5";
-        th.muted = "#6ee7b7";
-        th.accent = "#10b981";
-    } else if (id == "obsidian-neon") {
-        th.fg = "#f5f3ff";
-        th.muted = "#c4b5fd";
-        th.accent = "#a855f7";
-    } else if (id != "crystal-aurora") {
-        fs::path custom = fs::path(home_dir()) / ".config/spinelos/themes" / (id + ".theme");
-        std::ifstream ifs(custom);
-        std::string line;
-        while (std::getline(ifs, line)) {
-            line = trim_copy(line);
-            auto eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            std::string k = trim_copy(line.substr(0, eq));
-            std::string v = trim_copy(line.substr(eq + 1));
-            if (k == "is_light") th.is_light = (v == "true" || v == "1");
-            else if (k == "ui_text") th.fg = v;
-            else if (k == "ui_muted") th.muted = v;
-            else if (k == "ui_accent") th.accent = v;
-        }
-    }
-    return th;
-}
 
 namespace {
 
@@ -94,12 +45,58 @@ struct MountItem {
 
 enum class ClipOp { None, Copy, Cut };
 
+// Lightweight GObject wrapper so GListStore + GtkListView/GtkGridView virtualize 100k+ items effortlessly
+struct _SpinelFileObj {
+    GObject parent_instance;
+    DirItem *item;
+};
+
+struct _SpinelFileObjClass {
+    GObjectClass parent_class;
+};
+
+static GType spinel_file_obj_get_type(void);
+G_DEFINE_TYPE(_SpinelFileObj, spinel_file_obj, G_TYPE_OBJECT)
+
+static void spinel_file_obj_finalize(GObject *obj) {
+    auto *self = reinterpret_cast<_SpinelFileObj *>(obj);
+    delete self->item;
+    self->item = nullptr;
+    G_OBJECT_CLASS(spinel_file_obj_parent_class)->finalize(obj);
+}
+
+static void spinel_file_obj_class_init(_SpinelFileObjClass *klass) {
+    G_OBJECT_CLASS(klass)->finalize = spinel_file_obj_finalize;
+}
+
+static void spinel_file_obj_init(_SpinelFileObj *self) {
+    self->item = nullptr;
+}
+
+static _SpinelFileObj *spinel_file_obj_new(const DirItem &src) {
+    auto *obj = static_cast<_SpinelFileObj *>(g_object_new(spinel_file_obj_get_type(), nullptr));
+    obj->item = new DirItem(src);
+    return obj;
+}
+
+struct FilesTheme {
+    std::string id;
+    bool is_light = false;
+    std::string fg = "#f1f5f9";
+    std::string muted = "#94a3b8";
+    std::string accent = "#38bdf8";
+};
+
 struct FilesWin {
     GtkApplication *app = nullptr;
     GtkWindow *win = nullptr;
     GtkCssProvider *css = nullptr;
     guint theme_timer = 0;
+    guint search_timer = 0;
     std::string last_theme_id;
+
+    std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(true);
+    std::shared_ptr<std::atomic<uint64_t>> scan_gen = std::make_shared<std::atomic<uint64_t>>(0);
 
     GtkWidget *root = nullptr;
     GtkWidget *btn_back = nullptr;
@@ -122,15 +119,19 @@ struct FilesWin {
     GtkWidget *view_stack = nullptr;
     GtkWidget *status_label = nullptr;
 
+    GListStore *store = nullptr;
+    GtkSingleSelection *selection = nullptr;
+
     fs::path current_dir;
     std::vector<fs::path> history;
     int hist_idx = -1;
     std::vector<DirItem> items;
-    std::vector<DirItem> visible_items;
+    size_t visible_count = 0;
     fs::path selected_path;
     bool show_hidden = false;
     bool grid_mode = false;
     bool path_edit_mode = false;
+    bool scanning = false;
 
     ClipOp clip_op = ClipOp::None;
     std::vector<fs::path> clip_paths;
@@ -183,33 +184,76 @@ std::string format_perms(fs::perms p) {
 struct FileBadge {
     const char *icon_name;
     const char *css_class;
-    const char *kind_label;
 };
 
 FileBadge classify_item(const DirItem &it) {
-    if (it.is_dir) return {"folder-symbolic", "sf-ico-dir", "文件夹"};
+    if (it.is_dir) return {"folder-symbolic", "sf-ico-dir"};
     std::string ext = to_lower_copy(it.path.extension().string());
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" || ext == ".svg") {
-        return {"image-x-generic-symbolic", "sf-ico-img", "图片"};
+        return {"image-x-generic-symbolic", "sf-ico-img"};
     }
     if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" || ext == ".mov" || ext == ".avi") {
-        return {"video-x-generic-symbolic", "sf-ico-vid", "视频"};
+        return {"video-x-generic-symbolic", "sf-ico-vid"};
     }
     if (ext == ".mp3" || ext == ".flac" || ext == ".wav" || ext == ".ogg") {
-        return {"audio-x-generic-symbolic", "sf-ico-aud", "音频"};
+        return {"audio-x-generic-symbolic", "sf-ico-aud"};
     }
     if (ext == ".zip" || ext == ".tar" || ext == ".gz" || ext == ".xz" || ext == ".zst" || ext == ".7z") {
-        return {"package-x-generic-symbolic", "sf-ico-arc", "压缩包"};
+        return {"package-x-generic-symbolic", "sf-ico-arc"};
     }
     if (ext == ".cpp" || ext == ".hpp" || ext == ".c" || ext == ".h" || ext == ".py" ||
         ext == ".js" || ext == ".ts" || ext == ".sh" || ext == ".json" || ext == ".md" ||
         ext == ".txt" || ext == ".conf" || ext == ".css" || ext == ".html") {
-        return {"text-x-generic-symbolic", "sf-ico-code", "文本/代码"};
+        return {"text-x-generic-symbolic", "sf-ico-code"};
     }
     if (it.is_exec || ext == ".appimage") {
-        return {"application-x-executable-symbolic", "sf-ico-exec", "可执行"};
+        return {"application-x-executable-symbolic", "sf-ico-exec"};
     }
-    return {"text-x-generic-symbolic", "sf-ico-file", "文件"};
+    return {"text-x-generic-symbolic", "sf-ico-file"};
+}
+
+// Fast POSIX directory scan (1 fstatat syscall per entry, zero chrono clock conversions)
+std::vector<DirItem> scan_dir_posix(const fs::path &dir) {
+    std::vector<DirItem> out;
+    DIR *dp = opendir(dir.c_str());
+    if (!dp) return out;
+    int dfd = dirfd(dp);
+    struct dirent *de = nullptr;
+    while ((de = readdir(dp)) != nullptr) {
+        const char *name = de->d_name;
+        if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
+            continue;
+        }
+        DirItem it;
+        it.name = name;
+        it.path = dir / name;
+
+        struct stat lst{};
+        if (fstatat(dfd, name, &lst, AT_SYMLINK_NOFOLLOW) == 0) {
+            it.is_symlink = S_ISLNK(lst.st_mode);
+            struct stat st = lst;
+            if (it.is_symlink) {
+                struct stat target_st{};
+                if (fstatat(dfd, name, &target_st, 0) == 0) st = target_st;
+            }
+            it.is_dir = S_ISDIR(st.st_mode);
+            if (!it.is_dir && S_ISREG(st.st_mode)) {
+                it.size = static_cast<std::uintmax_t>(st.st_size);
+                it.is_exec = (st.st_mode & S_IXUSR) != 0;
+            }
+            it.mtime = st.st_mtime;
+        } else {
+            it.is_dir = (de->d_type == DT_DIR);
+        }
+        out.push_back(std::move(it));
+    }
+    closedir(dp);
+
+    std::sort(out.begin(), out.end(), [](const DirItem &a, const DirItem &b) {
+        if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
+        return to_lower_copy(a.name) < to_lower_copy(b.name);
+    });
+    return out;
 }
 
 std::vector<MountItem> scan_external_mounts() {
@@ -222,7 +266,6 @@ std::vector<MountItem> scan_external_mounts() {
         std::istringstream iss(line);
         std::string dev, mp, fstype;
         if (!(iss >> dev >> mp >> fstype)) continue;
-        // Unescape \040 spaces from /proc/mounts
         std::string clean_mp;
         for (size_t i = 0; i < mp.size(); ++i) {
             if (mp[i] == '\\' && i + 3 < mp.size() && mp.substr(i + 1, 3) == "040") {
@@ -245,7 +288,52 @@ std::vector<MountItem> scan_external_mounts() {
     return res;
 }
 
-void clear_box_children(GtkWidget *box);
+FilesTheme load_active_files_theme() {
+    std::string id = trim_copy(read_first_line(
+        (fs::path(home_dir()) / ".config/spinelos/theme.conf").string(), ""
+    ));
+    if (id.empty()) {
+        std::string legacy = trim_copy(read_first_line(
+            (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), ""
+        ));
+        if (legacy == "obsidian-purple") id = "obsidian-neon";
+        else if (legacy == "emerald-aurora") id = "emerald-nordic";
+        else id = "tahoe-light";
+    }
+
+    FilesTheme th;
+    th.id = id;
+    if (id == "tahoe-light") {
+        th.is_light = true;
+        th.fg = "#0f172a";
+        th.muted = "#64748b";
+        th.accent = "#0a84ff";
+    } else if (id == "emerald-nordic") {
+        th.fg = "#ecfdf5";
+        th.muted = "#6ee7b7";
+        th.accent = "#10b981";
+    } else if (id == "obsidian-neon") {
+        th.fg = "#f5f3ff";
+        th.muted = "#c4b5fd";
+        th.accent = "#a855f7";
+    } else if (id != "crystal-aurora") {
+        fs::path custom = fs::path(home_dir()) / ".config/spinelos/themes" / (id + ".theme");
+        std::ifstream ifs(custom);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            line = trim_copy(line);
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            std::string k = trim_copy(line.substr(0, eq));
+            std::string v = trim_copy(line.substr(eq + 1));
+            if (k == "is_light") th.is_light = (v == "true" || v == "1");
+            else if (k == "ui_text") th.fg = v;
+            else if (k == "ui_muted") th.muted = v;
+            else if (k == "ui_accent") th.accent = v;
+        }
+    }
+    return th;
+}
 
 void apply_theme_css(FilesWin *fw) {
     FilesTheme th = load_active_files_theme();
@@ -277,12 +365,15 @@ void apply_theme_css(FilesWin *fw) {
         << ".sf-crumb-pill { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 7px; padding: 3px 9px; font-size: 12px; }\n"
         << ".sf-crumb-pill:hover { border-color: " << accent << "; }\n"
         << ".sf-entry { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 8px; padding: 4px 10px; min-height: 28px; }\n"
-        << ".sf-listbox, .sf-flowbox { background: transparent; padding: 8px; }\n"
-        << ".sf-row { border-radius: 8px; padding: 6px 10px; margin: 1px 0; }\n"
-        << ".sf-row:hover { background: " << hover_bg << "; }\n"
-        << ".sf-row:selected { background: " << sel_bg << "; }\n"
-        << ".sf-grid-card { background: " << card_bg << "; border: 1px solid " << border << "; border-radius: 10px; padding: 10px 8px; min-width: 112px; }\n"
-        << ".sf-grid-card:hover { border-color: " << accent << "; }\n"
+        << "listview.sf-listview, gridview.sf-gridview { background: transparent; padding: 6px; }\n"
+        << "listview.sf-listview > row { border-radius: 8px; margin: 1px 4px; }\n"
+        << "listview.sf-listview > row:hover { background: " << hover_bg << "; }\n"
+        << "listview.sf-listview > row:selected { background: " << sel_bg << "; }\n"
+        << ".sf-row { padding: 6px 10px; }\n"
+        << "gridview.sf-gridview > child { border-radius: 10px; margin: 4px; }\n"
+        << ".sf-grid-card { background: " << card_bg << "; border: 1px solid " << border << "; border-radius: 10px; padding: 10px 8px; min-width: 118px; }\n"
+        << "gridview.sf-gridview > child:hover .sf-grid-card { border-color: " << accent << "; }\n"
+        << "gridview.sf-gridview > child:selected .sf-grid-card { background: " << sel_bg << "; border-color: " << accent << "; }\n"
         << ".sf-muted { color: " << muted << "; font-size: 12px; }\n"
         << ".sf-status { background: " << bar_bg << "; border-top: 1px solid " << border << "; padding: 5px 14px; font-size: 12px; color: " << muted << "; }\n"
         << ".sf-ico-dir { color: #38bdf8; }\n"
@@ -309,9 +400,7 @@ void apply_theme_css(FilesWin *fw) {
 void clear_box_children(GtkWidget *box) {
     if (!box) return;
     while (GtkWidget *c = gtk_widget_get_first_child(box)) {
-        if (GTK_IS_LIST_BOX(box)) gtk_list_box_remove(GTK_LIST_BOX(box), c);
-        else if (GTK_IS_FLOW_BOX(box)) gtk_flow_box_remove(GTK_FLOW_BOX(box), c);
-        else gtk_box_remove(GTK_BOX(box), c);
+        gtk_box_remove(GTK_BOX(box), c);
     }
 }
 
@@ -478,7 +567,6 @@ void do_paste(FilesWin *fw) {
         } else {
             fs::rename(src, dst, ec);
             if (ec) {
-                // Cross-filesystem move fallback: copy then remove source
                 ec.clear();
                 fs::copy(src, dst, fs::copy_options::recursive, ec);
                 if (!ec) fs::remove_all(src, ec);
@@ -769,131 +857,40 @@ void rebuild_breadcrumbs(FilesWin *fw) {
     gtk_editable_set_text(GTK_EDITABLE(fw->path_entry), fw->current_dir.string().c_str());
 }
 
-void attach_item_gestures(FilesWin *fw, GtkWidget *widget, const fs::path &item_path) {
-    auto *p = new fs::path(item_path);
-    g_object_set_data_full(G_OBJECT(widget), "sf-item-path", p, +[](gpointer x) { delete static_cast<fs::path *>(x); });
-
-    GtkGesture *click1 = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click1), 1);
-    g_signal_connect(click1, "pressed", G_CALLBACK(+[](GtkGestureClick *g, gint n_press, gdouble, gdouble, gpointer d) {
-        auto *win = static_cast<FilesWin *>(d);
-        GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
-        auto *ip = static_cast<fs::path *>(g_object_get_data(G_OBJECT(w), "sf-item-path"));
-        if (!ip) return;
-        win->selected_path = *ip;
-        if (n_press == 2) {
-            open_item_action(win, *ip);
-        }
-    }), fw);
-    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click1));
-
-    GtkGesture *click3 = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click3), 3);
-    g_signal_connect(click3, "pressed", G_CALLBACK(+[](GtkGestureClick *g, gint, gdouble x, gdouble y, gpointer d) {
-        auto *win = static_cast<FilesWin *>(d);
-        GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
-        auto *ip = static_cast<fs::path *>(g_object_get_data(G_OBJECT(w), "sf-item-path"));
-        show_context_menu(win, w, x, y, ip ? *ip : fs::path{});
-    }), fw);
-    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click3));
-}
-
-void render_visible_items(FilesWin *fw) {
-    clear_box_children(fw->list_view);
-    clear_box_children(fw->grid_view);
-
-    std::string q = to_lower_copy(trim_copy(gtk_editable_get_text(GTK_EDITABLE(fw->search_entry))));
-    fw->visible_items.clear();
-    for (const auto &it : fw->items) {
-        if (!fw->show_hidden && !it.name.empty() && it.name.front() == '.') continue;
-        if (!q.empty() && to_lower_copy(it.name).find(q) == std::string::npos) continue;
-        fw->visible_items.push_back(it);
-    }
-
-    for (const auto &it : fw->visible_items) {
-        FileBadge badge = classify_item(it);
-        if (!fw->grid_mode) {
-            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-            gtk_widget_add_css_class(row, "sf-row");
-            GtkWidget *ico = gtk_image_new_from_icon_name(badge.icon_name);
-            gtk_widget_add_css_class(ico, badge.css_class);
-            GtkWidget *name = gtk_label_new(it.name.c_str());
-            gtk_widget_set_hexpand(name, TRUE);
-            gtk_widget_set_halign(name, GTK_ALIGN_START);
-            gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
-
-            GtkWidget *sz = gtk_label_new(it.is_dir ? "文件夹" : format_size(it.size).c_str());
-            gtk_widget_add_css_class(sz, "sf-muted");
-            gtk_widget_set_size_request(sz, 86, -1);
-            gtk_label_set_xalign(GTK_LABEL(sz), 1.0f);
-
-            GtkWidget *mt = gtk_label_new(format_time(it.mtime).c_str());
-            gtk_widget_add_css_class(mt, "sf-muted");
-            gtk_widget_set_size_request(mt, 130, -1);
-            gtk_label_set_xalign(GTK_LABEL(mt), 1.0f);
-
-            gtk_box_append(GTK_BOX(row), ico);
-            gtk_box_append(GTK_BOX(row), name);
-            gtk_box_append(GTK_BOX(row), sz);
-            gtk_box_append(GTK_BOX(row), mt);
-            attach_item_gestures(fw, row, it.path);
-            gtk_list_box_append(GTK_LIST_BOX(fw->list_view), row);
-        } else {
-            GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-            gtk_widget_add_css_class(card, "sf-grid-card");
-            GtkWidget *ico = gtk_image_new_from_icon_name(badge.icon_name);
-            gtk_image_set_pixel_size(GTK_IMAGE(ico), 36);
-            gtk_widget_add_css_class(ico, badge.css_class);
-            GtkWidget *name = gtk_label_new(it.name.c_str());
-            gtk_label_set_max_width_chars(GTK_LABEL(name), 14);
-            gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
-            GtkWidget *sub = gtk_label_new(it.is_dir ? "文件夹" : format_size(it.size).c_str());
-            gtk_widget_add_css_class(sub, "sf-muted");
-            gtk_box_append(GTK_BOX(card), ico);
-            gtk_box_append(GTK_BOX(card), name);
-            gtk_box_append(GTK_BOX(card), sub);
-            attach_item_gestures(fw, card, it.path);
-            gtk_flow_box_append(GTK_FLOW_BOX(fw->grid_view), card);
-        }
-    }
-
-    gtk_stack_set_visible_child_name(GTK_STACK(fw->view_stack), fw->grid_mode ? "grid" : "list");
-
+void update_status_bar(FilesWin *fw) {
     std::ostringstream status;
-    status << "共 " << fw->visible_items.size() << " 项 · Ctrl+H 隐藏文件 · Ctrl+L 输路径 · F2 重命名 · Ctrl+C/X/V · Delete 回收站";
+    if (fw->scanning) {
+        status << "正在读取目录...";
+    } else {
+        status << "共 " << fw->visible_count << " 项";
+        if (!fw->selected_path.empty()) {
+            status << " · 已选: " << fw->selected_path.filename().string();
+        }
+        status << " · Ctrl+H 隐藏文件 · Ctrl+L 输路径 · F2 重命名 · Ctrl+C/X/V · Delete 回收站";
+    }
     gtk_label_set_text(GTK_LABEL(fw->status_label), status.str().c_str());
 }
 
-void refresh_current_dir(FilesWin *fw) {
-    fw->items.clear();
-    std::error_code ec;
-    for (const auto &entry : fs::directory_iterator(fw->current_dir, fs::directory_options::skip_permission_denied, ec)) {
-        DirItem it;
-        it.name = entry.path().filename().string();
-        it.path = entry.path();
-        std::error_code sec;
-        auto sym = entry.symlink_status(sec);
-        it.is_symlink = fs::is_symlink(sym);
-        auto st = entry.status(sec);
-        it.is_dir = fs::is_directory(st);
-        if (!it.is_dir && fs::is_regular_file(st)) {
-            it.size = entry.file_size(sec);
-            it.is_exec = (st.permissions() & fs::perms::owner_exec) != fs::perms::none;
-        }
-        auto ft = entry.last_write_time(sec);
-        if (!sec) {
-            auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                ft - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
-            it.mtime = std::chrono::system_clock::to_time_t(sctp);
-        }
-        fw->items.push_back(std::move(it));
+void apply_visible_filter(FilesWin *fw) {
+    std::string q = to_lower_copy(trim_copy(gtk_editable_get_text(GTK_EDITABLE(fw->search_entry))));
+    std::vector<gpointer> objs;
+    objs.reserve(fw->items.size());
+    for (const auto &it : fw->items) {
+        if (!fw->show_hidden && !it.name.empty() && it.name.front() == '.') continue;
+        if (!q.empty() && to_lower_copy(it.name).find(q) == std::string::npos) continue;
+        objs.push_back(spinel_file_obj_new(it));
     }
 
-    std::sort(fw->items.begin(), fw->items.end(), [](const DirItem &a, const DirItem &b) {
-        if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;
-        return to_lower_copy(a.name) < to_lower_copy(b.name);
-    });
+    guint old_n = g_list_model_get_n_items(G_LIST_MODEL(fw->store));
+    g_list_store_splice(fw->store, 0, old_n, objs.data(), static_cast<guint>(objs.size()));
+    for (gpointer p : objs) g_object_unref(p);  // GListStore owns a ref
 
+    fw->visible_count = objs.size();
+    gtk_stack_set_visible_child_name(GTK_STACK(fw->view_stack), fw->grid_mode ? "grid" : "list");
+    update_status_bar(fw);
+}
+
+void refresh_current_dir(FilesWin *fw) {
     gtk_widget_set_sensitive(fw->btn_back, fw->hist_idx > 0);
     gtk_widget_set_sensitive(fw->btn_fwd, fw->hist_idx + 1 < static_cast<int>(fw->history.size()));
     gtk_widget_set_sensitive(fw->btn_up, fw->current_dir.has_parent_path() && fw->current_dir.parent_path() != fw->current_dir);
@@ -904,7 +901,36 @@ void refresh_current_dir(FilesWin *fw) {
 
     rebuild_sidebar(fw);
     rebuild_breadcrumbs(fw);
-    render_visible_items(fw);
+
+    fw->scanning = true;
+    update_status_bar(fw);
+
+    uint64_t gen = ++(*fw->scan_gen);
+    fs::path dir = fw->current_dir;
+    auto alive = fw->alive;
+    auto gen_ptr = fw->scan_gen;
+
+    struct ScanResultIdle {
+        FilesWin *fw;
+        std::shared_ptr<std::atomic<bool>> alive;
+        std::shared_ptr<std::atomic<uint64_t>> gen_ptr;
+        uint64_t gen;
+        std::vector<DirItem> items;
+    };
+
+    std::thread([fw, alive, gen_ptr, gen, dir]() {
+        auto scanned = scan_dir_posix(dir);
+        if (!alive->load() || gen_ptr->load() != gen) return;
+        auto *res = new ScanResultIdle{fw, alive, gen_ptr, gen, std::move(scanned)};
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<ScanResultIdle> msg(static_cast<ScanResultIdle *>(d));
+            if (!msg->alive->load() || msg->gen_ptr->load() != msg->gen) return G_SOURCE_REMOVE;
+            msg->fw->scanning = false;
+            msg->fw->items = std::move(msg->items);
+            apply_visible_filter(msg->fw);
+            return G_SOURCE_REMOVE;
+        }, res);
+    }).detach();
 }
 
 void navigate_to(FilesWin *fw, const fs::path &dir, bool record_history) {
@@ -943,6 +969,142 @@ void set_path_edit_mode(FilesWin *fw, bool on) {
     }
 }
 
+void clear_badge_classes(GtkWidget *ico) {
+    for (const char *c : {"sf-ico-dir", "sf-ico-img", "sf-ico-vid", "sf-ico-aud",
+                          "sf-ico-arc", "sf-ico-code", "sf-ico-exec", "sf-ico-file"}) {
+        gtk_widget_remove_css_class(ico, c);
+    }
+}
+
+GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
+    GtkListItemFactory *fac = gtk_signal_list_item_factory_new();
+
+    if (!is_grid) {
+        g_signal_connect(fac, "setup", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer d) {
+            auto *win = static_cast<FilesWin *>(d);
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+            gtk_widget_add_css_class(row, "sf-row");
+            GtkWidget *ico = gtk_image_new();
+            GtkWidget *name = gtk_label_new("");
+            gtk_widget_set_hexpand(name, TRUE);
+            gtk_widget_set_halign(name, GTK_ALIGN_START);
+            gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
+
+            GtkWidget *sz = gtk_label_new("");
+            gtk_widget_add_css_class(sz, "sf-muted");
+            gtk_widget_set_size_request(sz, 86, -1);
+            gtk_label_set_xalign(GTK_LABEL(sz), 1.0f);
+
+            GtkWidget *mt = gtk_label_new("");
+            gtk_widget_add_css_class(mt, "sf-muted");
+            gtk_widget_set_size_request(mt, 130, -1);
+            gtk_label_set_xalign(GTK_LABEL(mt), 1.0f);
+
+            gtk_box_append(GTK_BOX(row), ico);
+            gtk_box_append(GTK_BOX(row), name);
+            gtk_box_append(GTK_BOX(row), sz);
+            gtk_box_append(GTK_BOX(row), mt);
+
+            g_object_set_data(G_OBJECT(row), "sf-ico", ico);
+            g_object_set_data(G_OBJECT(row), "sf-name", name);
+            g_object_set_data(G_OBJECT(row), "sf-sz", sz);
+            g_object_set_data(G_OBJECT(row), "sf-mt", mt);
+            g_object_set_data(G_OBJECT(row), "sf-li", li);
+
+            GtkGesture *click3 = gtk_gesture_click_new();
+            gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click3), 3);
+            g_signal_connect(click3, "pressed", G_CALLBACK(+[](GtkGestureClick *g, gint, gdouble x, gdouble y, gpointer wd) {
+                auto *fwin = static_cast<FilesWin *>(wd);
+                GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
+                auto *item = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(w), "sf-li"));
+                auto *fobj = item ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(item)) : nullptr;
+                if (fobj && fobj->item) {
+                    gtk_single_selection_set_selected(fwin->selection, gtk_list_item_get_position(item));
+                    show_context_menu(fwin, w, x, y, fobj->item->path);
+                }
+            }), win);
+            gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(click3));
+            gtk_list_item_set_child(li, row);
+        }), fw);
+
+        g_signal_connect(fac, "bind", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer) {
+            GtkWidget *row = gtk_list_item_get_child(li);
+            auto *fobj = reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(li));
+            if (!row || !fobj || !fobj->item) return;
+            const DirItem &it = *fobj->item;
+            FileBadge badge = classify_item(it);
+
+            GtkWidget *ico = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(row), "sf-ico"));
+            GtkWidget *name = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(row), "sf-name"));
+            GtkWidget *sz = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(row), "sf-sz"));
+            GtkWidget *mt = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(row), "sf-mt"));
+
+            clear_badge_classes(ico);
+            gtk_image_set_from_icon_name(GTK_IMAGE(ico), badge.icon_name);
+            gtk_widget_add_css_class(ico, badge.css_class);
+            gtk_label_set_text(GTK_LABEL(name), it.name.c_str());
+            gtk_label_set_text(GTK_LABEL(sz), it.is_dir ? "文件夹" : format_size(it.size).c_str());
+            gtk_label_set_text(GTK_LABEL(mt), format_time(it.mtime).c_str());
+        }), fw);
+    } else {
+        g_signal_connect(fac, "setup", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer d) {
+            auto *win = static_cast<FilesWin *>(d);
+            GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+            gtk_widget_add_css_class(card, "sf-grid-card");
+            GtkWidget *ico = gtk_image_new();
+            gtk_image_set_pixel_size(GTK_IMAGE(ico), 36);
+            GtkWidget *name = gtk_label_new("");
+            gtk_label_set_max_width_chars(GTK_LABEL(name), 14);
+            gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
+            GtkWidget *sub = gtk_label_new("");
+            gtk_widget_add_css_class(sub, "sf-muted");
+
+            gtk_box_append(GTK_BOX(card), ico);
+            gtk_box_append(GTK_BOX(card), name);
+            gtk_box_append(GTK_BOX(card), sub);
+
+            g_object_set_data(G_OBJECT(card), "sf-ico", ico);
+            g_object_set_data(G_OBJECT(card), "sf-name", name);
+            g_object_set_data(G_OBJECT(card), "sf-sub", sub);
+            g_object_set_data(G_OBJECT(card), "sf-li", li);
+
+            GtkGesture *click3 = gtk_gesture_click_new();
+            gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click3), 3);
+            g_signal_connect(click3, "pressed", G_CALLBACK(+[](GtkGestureClick *g, gint, gdouble x, gdouble y, gpointer wd) {
+                auto *fwin = static_cast<FilesWin *>(wd);
+                GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
+                auto *item = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(w), "sf-li"));
+                auto *fobj = item ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(item)) : nullptr;
+                if (fobj && fobj->item) {
+                    gtk_single_selection_set_selected(fwin->selection, gtk_list_item_get_position(item));
+                    show_context_menu(fwin, w, x, y, fobj->item->path);
+                }
+            }), win);
+            gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(click3));
+            gtk_list_item_set_child(li, card);
+        }), fw);
+
+        g_signal_connect(fac, "bind", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer) {
+            GtkWidget *card = gtk_list_item_get_child(li);
+            auto *fobj = reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(li));
+            if (!card || !fobj || !fobj->item) return;
+            const DirItem &it = *fobj->item;
+            FileBadge badge = classify_item(it);
+
+            GtkWidget *ico = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(card), "sf-ico"));
+            GtkWidget *name = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(card), "sf-name"));
+            GtkWidget *sub = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(card), "sf-sub"));
+
+            clear_badge_classes(ico);
+            gtk_image_set_from_icon_name(GTK_IMAGE(ico), badge.icon_name);
+            gtk_widget_add_css_class(ico, badge.css_class);
+            gtk_label_set_text(GTK_LABEL(name), it.name.c_str());
+            gtk_label_set_text(GTK_LABEL(sub), it.is_dir ? "文件夹" : format_size(it.size).c_str());
+        }), fw);
+    }
+    return fac;
+}
+
 gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifierType state, gpointer d) {
     auto *fw = static_cast<FilesWin *>(d);
     bool ctrl = (state & GDK_CONTROL_MASK) != 0;
@@ -952,7 +1114,7 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
         fw->show_hidden = !fw->show_hidden;
         if (fw->show_hidden) gtk_widget_add_css_class(fw->btn_hidden, "is-on");
         else gtk_widget_remove_css_class(fw->btn_hidden, "is-on");
-        render_visible_items(fw);
+        apply_visible_filter(fw);
         return TRUE;
     }
     if (ctrl && (keyval == GDK_KEY_l || keyval == GDK_KEY_L)) {
@@ -1063,7 +1225,14 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
     gtk_widget_add_css_class(fw->search_entry, "sf-entry");
     gtk_widget_set_size_request(fw->search_entry, 170, -1);
     g_signal_connect(fw->search_entry, "changed", G_CALLBACK(+[](GtkEditable *, gpointer d) {
-        render_visible_items(static_cast<FilesWin *>(d));
+        auto *w = static_cast<FilesWin *>(d);
+        if (w->search_timer) g_source_remove(w->search_timer);
+        w->search_timer = g_timeout_add(50, +[](gpointer wd) -> gboolean {
+            auto *win = static_cast<FilesWin *>(wd);
+            win->search_timer = 0;
+            apply_visible_filter(win);
+            return G_SOURCE_REMOVE;
+        }, w);
     }), fw);
 
     GtkWidget *new_dir_btn = gtk_button_new_with_label("+ 文件夹");
@@ -1079,7 +1248,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
         w->show_hidden = !w->show_hidden;
         if (w->show_hidden) gtk_widget_add_css_class(w->btn_hidden, "is-on");
         else gtk_widget_remove_css_class(w->btn_hidden, "is-on");
-        render_visible_items(w);
+        apply_visible_filter(w);
     }), fw);
 
     fw->btn_view_mode = gtk_button_new_with_label("网格视图");
@@ -1088,7 +1257,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
         auto *w = static_cast<FilesWin *>(d);
         w->grid_mode = !w->grid_mode;
         gtk_button_set_label(b, w->grid_mode ? "列表视图" : "网格视图");
-        render_visible_items(w);
+        gtk_stack_set_visible_child_name(GTK_STACK(w->view_stack), w->grid_mode ? "grid" : "list");
     }), fw);
 
     GtkWidget *term_btn = gtk_button_new_with_label("打开终端");
@@ -1102,7 +1271,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
         gtk_box_append(GTK_BOX(bar), w);
     }
 
-    // Body split: sidebar + main content
+    // Body split: sidebar + virtualized views
     GtkWidget *body = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_vexpand(body, TRUE);
 
@@ -1128,15 +1297,44 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
     gtk_box_append(GTK_BOX(sidebar), fw->drives_box);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(side_scroll), sidebar);
 
-    fw->list_view = gtk_list_box_new();
-    gtk_widget_add_css_class(fw->list_view, "sf-listbox");
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(fw->list_view), GTK_SELECTION_SINGLE);
+    fw->store = g_list_store_new(spinel_file_obj_get_type());
+    fw->selection = gtk_single_selection_new(G_LIST_MODEL(fw->store));  // takes ref to store
+    gtk_single_selection_set_autoselect(fw->selection, FALSE);
+    gtk_single_selection_set_can_unselect(fw->selection, TRUE);
 
-    fw->grid_view = gtk_flow_box_new();
-    gtk_widget_add_css_class(fw->grid_view, "sf-flowbox");
-    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(fw->grid_view), GTK_SELECTION_SINGLE);
-    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(fw->grid_view), 10);
-    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(fw->grid_view), 10);
+    g_signal_connect(fw->selection, "selection-changed", G_CALLBACK(+[](GtkSelectionModel *sm, guint, guint, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        auto *fobj = reinterpret_cast<_SpinelFileObj *>(gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(sm)));
+        w->selected_path = (fobj && fobj->item) ? fobj->item->path : fs::path{};
+        update_status_bar(w);
+    }), fw);
+
+    GtkListItemFactory *list_fac = create_item_factory(fw, false);
+    fw->list_view = gtk_list_view_new(GTK_SELECTION_MODEL(g_object_ref(fw->selection)), list_fac);
+    gtk_widget_add_css_class(fw->list_view, "sf-listview");
+    gtk_list_view_set_single_click_activate(GTK_LIST_VIEW(fw->list_view), FALSE);
+    g_signal_connect(fw->list_view, "activate", G_CALLBACK(+[](GtkListView *, guint pos, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        auto *fobj = reinterpret_cast<_SpinelFileObj *>(g_list_model_get_item(G_LIST_MODEL(w->selection), pos));
+        if (fobj) {
+            if (fobj->item) open_item_action(w, fobj->item->path);
+            g_object_unref(fobj);
+        }
+    }), fw);
+
+    GtkListItemFactory *grid_fac = create_item_factory(fw, true);
+    fw->grid_view = gtk_grid_view_new(GTK_SELECTION_MODEL(fw->selection), grid_fac);  // takes final ref to selection
+    gtk_widget_add_css_class(fw->grid_view, "sf-gridview");
+    gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(fw->grid_view), FALSE);
+    gtk_grid_view_set_max_columns(GTK_GRID_VIEW(fw->grid_view), 10);
+    g_signal_connect(fw->grid_view, "activate", G_CALLBACK(+[](GtkGridView *, guint pos, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        auto *fobj = reinterpret_cast<_SpinelFileObj *>(g_list_model_get_item(G_LIST_MODEL(w->selection), pos));
+        if (fobj) {
+            if (fobj->item) open_item_action(w, fobj->item->path);
+            g_object_unref(fobj);
+        }
+    }), fw);
 
     fw->view_stack = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(fw->view_stack), GTK_STACK_TRANSITION_TYPE_NONE);
@@ -1148,7 +1346,6 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
     gtk_widget_set_vexpand(fw->content_scroll, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(fw->content_scroll), fw->view_stack);
 
-    // Right-click on empty background inside content scroll
     GtkGesture *bg_click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bg_click), 3);
     g_signal_connect(bg_click, "pressed", G_CALLBACK(+[](GtkGestureClick *g, gint, gdouble x, gdouble y, gpointer d) {
@@ -1184,7 +1381,10 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
 
     g_signal_connect(win, "destroy", G_CALLBACK(+[](GtkWidget *, gpointer d) {
         auto *w = static_cast<FilesWin *>(d);
+        w->alive->store(false);
+        ++(*w->scan_gen);
         if (w->theme_timer) g_source_remove(w->theme_timer);
+        if (w->search_timer) g_source_remove(w->search_timer);
         if (w->css) {
             if (GdkDisplay *disp = gdk_display_get_default()) {
                 gtk_style_context_remove_provider_for_display(disp, GTK_STYLE_PROVIDER(w->css));
