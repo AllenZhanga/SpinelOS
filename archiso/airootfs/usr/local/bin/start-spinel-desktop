@@ -40,7 +40,7 @@ if [ "${SAFE_GFX}" -eq 1 ]; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export WEBKIT_DISABLE_COMPOSITING_MODE=1
   export LIBGL_ALWAYS_SOFTWARE=1
-elif [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
+elif [ -d /sys/module/nvidia ]; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GBM_BACKEND=nvidia-drm
   export __GLX_VENDOR_LIBRARY_NAME=nvidia

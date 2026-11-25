@@ -127,6 +127,7 @@ for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
     sed -i 's/^TIMEOUT 150/TIMEOUT 20/' "$cfg"
     sed -i 's/^timeout=15/timeout=2/' "$cfg"
     sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
+    sed -i 's/img_loop="${iso_path}"/img_loop="${iso_path}" quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
   fi
 done
 
@@ -136,12 +137,16 @@ for gcfg in "${PROFILE_DIR}/grub/grub.cfg" "${PROFILE_DIR}/grub/loopback.cfg"; d
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 txt = p.read_text()
-safe_block = """
-menuentry "SpinelOS Safe Graphics & Debug (%ARCH%, UEFI/BIOS)" --class recovery --class gnu-linux --class os --id 'archlinux-safe' {
+if p.name == "loopback.cfg":
+    boot_loc = 'img_dev=UUID=${archiso_img_dev_uuid} img_loop="${iso_path}"'
+else:
+    boot_loc = 'archisosearchuuid=%ARCHISO_UUID%'
+safe_block = f"""
+menuentry "SpinelOS Safe Graphics & Debug (%ARCH%, UEFI/BIOS)" --class recovery --class gnu-linux --class os --id 'archlinux-safe' {{
     set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
+    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux archisobasedir=%INSTALL_DIR% {boot_loc} nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
     initrd /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
-}
+}}
 """
 marker = "--id 'archlinux-accessibility'"
 if marker in txt:

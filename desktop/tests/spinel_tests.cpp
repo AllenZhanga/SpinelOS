@@ -337,6 +337,7 @@ void test_system_control_configs() {
     std::string raw_secret =
         "Proxy=http://alice:TopSecret99@127.0.0.1:7890\n"
         "Home=/home/alice/.config/spinelos/apps.log\n"
+        "Uri=file:///home/alice/Desktop/shot.png\n"
         "wifi-sec.psk:MyWifiPass42 password=hunter2 token=abc123xyz\n"
         "BSSID=12:34:56:78:9A:BC\n";
     std::string redacted = redact_sensitive_text(raw_secret);

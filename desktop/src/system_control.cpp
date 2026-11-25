@@ -1115,7 +1115,7 @@ std::string redact_sensitive_text(const std::string &raw) {
 
     for (size_t i = 0; i < raw.size();) {
         // 1. Mask /home/<user>
-        if (raw.compare(i, 6, "/home/") == 0 && (i == 0 || is_delim(raw[i - 1]) || raw[i - 1] == '=')) {
+        if (raw.compare(i, 6, "/home/") == 0 && (i == 0 || !std::isalnum(static_cast<unsigned char>(raw[i - 1])))) {
             size_t end = i + 6;
             while (end < raw.size() && raw[end] != '/' && !is_delim(raw[end]) && raw[end] != ':') {
                 ++end;
