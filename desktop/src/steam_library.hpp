@@ -47,6 +47,7 @@ void launch_steam_client(AppState *state);
 void launch_steam_game(const std::string &appid, const PerfConfig &perf);
 void launch_steam_gamepadui(AppState *state, const PerfConfig &perf);
 std::string build_steam_launch_options(const PerfConfig &perf);
+std::string merge_steam_launch_options(const std::string &existing_opts, const std::string &spinel_opts);
 SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf);
 
 std::map<std::string, GamePerfOverride> load_game_overrides();

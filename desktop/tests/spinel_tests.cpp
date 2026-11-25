@@ -193,6 +193,14 @@ void test_steam_library() {
     compact_direct.render_res = "native";
     std::string opts_direct = build_steam_launch_options(compact_direct);
     EXPECT(opts_direct == "gamemoderun mangohud %command%");
+    EXPECT(merge_steam_launch_options(
+               "VKD3D_CONFIG=dxr,dxr11 PROTON_ENABLE_NVAPI=1 gamemoderun mangohud %command% -dx12",
+               "gamemoderun %command%") ==
+           "VKD3D_CONFIG=dxr,dxr11 PROTON_ENABLE_NVAPI=1 gamemoderun %command% -dx12");
+    EXPECT(merge_steam_launch_options(
+               "PROTON_ENABLE_NVAPI=1 gamescope -f -w 1280 -h 720 --mangoapp -- %command%",
+               "gamemoderun mangohud %command%") ==
+           "PROTON_ENABLE_NVAPI=1 gamemoderun mangohud %command%");
 
     PerfConfig fsr_cfg;
     fsr_cfg.gamemode = false;

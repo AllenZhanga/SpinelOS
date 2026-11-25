@@ -434,6 +434,14 @@ bool is_steam_bootstrapping(std::string &progress_line) {
     return true;
 }
 
+void append_nvidia_steam_envs(std::vector<std::pair<std::string, std::string>> &envs) {
+    std::error_code ec;
+    if (fs::exists("/sys/module/nvidia", ec) || fs::exists("/sys/module/nvidia_drm", ec)) {
+        envs.emplace_back("PROTON_ENABLE_NVAPI", "1");
+        envs.emplace_back("VKD3D_CONFIG", "dxr,dxr11");
+    }
+}
+
 }  // namespace
 
 void launch_steam_client(AppState *state) {
@@ -467,8 +475,10 @@ void launch_steam_client(AppState *state) {
     PerfConfig perf = load_perf_config();
     sync_mangohud_config(perf);
     apply_perf_to_steam_configs(perf);
+    std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
+    append_nvidia_steam_envs(envs);
     std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
-    spawn_argv_logged({"steam"}, "Steam", build_proxy_envs());
+    spawn_argv_logged({"steam"}, "Steam", envs);
 }
 
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
@@ -478,6 +488,7 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     sync_mangohud_config(eff);
     apply_perf_to_steam_configs(eff);
     std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
+    append_nvidia_steam_envs(envs);
     if (eff.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }
@@ -511,6 +522,7 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
     apply_perf_to_steam_configs(perf);
 
     std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
+    append_nvidia_steam_envs(envs);
     if (perf.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }
@@ -662,11 +674,24 @@ std::string vdf_escape(const std::string &s) {
     return out;
 }
 
+std::string vdf_unescape(const std::string &in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '\\' && i + 1 < in.size()) {
+            out += in[++i];
+        } else {
+            out += in[i];
+        }
+    }
+    return out;
+}
+
 bool patch_single_appid_in_apps(std::string &txt,
                                 size_t apps_open,
                                 size_t &apps_close,
                                 const std::string &appid,
-                                const std::string &escaped_opts) {
+                                const std::string &raw_spinel_opts) {
     size_t app_open = 0, app_close = 0;
     if (find_vdf_section_bounds(txt, appid, apps_open + 1, apps_close, app_open, app_close)) {
         size_t lpos = txt.find("\"LaunchOptions\"", app_open + 1);
@@ -675,18 +700,38 @@ bool patch_single_appid_in_apps(std::string &txt,
             line_start = (line_start == std::string::npos) ? app_open + 1 : line_start + 1;
             size_t line_end = txt.find('\n', lpos);
             if (line_end == std::string::npos || line_end > app_close) line_end = app_close;
-            std::string repl = "\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"";
+
+            // Extract existing LaunchOptions value to preserve custom user env vars / flags
+            std::string existing_raw;
+            size_t v_start = txt.find('"', lpos + 15);
+            if (v_start != std::string::npos && v_start < line_end) {
+                ++v_start;
+                size_t p = v_start;
+                while (p < line_end) {
+                    if (txt[p] == '\\' && p + 1 < line_end) {
+                        p += 2;
+                        continue;
+                    }
+                    if (txt[p] == '"') break;
+                    ++p;
+                }
+                if (p < line_end) {
+                    existing_raw = vdf_unescape(txt.substr(v_start, p - v_start));
+                }
+            }
+            std::string merged = merge_steam_launch_options(existing_raw, raw_spinel_opts);
+            std::string repl = "\t\t\t\t\t\"LaunchOptions\"\t\t\"" + vdf_escape(merged) + "\"";
             std::ptrdiff_t delta = static_cast<std::ptrdiff_t>(repl.size()) - static_cast<std::ptrdiff_t>(line_end - line_start);
             txt.replace(line_start, line_end - line_start, repl);
             apps_close = static_cast<size_t>(static_cast<std::ptrdiff_t>(apps_close) + delta);
             return true;
         }
-        std::string ins = "\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"";
+        std::string ins = "\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + vdf_escape(raw_spinel_opts) + "\"";
         txt.insert(app_open + 1, ins);
         apps_close += ins.size();
         return true;
     }
-    std::string block = "\n\t\t\t\t\"" + appid + "\"\n\t\t\t\t{\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + escaped_opts + "\"\n\t\t\t\t}";
+    std::string block = "\n\t\t\t\t\"" + appid + "\"\n\t\t\t\t{\n\t\t\t\t\t\"LaunchOptions\"\t\t\"" + vdf_escape(raw_spinel_opts) + "\"\n\t\t\t\t}";
     txt.insert(apps_close, block);
     apps_close += block.size();
     return true;
@@ -720,6 +765,61 @@ std::string build_steam_launch_options(const PerfConfig &perf) {
     for (size_t i = 0; i < parts.size(); ++i) {
         if (i > 0) oss << ' ';
         oss << parts[i];
+    }
+    return oss.str();
+}
+
+std::string merge_steam_launch_options(const std::string &existing_opts, const std::string &spinel_opts) {
+    if (existing_opts.empty()) return spinel_opts;
+
+    std::istringstream iss(existing_opts);
+    std::vector<std::string> tokens;
+    std::string tok;
+    while (iss >> tok) tokens.push_back(std::move(tok));
+    if (tokens.empty()) return spinel_opts;
+
+    auto cmd_it = std::find(tokens.begin(), tokens.end(), "%command%");
+    std::vector<std::string> left_custom;
+    std::vector<std::string> right_custom;
+    bool in_gamescope = false;
+    for (auto it = tokens.begin(); it != tokens.end(); ++it) {
+        if (cmd_it != tokens.end() && it >= cmd_it) {
+            if (it != cmd_it) right_custom.push_back(*it);
+            continue;
+        }
+        const std::string &t = *it;
+        if (in_gamescope) {
+            if (t == "--") in_gamescope = false;
+            continue;
+        }
+        if (t == "gamescope") {
+            in_gamescope = true;
+            continue;
+        }
+        if (t == "gamemoderun" || t == "mangohud" || t == "MANGOHUD=1" || t == "MANGOHUD=0") {
+            continue;
+        }
+        left_custom.push_back(t);
+    }
+
+    if (left_custom.empty() && right_custom.empty()) return spinel_opts;
+
+    std::vector<std::string> sp_tokens;
+    std::istringstream siss(spinel_opts);
+    while (siss >> tok) {
+        if (tok != "%command%") sp_tokens.push_back(std::move(tok));
+    }
+
+    std::vector<std::string> out;
+    out.insert(out.end(), left_custom.begin(), left_custom.end());
+    out.insert(out.end(), sp_tokens.begin(), sp_tokens.end());
+    out.push_back("%command%");
+    out.insert(out.end(), right_custom.begin(), right_custom.end());
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (i > 0) oss << ' ';
+        oss << out[i];
     }
     return oss.str();
 }
@@ -764,8 +864,8 @@ SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf) {
             fs::copy_file(vdf, vdf.string() + ".bak", fs::copy_options::overwrite_existing, ec);
             int file_updates = 0;
             for (const auto &appid : appids) {
-                std::string per_game_escaped = vdf_escape(build_steam_launch_options(resolve_perf_for_appid(appid, perf)));
-                if (patch_single_appid_in_apps(txt, apps_open, apps_close, appid, per_game_escaped)) {
+                std::string per_game_raw = build_steam_launch_options(resolve_perf_for_appid(appid, perf));
+                if (patch_single_appid_in_apps(txt, apps_open, apps_close, appid, per_game_raw)) {
                     ++file_updates;
                 }
             }
