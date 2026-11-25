@@ -215,11 +215,15 @@ void open_installer_window(AppState *state) {
     }
 }
 
-void open_store_window(AppState *state) {
+void open_store_window(AppState *state, const std::string &focus_id = "") {
     bool existed = (state->store_win != nullptr);
+    std::string query = focus_id.empty() ? "?mode=store" : ("?mode=store&focus=" + focus_id);
     ensure_app_window(state, &state->store_win, &state->store_view,
-                      "SpinelOS 应用商店", "?mode=store", 1020, 680);
+                      "SpinelOS 应用商店", query, 1020, 680);
     if (existed) {
+        if (!focus_id.empty()) {
+            eval_js(state->store_view, "window.__spinelFocusStoreApp && window.__spinelFocusStoreApp('" + focus_id + "');");
+        }
         push_theme_state(state);
         push_desktop_apps(state);
         push_store_catalog(state);
@@ -256,7 +260,9 @@ void launch_webui_cmd(const std::string &cmd) {
 }
 
 void open_games_window(AppState *) { launch_webui_cmd("games:open"); }
-void open_store_window(AppState *) { launch_webui_cmd("store:open"); }
+void open_store_window(AppState *, const std::string &focus_id = "") {
+    launch_webui_cmd(focus_id.empty() ? "store:open" : ("store:open:" + focus_id));
+}
 void open_installer_window(AppState *) { launch_webui_cmd("installer:open"); }
 void open_settings_window(AppState *, const std::string &tab) {
     launch_webui_cmd("settings:open:" + tab);
@@ -475,6 +481,9 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     } else if (cmd == "store:open") {
         native_shell_set_cc_visible(state, false);
         open_store_window(state);
+    } else if (cmd.rfind("store:open:", 0) == 0) {
+        native_shell_set_cc_visible(state, false);
+        open_store_window(state, cmd.substr(11));
 #if SPINEL_HAS_WEBKIT
     } else if (cmd == "store:refresh") {
         push_desktop_apps(state);

@@ -72,8 +72,7 @@ gvfs
 mousepad
 ristretto
 
-# Steam, Proton & Gaming Utilities
-steam
+# Proton & Open-Source Gaming Utilities (Steam itself is installed on-demand via App Store for clean redistribution)
 gamescope
 mangohud
 lib32-mangohud

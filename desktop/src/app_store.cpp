@@ -1,6 +1,7 @@
 #include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "steam_library.hpp"
 #include "system_control.hpp"
 
 #include <sys/wait.h>
@@ -30,10 +31,12 @@ struct StoreAppEntry {
 };
 
 constexpr StoreAppEntry kCatalog[] = {
+    {"steam", "Steam 客户端", "游戏平台", "pacman", "steam",
+     "Valve 官方 PC 游戏与 Proton 平台（自动配合系统代理与 32 位图形库运行）", "steam", "一键安装"},
     {"chrome", "Google Chrome", "浏览器", "flatpak", "com.google.Chrome",
      "Google 官方浏览器，支持账号同步、硬件视频解码与扩展生态", "flatpak run com.google.Chrome", "Flatpak 免密"},
     {"chromium", "Chromium", "浏览器", "pacman", "chromium",
-     "Arch 官方仓库高速开源浏览器，国内镜像源直接拉取", "chromium --ozone-platform-hint=auto", "Pacman 原生"},
+     "官方软件源高速开源浏览器，国内镜像源直接拉取", "chromium --ozone-platform-hint=auto", "Pacman 原生"},
     {"firefox", "Firefox", "浏览器", "pacman", "firefox",
      "Mozilla 开源隐私浏览器，原生 Wayland 流畅滚动", "firefox", "Pacman 原生"},
     {"heroic", "Heroic Games Launcher", "游戏平台", "flatpak", "com.heroicgameslauncher.hgl",
@@ -339,7 +342,7 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                     cmd.insert(cmd.end(), {"env", "http_proxy=" + hv, "https_proxy=" + hv, "all_proxy=" + av, "no_proxy=" + pc.no_proxy});
                 }
                 cmd.insert(cmd.end(), {"pacman", "-Syu", "--noconfirm"});
-                emit_store_line(state, "==> 正在全面更新 Arch / SpinelOS 软件包...");
+                emit_store_line(state, "==> 正在全面更新 SpinelOS 系统软件包...");
                 rc = run_streaming_command(state, cmd, pwd_in);
                 if (rc == 0 && has_flatpak_cli()) {
                     emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");
@@ -368,7 +371,7 @@ void start_store_action(AppState *state, const std::string &action, const std::s
             } else if (action == "keyring-fix") {
                 std::vector<std::string> cmd1 = base_sudo;
                 cmd1.insert(cmd1.end(), {"pacman", "-Sy", "--noconfirm", "archlinux-keyring"});
-                emit_store_line(state, "==> 正在更新 archlinux-keyring ...");
+                emit_store_line(state, "==> 正在更新系统签名密钥环...");
                 rc = run_streaming_command(state, cmd1, pwd_in);
                 if (rc == 0) {
                     std::vector<std::string> cmd2 = base_sudo;
@@ -440,7 +443,9 @@ void launch_store_app(AppState *state, const std::string &app_id) {
         spawn_argv_logged({"flatpak", "run", entry->pkg}, "Store:" + app_id);
         return;
     }
-    if (app_id == "chromium") {
+    if (app_id == "steam") {
+        launch_steam_client(state);
+    } else if (app_id == "chromium") {
         spawn_argv_logged({"chromium", "--ozone-platform-hint=auto", "--enable-wayland-ime"}, "Store:" + app_id);
     } else if (app_id == "obs") {
         spawn_argv_logged({"obs"}, "Store:" + app_id);

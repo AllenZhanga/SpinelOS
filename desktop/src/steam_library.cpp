@@ -337,6 +337,31 @@ void show_steam_alert(AppState *state, const std::string &title, const std::stri
     }, msg);
 }
 
+void on_steam_install_prompt_reply(GObject *source, GAsyncResult *res, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), res, nullptr);
+    if (choice == 1 && state && !state->shutting_down.load()) {
+        handle_shell_command(state, "store:open:steam");
+    }
+}
+
+void show_steam_install_prompt(AppState *state, const std::string &title, const std::string &detail) {
+    auto *msg = new AlertPrompt{state, title, detail};
+    g_idle_add([](gpointer data) -> gboolean {
+        std::unique_ptr<AlertPrompt> prompt(static_cast<AlertPrompt *>(data));
+        GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", prompt->title.c_str());
+        gtk_alert_dialog_set_detail(dlg, prompt->detail.c_str());
+        const char *buttons[] = {"取消", "去应用商店一键安装", nullptr};
+        gtk_alert_dialog_set_buttons(dlg, buttons);
+        gtk_alert_dialog_set_cancel_button(dlg, 0);
+        gtk_alert_dialog_set_default_button(dlg, 1);
+        gtk_alert_dialog_choose(dlg, pick_alert_parent(prompt->state), nullptr,
+                                on_steam_install_prompt_reply, prompt->state);
+        g_object_unref(dlg);
+        return G_SOURCE_REMOVE;
+    }, msg);
+}
+
 std::vector<std::pair<std::string, std::string>> build_proxy_envs() {
     std::vector<std::pair<std::string, std::string>> envs;
     ProxyConfig p = load_proxy_config();
@@ -400,9 +425,9 @@ bool is_steam_bootstrapping(std::string &progress_line) {
 
 void launch_steam_client(AppState *state) {
     if (!has_executable("steam")) {
-        append_app_log("[Steam] 启动失败: 未检测到 /usr/bin/steam");
-        show_steam_alert(state, "未检测到 Steam 客户端",
-                         "当前系统尚未安装 steam。请联网后在终端执行 sudo pacman -Sy steam 安装。");
+        append_app_log("[Steam] 尚未安装客户端，引导前往应用商店一键安装");
+        show_steam_install_prompt(state, "尚未安装 Steam 客户端",
+                                  "出于开源许可合规，系统出厂镜像未预捆绑 Steam 客户端。\n点击下方按钮即可打开应用商店一键在线安装 Steam。");
         return;
     }
     if (steam_running_without_proxy()) {
@@ -445,9 +470,9 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
 
 void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
     if (!has_executable("steam")) {
-        append_app_log("[GamepadUI] 启动失败: 未检测到 /usr/bin/steam");
-        show_steam_alert(state, "无法启动主机大屏模式",
-                         "当前系统未检测到 Steam 客户端（可在终端执行 sudo pacman -Sy steam 安装，或在应用商店安装 Heroic / Lutris）。");
+        append_app_log("[GamepadUI] 尚未安装 Steam，引导前往应用商店一键安装");
+        show_steam_install_prompt(state, "需要安装 Steam 才能进入主机大屏",
+                                  "主机大屏模式依赖官方 Steam 客户端。点击下方按钮即可一键前往应用商店在线安装。");
         return;
     }
     if (steam_running_without_proxy()) {

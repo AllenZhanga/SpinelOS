@@ -824,11 +824,15 @@
       b1.className = "btn primary small";
       b1.setAttribute("data-cmd", "launch:steam");
       b1.textContent = "启动 Steam";
+      const bInstall = document.createElement("button");
+      bInstall.className = "btn small";
+      bInstall.setAttribute("data-cmd", "store:open:steam");
+      bInstall.textContent = "安装 Steam";
       const b2 = document.createElement("button");
       b2.className = "btn glow small";
       b2.setAttribute("data-cmd", "launch:steam-gamepadui");
       b2.textContent = "进入主机大屏";
-      actions.append(b1, b2);
+      actions.append(b1, bInstall, b2);
       empty.append(msg, actions);
       grid.appendChild(empty);
       return;
@@ -1889,6 +1893,7 @@
   let storeState = { flatpak_ready: true, sudo_nopass: false, busy: false, active_id: "", active_action: "", apps: [] };
   let storeCategory = "all";
   let pendingStoreOp = null;
+  let pendingStoreFocus = params.get("focus") || "";
 
   function renderStoreApps() {
     const grid = document.getElementById("store-app-grid");
@@ -2050,6 +2055,10 @@
     }
   });
 
+  window.__spinelFocusStoreApp = (appId) => {
+    pendingStoreFocus = String(appId || "").trim();
+  };
+
   window.__spinelStoreData = (data) => {
     storeState = { ...storeState, ...data };
     if (!storeState.busy) {
@@ -2057,6 +2066,19 @@
       storeState.active_action = "";
     }
     renderStoreApps();
+    if (pendingStoreFocus && !storeState.busy) {
+      const targetId = pendingStoreFocus;
+      pendingStoreFocus = "";
+      const targetApp = (storeState.apps || []).find((a) => a.id === targetId);
+      if (targetApp && !targetApp.installed) {
+        requestStoreOp("install", {
+          id: targetApp.id,
+          name: targetApp.name,
+          backend: targetApp.backend,
+          pkg: targetApp.pkg
+        });
+      }
+    }
   };
 
   window.__spinelStoreLog = (line) => {

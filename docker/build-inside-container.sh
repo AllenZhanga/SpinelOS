@@ -34,8 +34,31 @@ grep -vE '^\s*(#|$)' "${WORKSPACE}/archiso/packages.custom.x86_64" >> "${PROFILE
 sort -u "${PROFILE_DIR}/packages.x86_64" -o "${PROFILE_DIR}/packages.x86_64"
 
 cp -a "${WORKSPACE}/archiso/airootfs/." "${PROFILE_DIR}/airootfs/"
-# Ensure custom os-release replaces releng symlink cleanly
+# Ensure custom os-release & branding replace releng defaults cleanly
 cp -f "${WORKSPACE}/archiso/airootfs/etc/os-release" "${PROFILE_DIR}/airootfs/etc/os-release"
+if [ -f "${WORKSPACE}/archiso/airootfs/usr/share/pixmaps/spinelos.png" ]; then
+  mkdir -p "${PROFILE_DIR}/airootfs/usr/share/pixmaps"
+  cp -f "${WORKSPACE}/archiso/airootfs/usr/share/pixmaps/spinelos.png" "${PROFILE_DIR}/airootfs/usr/share/pixmaps/archlinux-logo.png"
+fi
+mkdir -p "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos"
+cat > "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos/NOTICE-THIRD-PARTY.txt" <<'EOF'
+SpinelOS Gaming Linux — Third-Party Software & Open-Source License Notice
+========================================================================
+1. First-Party Components (Spinel Shell, Spinel WebUI, Spinel Terminal, themes & scripts):
+   Licensed under the MIT License (https://github.com/AllenZhanga/SpinelOS).
+
+2. Base OS & Upstream Packages:
+   SpinelOS bundles upstream Linux kernel, systemd, glibc, pacman, GRUB, Plymouth,
+   labwc, Mesa, PipeWire, Fcitx5, Noto Fonts, and hardware drivers under their
+   respective upstream licenses (GPLv2/GPLv3, LGPL, MIT, BSD, OFL-1.1, and vendor
+   firmware/driver licenses).
+
+3. GPL Source Correspondence & Package Manifest:
+   A complete package version, license, and upstream URL manifest
+   (spinelos-packages-licenses.tsv) is generated alongside each ISO build.
+   Upstream package sources and PKGBUILDs are archived at:
+   https://archive.archlinux.org/packages/
+EOF
 if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
   mkdir -p "${PROFILE_DIR}/airootfs/etc/fonts/conf.d"
   ln -sf /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf \
@@ -118,5 +141,29 @@ EOF
 echo "[5/5] Building ISO via mkarchiso..."
 mkarchiso -v -w "${WORK_DIR}" -o "${OUT_DIR}" "${PROFILE_DIR}"
 
-echo "Done! ISO generated in ${OUT_DIR}:"
-ls -lh "${OUT_DIR}"/*.iso
+echo "[6/6] Exporting package & GPL/open-source license manifest..."
+MANIFEST_TSV="${OUT_DIR}/spinelos-packages-licenses.tsv"
+printf "package\tversion\tlicenses\turl\n" > "${MANIFEST_TSV}"
+PACMAN_LOCAL_DIR="${WORK_DIR}/x86_64/airootfs/var/lib/pacman/local"
+if [ -d "${PACMAN_LOCAL_DIR}" ]; then
+  awk '
+    FNR == 1 { if (name != "") printf "%s\t%s\t%s\t%s\n", name, ver, lic, url; name=""; ver=""; lic=""; url=""; sec="" }
+    /^%NAME%$/ { sec="name"; next }
+    /^%VERSION%$/ { sec="ver"; next }
+    /^%LICENSE%$/ { sec="lic"; next }
+    /^%URL%$/ { sec="url"; next }
+    /^%/ { sec=""; next }
+    NF == 0 { sec=""; next }
+    {
+      if (sec == "name") name = $0
+      else if (sec == "ver") ver = $0
+      else if (sec == "lic") lic = (lic == "" ? $0 : lic ", " $0)
+      else if (sec == "url") url = $0
+    }
+    END { if (name != "") printf "%s\t%s\t%s\t%s\n", name, ver, lic, url }
+  ' "${PACMAN_LOCAL_DIR}"/*/desc | sort >> "${MANIFEST_TSV}"
+fi
+cp -f "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos/NOTICE-THIRD-PARTY.txt" "${OUT_DIR}/NOTICE-THIRD-PARTY.txt"
+
+echo "Done! ISO & compliance manifests generated in ${OUT_DIR}:"
+ls -lh "${OUT_DIR}"/*.iso "${MANIFEST_TSV}" "${OUT_DIR}/NOTICE-THIRD-PARTY.txt"
