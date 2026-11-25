@@ -1257,6 +1257,13 @@
         ? "当前驱动仅支持「省电 / 平衡」档位（虚拟机或占位驱动不支持性能档）"
         : "调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）";
     }
+    const idleOn = document.getElementById("power-idle-lock-on");
+    const idleOff = document.getElementById("power-idle-lock-off");
+    if (idleOn && idleOff) {
+      const enabled = Boolean(data.idle_lock);
+      idleOn.classList.toggle("active", enabled);
+      idleOff.classList.toggle("active", !enabled);
+    }
     const sumEl = document.getElementById("power-hw-summary");
     if (sumEl) {
       const batText = (typeof data.battery_pct === "number" && data.battery_pct >= 0)

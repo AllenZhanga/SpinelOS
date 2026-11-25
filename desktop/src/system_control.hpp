@@ -27,6 +27,7 @@ struct TelemetrySnapshot {
 
 struct MediaSnapshot {
     int volume = 75;
+    bool volume_muted = false;
     int brightness = -1;
     int battery_pct = -1;
     bool battery_charging = false;
@@ -107,6 +108,10 @@ void set_audio_default_node(AppState *state, int id, bool is_sink);
 void set_mic_volume(AppState *state, int pct);
 void toggle_mic_mute(AppState *state);
 void set_power_profile(AppState *state, const std::string &profile);
+bool get_idle_lock_enabled();
+void set_idle_lock_enabled(AppState *state, bool enabled);
+bool set_system_brightness_pct(int pct);
+void trigger_media_osd(AppState *state, const std::string &op);
 void start_gamepad_hotkey_listener(AppState *state);
 void stop_gamepad_hotkey_listener();
 

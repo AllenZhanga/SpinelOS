@@ -134,6 +134,14 @@ struct NativeShellState {
     cairo_surface_t *wallpaper_surf = nullptr;
     int wallpaper_w = 0;
     int wallpaper_h = 0;
+
+    // Floating Hardware OSD Pill (Volume / Brightness)
+    GtkWindow *osd_win = nullptr;
+    GtkWidget *osd_da = nullptr;
+    guint osd_timer = 0;
+    std::string osd_kind = "volume";
+    int osd_value = 0;
+    bool osd_muted = false;
     GtkWidget *cc_net_val = nullptr;
     GtkWidget *cc_gpu_badge = nullptr;
     GtkWidget *cc_mem_val = nullptr;
@@ -747,7 +755,7 @@ void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_d
     draw_spinel_logo_at(ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz);
 }
 
-enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard };
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard, Volume, Mute, Brightness };
 
 void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
@@ -881,6 +889,45 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             cairo_line_to(cr, 10.5, 7.2);
             cairo_move_to(cr, 5.5, 10.0);
             cairo_line_to(cr, 9.2, 10.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Volume:
+            cairo_move_to(cr, 2.4, 6.4);
+            cairo_line_to(cr, 5.0, 6.4);
+            cairo_line_to(cr, 8.2, 3.6);
+            cairo_line_to(cr, 8.2, 12.4);
+            cairo_line_to(cr, 5.0, 9.6);
+            cairo_line_to(cr, 2.4, 9.6);
+            cairo_close_path(cr);
+            cairo_stroke(cr);
+            cairo_arc(cr, 9.2, 8.0, 2.6, -0.82, 0.82);
+            cairo_stroke(cr);
+            cairo_arc(cr, 9.2, 8.0, 4.6, -0.78, 0.78);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Mute:
+            cairo_move_to(cr, 2.4, 6.4);
+            cairo_line_to(cr, 5.0, 6.4);
+            cairo_line_to(cr, 8.2, 3.6);
+            cairo_line_to(cr, 8.2, 12.4);
+            cairo_line_to(cr, 5.0, 9.6);
+            cairo_line_to(cr, 2.4, 9.6);
+            cairo_close_path(cr);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 10.6, 5.6);
+            cairo_line_to(cr, 14.0, 10.4);
+            cairo_move_to(cr, 14.0, 5.6);
+            cairo_line_to(cr, 10.6, 10.4);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Brightness:
+            cairo_arc(cr, 8.0, 8.0, 2.9, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            for (int i = 0; i < 8; ++i) {
+                double ang = i * (M_PI / 4.0);
+                cairo_move_to(cr, 8.0 + std::cos(ang) * 4.5, 8.0 + std::sin(ang) * 4.5);
+                cairo_line_to(cr, 8.0 + std::cos(ang) * 6.0, 8.0 + std::sin(ang) * 6.0);
+            }
             cairo_stroke(cr);
             break;
     }
@@ -3485,6 +3532,147 @@ void show_desktop_startup_splash(GtkApplication *app, NativeShellState *ns) {
     gtk_window_present(win);
 }
 
+/* ==================== 7. Native Hardware OSD Pill (Volume / Brightness) ==================== */
+
+void draw_osd_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns) return;
+
+    const double pad = 10.0;
+    const double cw = w - pad * 2.0;
+    const double ch = h - pad * 2.0;
+
+    cairo_save(cr);
+    cairo_rounded_rect(cr, pad, pad + 3.0, cw, ch, 16.0);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.28);
+    cairo_fill(cr);
+
+    cairo_pattern_t *bg = cairo_pattern_create_linear(0, pad, 0, pad + ch);
+    if (ns->theme.is_light) {
+        cairo_pattern_add_color_stop_rgba(bg, 0.0, 0.97, 0.98, 1.00, 0.94);
+        cairo_pattern_add_color_stop_rgba(bg, 1.0, 0.91, 0.95, 0.99, 0.94);
+    } else {
+        cairo_pattern_add_color_stop_rgba(bg, 0.0, 0.09, 0.13, 0.23, 0.94);
+        cairo_pattern_add_color_stop_rgba(bg, 1.0, 0.05, 0.08, 0.15, 0.96);
+    }
+    cairo_rounded_rect(cr, pad, pad, cw, ch, 16.0);
+    cairo_set_source(cr, bg);
+    cairo_fill_preserve(cr);
+    cairo_pattern_destroy(bg);
+
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, ns->theme.is_light ? 0.72 : 0.22);
+    cairo_set_line_width(cr, 1.1);
+    cairo_stroke(cr);
+
+    double fg_r = ns->theme.is_light ? 0.06 : 0.96;
+    double fg_g = ns->theme.is_light ? 0.09 : 0.98;
+    double fg_b = ns->theme.is_light ? 0.16 : 1.00;
+
+    BarGlyph glyph = BarGlyph::Volume;
+    std::string label = "音量";
+    if (ns->osd_kind == "brightness") {
+        glyph = BarGlyph::Brightness;
+        label = "屏幕亮度";
+    } else if (ns->osd_muted || ns->osd_value <= 0) {
+        glyph = BarGlyph::Mute;
+        label = ns->osd_muted ? "已静音" : "音量";
+    }
+
+    cairo_save(cr);
+    cairo_translate(cr, pad + 14.0, pad + (ch - 22.0) * 0.5);
+    GdkRGBA icon_fg{static_cast<float>(fg_r), static_cast<float>(fg_g), static_cast<float>(fg_b), 0.92f};
+    draw_monochrome_glyph(cr, 22, 22, glyph, icon_fg);
+    cairo_restore(cr);
+
+    double tx = pad + 44.0;
+    double tw_area = cw - 44.0 - 16.0;
+    draw_pango_text(cr, label, tx, pad + 11.0, 12.5, true, fg_r, fg_g, fg_b, 0.94);
+
+    std::string pct_str = std::to_string(std::clamp(ns->osd_value, 0, 100)) + "%";
+    int pw = 0;
+    draw_pango_text(cr, pct_str, 0, 0, 12.0, true, fg_r, fg_g, fg_b, 0.85, &pw, nullptr, true);
+    draw_pango_text(cr, pct_str, tx + tw_area - pw, pad + 11.5, 12.0, true, fg_r, fg_g, fg_b, 0.85);
+
+    double bar_y = pad + ch - 16.0;
+    double bar_h = 5.0;
+    cairo_rounded_rect(cr, tx, bar_y, tw_area, bar_h, 2.5);
+    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, 0.15);
+    cairo_fill(cr);
+
+    double ratio = (ns->osd_muted ? 0 : std::clamp(ns->osd_value, 0, 100)) / 100.0;
+    if (ratio > 0.005) {
+        cairo_pattern_t *gp = cairo_pattern_create_linear(tx, 0, tx + tw_area, 0);
+        if (ns->osd_kind == "brightness") {
+            cairo_pattern_add_color_stop_rgba(gp, 0.0, 0.96, 0.62, 0.04, 1.0);
+            cairo_pattern_add_color_stop_rgba(gp, 1.0, 0.98, 0.80, 0.08, 1.0);
+        } else {
+            cairo_pattern_add_color_stop_rgba(gp, 0.0, 0.22, 0.74, 0.97, 1.0);
+            cairo_pattern_add_color_stop_rgba(gp, 1.0, 0.55, 0.36, 0.96, 1.0);
+        }
+        cairo_rounded_rect(cr, tx, bar_y, std::max(6.0, tw_area * ratio), bar_h, 2.5);
+        cairo_set_source(cr, gp);
+        cairo_fill(cr);
+        cairo_pattern_destroy(gp);
+    }
+    cairo_restore(cr);
+}
+
+void build_osd_window(GtkApplication *app, NativeShellState *ns) {
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelOSD");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 272, 74);
+    gtk_widget_set_can_target(GTK_WIDGET(win), FALSE);
+
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-osd");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, 108);
+    gtk_layer_set_exclusive_zone(win, -1);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    GtkWidget *da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(da, 272, 74);
+    gtk_widget_set_can_target(da, FALSE);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_osd_cb, ns, nullptr);
+    gtk_window_set_child(win, da);
+
+    ns->osd_win = win;
+    ns->osd_da = da;
+}
+
+gboolean on_osd_hide_timeout(gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    if (!ns) return G_SOURCE_REMOVE;
+    ns->osd_timer = 0;
+    if (ns->osd_win) gtk_widget_set_visible(GTK_WIDGET(ns->osd_win), FALSE);
+    return G_SOURCE_REMOVE;
+}
+
+void sync_cc_media_sliders(NativeShellState *ns) {
+    if (!ns) return;
+    MediaSnapshot media = collect_media_state();
+    ns->cc_updating_sliders = true;
+    if (ns->cc_vol_scale && ns->cc_vol_pct) {
+        gtk_range_set_value(GTK_RANGE(ns->cc_vol_scale), media.volume);
+        std::string s = media.volume_muted ? "静音" : (std::to_string(media.volume) + "%");
+        gtk_label_set_text(GTK_LABEL(ns->cc_vol_pct), s.c_str());
+    }
+    if (ns->cc_bright_scale && ns->cc_bright_pct) {
+        if (media.brightness >= 0) {
+            gtk_widget_set_sensitive(ns->cc_bright_scale, TRUE);
+            gtk_range_set_value(GTK_RANGE(ns->cc_bright_scale), media.brightness);
+            std::string s = std::to_string(media.brightness) + "%";
+            gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), s.c_str());
+        } else {
+            gtk_widget_set_sensitive(ns->cc_bright_scale, FALSE);
+            gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), "外接/VM");
+        }
+    }
+    ns->cc_updating_sliders = false;
+}
+
 }  // namespace
 
 void init_native_shell(GtkApplication *app, AppState *state) {
@@ -3504,6 +3692,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     build_native_dock(app, ns);
     build_native_control_center(app, ns);
     build_native_launcher(app, ns);
+    build_osd_window(app, ns);
     show_desktop_startup_splash(app, ns);
 
     native_shell_sync_telemetry(state);
@@ -3514,6 +3703,7 @@ void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
     close_startup_splash(ns);
+    if (ns->osd_timer) g_source_remove(ns->osd_timer);
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
     if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
     if (ns->css_provider) {
@@ -3677,25 +3867,7 @@ void native_shell_set_cc_visible(AppState *state, bool visible) {
     if (visible) {
         native_shell_sync_telemetry(state);
         native_shell_sync_perf(state);
-        MediaSnapshot media = collect_media_state();
-        ns->cc_updating_sliders = true;
-        if (ns->cc_vol_scale && ns->cc_vol_pct) {
-            gtk_range_set_value(GTK_RANGE(ns->cc_vol_scale), media.volume);
-            std::string s = std::to_string(media.volume) + "%";
-            gtk_label_set_text(GTK_LABEL(ns->cc_vol_pct), s.c_str());
-        }
-        if (ns->cc_bright_scale && ns->cc_bright_pct) {
-            if (media.brightness >= 0) {
-                gtk_widget_set_sensitive(ns->cc_bright_scale, TRUE);
-                gtk_range_set_value(GTK_RANGE(ns->cc_bright_scale), media.brightness);
-                std::string s = std::to_string(media.brightness) + "%";
-                gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), s.c_str());
-            } else {
-                gtk_widget_set_sensitive(ns->cc_bright_scale, FALSE);
-                gtk_label_set_text(GTK_LABEL(ns->cc_bright_pct), "外接/VM");
-            }
-        }
-        ns->cc_updating_sliders = false;
+        sync_cc_media_sliders(ns);
         gtk_window_present(ns->cc_win);
     }
 }
@@ -3710,4 +3882,22 @@ void native_shell_toggle_launcher(AppState *state) {
     if (!state || !state->native || !state->native->launcher_win) return;
     bool vis = gtk_widget_get_visible(GTK_WIDGET(state->native->launcher_win));
     set_launcher_visible(state->native, !vis);
+}
+
+void native_shell_show_osd(AppState *state, const std::string &kind, int value, bool muted) {
+    if (!state || !state->native || !state->native->osd_win) return;
+    NativeShellState *ns = state->native;
+    ns->osd_kind = (kind == "brightness") ? "brightness" : "volume";
+    ns->osd_value = std::clamp(value, 0, 100);
+    ns->osd_muted = muted;
+    if (ns->cc_win && gtk_widget_get_visible(GTK_WIDGET(ns->cc_win))) {
+        sync_cc_media_sliders(ns);
+    }
+    if (ns->osd_timer) {
+        g_source_remove(ns->osd_timer);
+        ns->osd_timer = 0;
+    }
+    gtk_window_present(ns->osd_win);
+    if (ns->osd_da) gtk_widget_queue_draw(ns->osd_da);
+    ns->osd_timer = g_timeout_add(1500, on_osd_hide_timeout, ns);
 }

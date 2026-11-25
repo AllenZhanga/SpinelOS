@@ -491,6 +491,7 @@ MediaSnapshot collect_media_state() {
         double v = std::atof(vol_out.c_str() + pos + 7);
         snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
     }
+    snap.volume_muted = (vol_out.find("MUTED") != std::string::npos);
 
     if (has_executable("brightnessctl")) {
         std::string b_out;
@@ -2017,10 +2018,12 @@ void push_audio_power_state(AppState *state) {
 
     bool zram_active = !trim_copy(run_cmd_capture("swapon --noheadings --show=NAME 2>/dev/null")).empty();
     bool ppd_available = !media.power_profile.empty();
+    bool idle_lock = get_idle_lock_enabled();
 
     std::ostringstream js;
     js << "window.__spinelAudioPowerData && window.__spinelAudioPowerData({"
        << "\"volume\":" << media.volume << ","
+       << "\"volume_muted\":" << (media.volume_muted ? "true" : "false") << ","
        << "\"brightness\":" << media.brightness << ","
        << "\"mic_volume\":" << mic_vol << ","
        << "\"mic_muted\":" << (mic_muted ? "true" : "false") << ","
@@ -2028,6 +2031,7 @@ void push_audio_power_state(AppState *state) {
        << "\"battery_charging\":" << (media.battery_charging ? "true" : "false") << ","
        << "\"power_profile\":\"" << json_escape(media.power_profile) << "\","
        << "\"ppd_available\":" << (ppd_available ? "true" : "false") << ","
+       << "\"idle_lock\":" << (idle_lock ? "true" : "false") << ","
        << "\"supported_profiles\":[";
     for (size_t i = 0; i < supported_profiles.size(); ++i) {
         if (i > 0) js << ",";
@@ -2082,6 +2086,81 @@ void set_power_profile(AppState *state, const std::string &profile) {
     append_app_log("[Power] 切换性能电源模式 -> " + profile + (ok ? " (成功)" : " (失败: " + out + ")"));
     push_audio_power_state(state);
     native_shell_sync_telemetry(state);
+}
+
+bool get_idle_lock_enabled() {
+    std::ifstream ifs(fs::path(home_dir()) / ".config/spinelos/power.conf");
+    if (!ifs.is_open()) return false;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        if (trim_copy(line) == "idle_lock=true") return true;
+    }
+    return false;
+}
+
+void set_idle_lock_enabled(AppState *state, bool enabled) {
+    fs::path p = fs::path(home_dir()) / ".config/spinelos/power.conf";
+    write_text_file(p.string(), enabled ? "idle_lock=true\n" : "idle_lock=false\n");
+    if (has_executable("swayidle")) {
+        std::string tmp_out;
+        int rc = 0;
+        run_argv_capture({"pkill", "-x", "swayidle"}, tmp_out, rc);
+        if (enabled) {
+            spawn_argv_detached({"swayidle", "-w", "timeout", "900", "spinel-lock", "before-sleep", "spinel-lock"});
+        } else {
+            spawn_argv_detached({"swayidle", "-w", "before-sleep", "spinel-lock"});
+        }
+    }
+    append_app_log(std::string("[Power] 闲置 15 分钟自动锁屏已") + (enabled ? "开启" : "关闭"));
+    push_audio_power_state(state);
+}
+
+bool set_system_brightness_pct(int pct) {
+    int clamped = std::clamp(pct, 5, 100);
+    if (has_executable("brightnessctl")) {
+        std::string out;
+        int rc = 1;
+        return run_argv_capture({"brightnessctl", "-q", "set", std::to_string(clamped) + "%"}, out, rc) && rc == 0;
+    }
+    std::string cmd_str =
+        "for d in /sys/class/backlight/*; do "
+        "[ -w \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+        "max=$(cat \"$d/max_brightness\"); "
+        "[ \"$max\" -gt 0 ] || continue; "
+        "echo $(( max * " + std::to_string(clamped) + " / 100 )) > \"$d/brightness\" && echo ok; break; done 2>/dev/null";
+    std::string out = run_cmd_capture(cmd_str.c_str());
+    return trim_copy(out) == "ok";
+}
+
+void trigger_media_osd(AppState *state, const std::string &op) {
+    if (op == "volume-up" || op == "volume-down" || op == "mute") {
+        if (has_executable("wpctl")) {
+            std::string out;
+            int rc = 1;
+            if (op == "volume-up") {
+                run_argv_capture({"wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", "5%+"}, out, rc);
+            } else if (op == "volume-down") {
+                run_argv_capture({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"}, out, rc);
+            } else {
+                run_argv_capture({"wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"}, out, rc);
+            }
+        }
+        MediaSnapshot media = collect_media_state();
+        native_shell_sync_telemetry(state);
+        native_shell_show_osd(state, "volume", media.volume, media.volume_muted);
+        return;
+    }
+
+    if (op == "bright-up" || op == "bright-down") {
+        MediaSnapshot before = collect_media_state();
+        int cur = before.brightness >= 0 ? before.brightness : 75;
+        int next = std::clamp(cur + (op == "bright-up" ? 5 : -5), 5, 100);
+        set_system_brightness_pct(next);
+        MediaSnapshot after = collect_media_state();
+        int shown = after.brightness >= 0 ? after.brightness : next;
+        native_shell_sync_telemetry(state);
+        native_shell_show_osd(state, "brightness", shown, false);
+    }
 }
 
 void start_gamepad_hotkey_listener(AppState *state) {
@@ -2449,6 +2528,21 @@ bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
         << "    </keybind>\n"
         << "    <keybind key=\"A-space\">\n"
         << "      <action name=\"Execute\" command=\"spinel-shell --launcher\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"XF86AudioRaiseVolume\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --osd volume-up\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"XF86AudioLowerVolume\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --osd volume-down\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"XF86AudioMute\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --osd mute\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"XF86MonBrightnessUp\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --osd bright-up\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"XF86MonBrightnessDown\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --osd bright-down\" />\n"
         << "    </keybind>\n"
         << "    <keybind key=\"A-Tab\">\n"
         << "      <action name=\"NextWindow\" />\n"

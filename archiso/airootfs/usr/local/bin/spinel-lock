@@ -16,12 +16,21 @@ if [[ -f "${HOME}/.config/spinelos/theme.conf" ]]; then
 fi
 
 IMG_ARGS=()
-for cand in /usr/share/pixmaps/spinelos.png /usr/share/spinel-shell/ui/spinel-logo.png; do
-  if [[ -f "${cand}" ]]; then
-    IMG_ARGS=(-s center -i "${cand}")
-    break
+if [[ -f "${HOME}/.config/spinelos/wallpaper_image.conf" ]]; then
+  CUSTOM_WP="$(head -n1 "${HOME}/.config/spinelos/wallpaper_image.conf" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [[ -n "${CUSTOM_WP}" && -f "${CUSTOM_WP}" ]]; then
+    IMG_ARGS=(-s fill -i "${CUSTOM_WP}")
   fi
-done
+fi
+
+if [[ ${#IMG_ARGS[@]} -eq 0 ]]; then
+  for cand in /usr/share/pixmaps/spinelos.png /usr/share/spinel-shell/ui/spinel-logo.png; do
+    if [[ -f "${cand}" ]]; then
+      IMG_ARGS=(-s center -i "${cand}")
+      break
+    fi
+  done
+fi
 
 if [[ "${THEME_ID}" == "tahoe-light" ]]; then
   exec swaylock -f \

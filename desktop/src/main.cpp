@@ -30,16 +30,23 @@ namespace {
 
 GtkApplication *g_app = nullptr;
 
-void notify_dbus_action(const char *bus_name, const char *obj_path, const char *action_name, bool sync = false) {
+void notify_dbus_action(const char *bus_name,
+                        const char *obj_path,
+                        const char *action_name,
+                        bool sync = false,
+                        const char *str_param = nullptr) {
     GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
     if (!bus) return;
-    GVariantBuilder empty_params;
-    g_variant_builder_init(&empty_params, G_VARIANT_TYPE("av"));
+    GVariantBuilder params;
+    g_variant_builder_init(&params, G_VARIANT_TYPE("av"));
+    if (str_param) {
+        g_variant_builder_add(&params, "v", g_variant_new_string(str_param));
+    }
     GVariantBuilder empty_platform;
     g_variant_builder_init(&empty_platform, G_VARIANT_TYPE("a{sv}"));
     GVariant *args = g_variant_new("(s@av@a{sv})",
                                    action_name,
-                                   g_variant_builder_end(&empty_params),
+                                   g_variant_builder_end(&params),
                                    g_variant_builder_end(&empty_platform));
     if (sync) {
         GVariant *res = g_dbus_connection_call_sync(
@@ -384,6 +391,15 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
     add_act("toggle-launcher", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         native_shell_toggle_launcher(static_cast<AppState *>(d));
     }));
+    GSimpleAction *osd_act = g_simple_action_new("osd", G_VARIANT_TYPE_STRING);
+    g_signal_connect(osd_act, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *param, gpointer d) {
+        const char *op = param ? g_variant_get_string(param, nullptr) : nullptr;
+        if (op && *op) {
+            trigger_media_osd(static_cast<AppState *>(d), op);
+        }
+    }), state);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(osd_act));
+    g_object_unref(osd_act);
 }
 
 void on_activate(GtkApplication *app, gpointer user_data) {
@@ -416,6 +432,7 @@ void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
 void native_shell_toggle_launcher(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher"); }
+void native_shell_show_osd(AppState *, const std::string &, int, bool) {}
 #endif
 
 void handle_shell_command(AppState *state, const std::string &cmd) {
@@ -571,17 +588,9 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
     } else if (cmd.rfind("system:brightness-set:", 0) == 0) {
         int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 5, 100);
-        if (has_executable("brightnessctl")) {
-            spawn_argv_detached({"brightnessctl", "-q", "set", std::to_string(pct) + "%"});
-        } else {
-            spawn_argv_detached({
-                "sh", "-c",
-                "for d in /sys/class/backlight/*; do "
-                "[ -w \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
-                "max=$(cat \"$d/max_brightness\"); "
-                "echo $(( max * " + std::to_string(pct) + " / 100 )) > \"$d/brightness\"; break; done"
-            });
-        }
+        set_system_brightness_pct(pct);
+    } else if (cmd == "system:idle-lock:on" || cmd == "system:idle-lock:off") {
+        set_idle_lock_enabled(state, cmd == "system:idle-lock:on");
     } else if (cmd == "system:lock") {
         native_shell_set_cc_visible(state, false);
         spawn_argv_detached({has_executable("spinel-lock") ? "spinel-lock" : "swaylock"});
@@ -796,6 +805,10 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && std::string(argv[1]) == "--launcher") {
         notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher", true);
+        return 0;
+    }
+    if (argc > 2 && std::string(argv[1]) == "--osd") {
+        notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "osd", true, argv[2]);
         return 0;
     }
 #endif

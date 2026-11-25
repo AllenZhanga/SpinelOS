@@ -35,6 +35,21 @@
     <keybind key="A-space">
       <action name="Execute" command="spinel-shell --launcher" />
     </keybind>
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute" command="spinel-shell --osd volume-up" />
+    </keybind>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute" command="spinel-shell --osd volume-down" />
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute" command="spinel-shell --osd mute" />
+    </keybind>
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute" command="spinel-shell --osd bright-up" />
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute" command="spinel-shell --osd bright-down" />
+    </keybind>
     <keybind key="A-Tab">
       <action name="NextWindow" />
     </keybind>

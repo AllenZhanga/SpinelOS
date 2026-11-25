@@ -118,7 +118,7 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 ├── docs/
 │   └── UI_SPEC.md               # SpinelOS 统一 UI 设计规范（Design Tokens / 栅格 / 组件 / 主题）
 ├── archiso/                     # ArchISO 定制覆盖层
-│   ├── packages.custom.x86_64   # 内核、显卡、Wayland、Steam、Gamescope、Fcitx5、Ptyxis 等软件清单
+│   ├── packages.custom.x86_64   # 内核、显卡、Wayland、Gamescope、Fcitx5、Spinel 依赖软件清单
 │   └── airootfs/                # 根文件系统覆盖（labwc/portals/themes/autostart/install 脚本）
 ├── docker/                      # 容器化 ISO 与 C++20 交叉构建环境
 ├── scripts/
@@ -159,7 +159,7 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 
 **SpinelOS** is an Arch-based gaming Linux distribution featuring a **custom standalone Wayland desktop shell (`spinel-shell`)** built from scratch in **C++20 (`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`)** on top of the lightweight **`labwc`** compositor — without KDE, GNOME, or XFCE.
 
-- **Ready for Gaming**: Pre-configured `[multilib]`, AMD (`mesa`/`vulkan-radeon`), Intel (`mesa`/`vulkan-intel`), NVIDIA (`nvidia-open`), `steam`, `gamescope`, `mangohud`, `gamemode`, and `pipewire`.
+- **Ready for Gaming**: Pre-configured `[multilib]`, AMD (`mesa`/`vulkan-radeon`), Intel (`mesa`/`vulkan-intel`), NVIDIA (`nvidia-open`), `gamescope`, `mangohud`, `gamemode`, `pipewire`, and 1-click Store install for Steam.
 - **Cohesive Custom UI**: Unified global top menu bar, Clipboard History (`wl-clip-persist`), Spotlight Launcher (`Alt+Space`), drag-to-reorder Dock, Bento Control Center, custom image wallpapers + multi-theme engine, Flatpak + `pacman` App Store, and `PSS`-accurate Process Monitor.
 - **Out-of-the-Box CJK & First-Party Terminal**: Fcitx5 Wayland (Pinyin + optional Rime-Ice + Noto Color Emoji), custom lightweight tabbed terminal `spinel-terminal` (`GTK4 + VTE4`), and GUI proxy toggles propagated to Steam and browsers.
 - **Build Your Own ISO**: Run `./scripts/build-iso.sh` on any Docker-enabled `x86_64` Linux host to generate `out/spinelos-*.iso`.
