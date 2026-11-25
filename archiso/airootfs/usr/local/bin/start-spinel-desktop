@@ -2,7 +2,7 @@
 set -euo pipefail
 
 export XDG_SESSION_TYPE=wayland
-export XDG_CURRENT_DESKTOP=SpinelOS
+export XDG_CURRENT_DESKTOP=SpinelOS:GNOME
 export GDK_BACKEND=wayland
 export GTK_THEME=Adwaita
 export QT_QPA_PLATFORM=wayland

@@ -354,14 +354,12 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"launch:browser", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
-            std::string tmp_out;
-            int rc = 1;
-            if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
-                spawn_argv_detached({"google-chrome-stable", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
-            } else if (run_argv_capture({"which", "chromium"}, tmp_out, rc) && rc == 0) {
-                spawn_argv_detached({"chromium", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
-            } else if (run_argv_capture({"which", "firefox"}, tmp_out, rc) && rc == 0) {
-                spawn_argv_detached({"firefox"});
+            if (has_executable("google-chrome-stable")) {
+                launch_browser_command({"google-chrome-stable"}, "Browser:Chrome");
+            } else if (has_executable("chromium")) {
+                launch_browser_command({"chromium"}, "Browser:Chromium");
+            } else if (has_executable("firefox")) {
+                launch_browser_command({"firefox"}, "Browser:Firefox");
             } else if (a.open_store) {
                 a.open_store(s, "");
             }

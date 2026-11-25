@@ -157,16 +157,7 @@ void emit_store_done(AppState *state, int exit_code, const std::string &target_i
 }
 
 std::vector<std::pair<std::string, std::string>> build_proxy_env_pairs() {
-    ProxyConfig pc = load_proxy_config();
-    if (!pc.enabled || (pc.http_proxy.empty() && pc.socks_proxy.empty())) return {};
-    std::string hv = !pc.http_proxy.empty() ? pc.http_proxy : pc.socks_proxy;
-    std::string av = !pc.socks_proxy.empty() ? pc.socks_proxy : pc.http_proxy;
-    return {
-        {"http_proxy", hv},
-        {"https_proxy", hv},
-        {"all_proxy", av},
-        {"no_proxy", pc.no_proxy}
-    };
+    return build_effective_proxy_envs();
 }
 
 void append_proxy_env_prefix(std::vector<std::string> &cmd) {
@@ -549,8 +540,8 @@ void launch_store_app(AppState *state, const std::string &app_id) {
     }
     if (app_id == "steam") {
         launch_steam_client(state);
-    } else if (app_id == "chromium") {
-        spawn_argv_logged({"chromium", "--ozone-platform-hint=auto", "--enable-wayland-ime"}, "Store:" + app_id);
+    } else if (app_id == "chromium" || app_id == "firefox" || app_id == "chrome") {
+        launch_browser_command({entry->pkg}, "Store:" + app_id);
     } else if (app_id == "obs") {
         spawn_argv_logged({"obs"}, "Store:" + app_id);
     } else {

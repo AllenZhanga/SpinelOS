@@ -1,6 +1,7 @@
 #include "desktop_apps.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "system_control.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -294,11 +295,14 @@ void launch_desktop_app_id(const std::string &desktop_id) {
                     args.insert(args.begin(), "foot");
                 }
             }
-            // Prefer Wayland ozone & text-input-v3 IME for Chromium
-            if (args[0].find("chromium") != std::string::npos || args[0].find("chrome") != std::string::npos) {
-                args.push_back("--ozone-platform=wayland");
-                args.push_back("--enable-wayland-ime");
-                args.push_back("--wayland-text-input-version=3");
+            // Launch browsers through unified Wayland + system-proxy helper
+            std::string bin_l = args[0];
+            for (char &ch : bin_l) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (bin_l.find("chromium") != std::string::npos || bin_l.find("chrome") != std::string::npos ||
+                bin_l.find("firefox") != std::string::npos || bin_l.find("brave") != std::string::npos ||
+                bin_l.find("msedge") != std::string::npos) {
+                launch_browser_command(std::move(args), "App:" + app.id);
+                return;
             }
             spawn_argv_logged(args, "App:" + app.id);
             return;

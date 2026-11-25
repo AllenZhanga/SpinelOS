@@ -255,8 +255,138 @@ ProxyConfig load_proxy_config() {
     return cfg;
 }
 
-void sync_process_proxy_env() {
+std::string strip_single_quotes(std::string s) {
+    s = trim_copy(s);
+    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+std::string gsettings_proxy_get(const char *schema, const char *key) {
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"gsettings", "get", schema, key}, out, rc) || rc != 0) return "";
+    return strip_single_quotes(out);
+}
+
+void sync_gsettings_proxy(const ProxyConfig &cfg) {
+    if (!has_executable("gsettings")) return;
+    auto parse_host_port = [](const std::string &url, std::string &host_out, std::string &port_out) {
+        auto pos = url.find("://");
+        std::string rest = (pos != std::string::npos) ? url.substr(pos + 3) : url;
+        auto slash = rest.find('/');
+        if (slash != std::string::npos) rest = rest.substr(0, slash);
+        auto colon = rest.rfind(':');
+        if (colon == std::string::npos) return false;
+        host_out = rest.substr(0, colon);
+        port_out = rest.substr(colon + 1);
+        return !host_out.empty() && !port_out.empty();
+    };
+    std::string out;
+    int rc = 1;
+    if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) {
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy", "mode", "none"}, out, rc);
+        return;
+    }
+    run_argv_capture({"gsettings", "set", "org.gnome.system.proxy", "mode", "manual"}, out, rc);
+    std::string h, p;
+    if (parse_host_port(cfg.http_proxy, h, p)) {
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.http", "enabled", "true"}, out, rc);
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.http", "host", h}, out, rc);
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.http", "port", p}, out, rc);
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.https", "host", h}, out, rc);
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.https", "port", p}, out, rc);
+    }
+    if (parse_host_port(cfg.socks_proxy, h, p)) {
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.socks", "host", h}, out, rc);
+        run_argv_capture({"gsettings", "set", "org.gnome.system.proxy.socks", "port", p}, out, rc);
+    }
+}
+
+ProxyConfig resolve_effective_proxy() {
     ProxyConfig cfg = load_proxy_config();
+    if (cfg.enabled && (!cfg.http_proxy.empty() || !cfg.socks_proxy.empty())) {
+        return cfg;
+    }
+    if (!has_executable("gsettings")) return cfg;
+    if (gsettings_proxy_get("org.gnome.system.proxy", "mode") != "manual") return cfg;
+
+    // Pick up desktop-wide GSettings proxies written by Clash/Monocloud/v2rayN even if http.enabled was left false
+    auto read_hp = [&](const char *subschema, const char *scheme) -> std::string {
+        std::string host = gsettings_proxy_get(subschema, "host");
+        std::string port = gsettings_proxy_get(subschema, "port");
+        int pnum = std::atoi(port.c_str());
+        if (host.empty() || pnum <= 0 || pnum > 65535) return "";
+        std::string url = std::string(scheme) + "://" + host + ":" + std::to_string(pnum);
+        return is_valid_proxy_url(url) ? url : "";
+    };
+
+    std::string http_u = read_hp("org.gnome.system.proxy.http", "http");
+    std::string https_u = read_hp("org.gnome.system.proxy.https", "http");
+    std::string socks_u = read_hp("org.gnome.system.proxy.socks", "socks5");
+
+    cfg.http_proxy = !http_u.empty() ? http_u : https_u;
+    cfg.socks_proxy = socks_u;
+    cfg.enabled = (!cfg.http_proxy.empty() || !cfg.socks_proxy.empty());
+    return cfg;
+}
+
+std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs() {
+    ProxyConfig cfg = resolve_effective_proxy();
+    if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) return {};
+    std::string http_val = !cfg.http_proxy.empty() ? cfg.http_proxy : cfg.socks_proxy;
+    std::string all_val = !cfg.socks_proxy.empty() ? cfg.socks_proxy : cfg.http_proxy;
+    return {
+        {"http_proxy", http_val},
+        {"https_proxy", http_val},
+        {"HTTP_PROXY", http_val},
+        {"HTTPS_PROXY", http_val},
+        {"all_proxy", all_val},
+        {"ALL_PROXY", all_val},
+        {"no_proxy", cfg.no_proxy},
+        {"NO_PROXY", cfg.no_proxy}
+    };
+}
+
+void launch_browser_command(std::vector<std::string> args, const std::string &tag) {
+    if (args.empty()) return;
+    std::string bin_lower = args[0];
+    for (char &ch : bin_lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    bool is_chromium_like = bin_lower.find("chromium") != std::string::npos ||
+                            bin_lower.find("chrome") != std::string::npos ||
+                            bin_lower.find("brave") != std::string::npos ||
+                            bin_lower.find("msedge") != std::string::npos;
+
+    auto has_arg = [&](const std::string &prefix) {
+        return std::any_of(args.begin(), args.end(), [&](const std::string &a) {
+            return a == prefix || a.rfind(prefix, 0) == 0;
+        });
+    };
+
+    if (is_chromium_like) {
+        if (!has_arg("--ozone-platform=")) args.push_back("--ozone-platform=wayland");
+        if (!has_arg("--enable-wayland-ime")) args.push_back("--enable-wayland-ime");
+        if (!has_arg("--wayland-text-input-version=")) args.push_back("--wayland-text-input-version=3");
+    }
+
+    auto envs = build_effective_proxy_envs();
+    envs.emplace_back("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
+
+    ProxyConfig p = resolve_effective_proxy();
+    if (is_chromium_like && p.enabled && (!p.http_proxy.empty() || !p.socks_proxy.empty())) {
+        std::string srv = !p.http_proxy.empty() ? p.http_proxy : p.socks_proxy;
+        if (!has_arg("--proxy-server=")) args.push_back("--proxy-server=" + srv);
+        if (!p.no_proxy.empty() && !has_arg("--proxy-bypass-list=")) {
+            args.push_back("--proxy-bypass-list=" + p.no_proxy);
+        }
+    }
+
+    spawn_argv_logged(args, tag, envs);
+}
+
+void sync_process_proxy_env() {
+    ProxyConfig cfg = resolve_effective_proxy();
     const char *vars[] = {
         "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
         "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"
@@ -329,6 +459,7 @@ void update_proxy_config(AppState *state, const std::string &payload) {
         << "socks_proxy=" << cfg.socks_proxy << "\n"
         << "no_proxy=" << cfg.no_proxy << "\n";
     write_text_file((sys_internal::config_dir() / "proxy.conf").string(), out.str());
+    sync_gsettings_proxy(cfg);
     sync_process_proxy_env();
     append_app_log(cfg.enabled
         ? ("[Proxy] 已启用系统代理: http=" + cfg.http_proxy + " socks=" + cfg.socks_proxy)

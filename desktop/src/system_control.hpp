@@ -42,6 +42,9 @@ struct ProxyConfig {
 };
 
 ProxyConfig load_proxy_config();
+ProxyConfig resolve_effective_proxy();
+std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs();
+void launch_browser_command(std::vector<std::string> args, const std::string &tag);
 void sync_process_proxy_env();
 void push_proxy_config(AppState *state);
 void update_proxy_config(AppState *state, const std::string &payload);

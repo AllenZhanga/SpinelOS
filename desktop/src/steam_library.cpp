@@ -1,6 +1,7 @@
 #include "steam_library.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "system_control.hpp"
 
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -388,24 +389,11 @@ void show_steam_install_prompt(AppState *state, const std::string &title, const 
 }
 
 std::vector<std::pair<std::string, std::string>> build_proxy_envs() {
-    std::vector<std::pair<std::string, std::string>> envs;
-    ProxyConfig p = load_proxy_config();
-    if (!p.enabled || (p.http_proxy.empty() && p.socks_proxy.empty())) return envs;
-    std::string http_val = !p.http_proxy.empty() ? p.http_proxy : p.socks_proxy;
-    std::string all_val = !p.socks_proxy.empty() ? p.socks_proxy : p.http_proxy;
-    envs.emplace_back("http_proxy", http_val);
-    envs.emplace_back("https_proxy", http_val);
-    envs.emplace_back("HTTP_PROXY", http_val);
-    envs.emplace_back("HTTPS_PROXY", http_val);
-    envs.emplace_back("all_proxy", all_val);
-    envs.emplace_back("ALL_PROXY", all_val);
-    envs.emplace_back("no_proxy", p.no_proxy);
-    envs.emplace_back("NO_PROXY", p.no_proxy);
-    return envs;
+    return build_effective_proxy_envs();
 }
 
 bool steam_running_without_proxy() {
-    ProxyConfig p = load_proxy_config();
+    ProxyConfig p = resolve_effective_proxy();
     if (!p.enabled || (p.http_proxy.empty() && p.socks_proxy.empty())) return false;
     std::string pid_out;
     int pid_rc = 1;
@@ -462,8 +450,9 @@ void launch_steam_client(AppState *state) {
     std::string prog;
     if (is_steam_bootstrapping(prog)) {
         append_app_log("[Steam] 后台正在首次更新下载: " + prog);
-        std::string proxy_hint = load_proxy_config().enabled
-            ? ("\n当前已通过系统代理: " + load_proxy_config().http_proxy)
+        ProxyConfig eff_p = resolve_effective_proxy();
+        std::string proxy_hint = eff_p.enabled
+            ? ("\n当前已通过系统代理: " + eff_p.http_proxy)
             : "\n提示：若下载缓慢，可在「系统设置 → Wi-Fi 与网络」启用系统代理后重启 Steam。";
         show_steam_alert(state, "Steam 正在后台下载客户端更新",
                          "当前进度: " + prog + proxy_hint + "\n\n完成后会自动弹出登录窗口，请勿重复启动多个 Steam 进程。");
