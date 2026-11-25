@@ -1915,9 +1915,15 @@ std::vector<NotificationHistoryItem> fetch_notification_history() {
 
     auto collect_from = [&](const char *method) {
         GVariant *outer = g_dbus_connection_call_sync(
-            bus, "fr.emersion.Mako", "/fr/emersion/Mako", "fr.emersion.Mako",
+            bus, "org.freedesktop.Notifications", "/fr/emersion/Mako", "fr.emersion.Mako",
             method, nullptr, G_VARIANT_TYPE("(aa{sv})"),
             G_DBUS_CALL_FLAGS_NO_AUTO_START, 250, nullptr, nullptr);
+        if (!outer) {
+            outer = g_dbus_connection_call_sync(
+                bus, "fr.emersion.Mako", "/fr/emersion/Mako", "fr.emersion.Mako",
+                method, nullptr, G_VARIANT_TYPE("(aa{sv})"),
+                G_DBUS_CALL_FLAGS_NO_AUTO_START, 250, nullptr, nullptr);
+        }
         if (!outer) return;
         GVariant *arr = g_variant_get_child_value(outer, 0);
         gsize n = g_variant_n_children(arr);
@@ -1960,10 +1966,21 @@ std::vector<NotificationHistoryItem> fetch_notification_history() {
 }
 
 void dismiss_all_notifications() {
+    if (has_executable("makoctl")) {
+        std::string out;
+        int rc = 1;
+        if (run_argv_capture({"makoctl", "dismiss", "-a"}, out, rc) && rc == 0) {
+            return;
+        }
+    }
     if (GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr)) {
+        GVariantBuilder b;
+        g_variant_builder_init(&b, G_VARIANT_TYPE("a{sv}"));
+        g_variant_builder_add(&b, "{sv}", "all", g_variant_new_boolean(TRUE));
+        GVariant *args = g_variant_new("(@a{sv})", g_variant_builder_end(&b));
         GVariant *res = g_dbus_connection_call_sync(
-            bus, "fr.emersion.Mako", "/fr/emersion/Mako", "fr.emersion.Mako",
-            "DismissAllNotifications", nullptr, nullptr,
+            bus, "org.freedesktop.Notifications", "/fr/emersion/Mako", "fr.emersion.Mako",
+            "DismissNotifications", args, nullptr,
             G_DBUS_CALL_FLAGS_NO_AUTO_START, 250, nullptr, nullptr);
         if (res) g_variant_unref(res);
         g_object_unref(bus);
