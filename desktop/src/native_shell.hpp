@@ -13,3 +13,4 @@ void native_shell_sync_theme(AppState *state);
 void native_shell_sync_perf(AppState *state);
 void native_shell_toggle_cc(AppState *state);
 void native_shell_set_cc_visible(AppState *state, bool visible);
+void native_shell_toggle_launcher(AppState *state);

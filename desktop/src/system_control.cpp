@@ -1979,9 +1979,26 @@ void dispatch_gamepad_cmd(AppState *state, const std::string &cmd) {
 
 }  // namespace
 
+std::vector<std::string> list_supported_power_profiles() {
+    std::vector<std::string> out;
+    if (!has_executable("powerprofilesctl")) return out;
+    std::string raw;
+    int rc = 1;
+    if (!run_argv_capture({"powerprofilesctl", "list"}, raw, rc) || rc != 0) return out;
+    for (const auto &line : split_lines(raw)) {
+        std::string s = trim_copy(line);
+        if (!s.empty() && s.front() == '*') s = trim_copy(s.substr(1));
+        if (s.rfind("power-saver:", 0) == 0) out.emplace_back("power-saver");
+        else if (s.rfind("balanced:", 0) == 0) out.emplace_back("balanced");
+        else if (s.rfind("performance:", 0) == 0) out.emplace_back("performance");
+    }
+    return out;
+}
+
 void push_audio_power_state(AppState *state) {
     if (!state || !state->settings_view) return;
     MediaSnapshot media = collect_media_state();
+    std::vector<std::string> supported_profiles = list_supported_power_profiles();
 
     std::vector<AudioDeviceItem> sinks, sources;
     if (has_executable("wpctl")) {
@@ -2011,6 +2028,12 @@ void push_audio_power_state(AppState *state) {
        << "\"battery_charging\":" << (media.battery_charging ? "true" : "false") << ","
        << "\"power_profile\":\"" << json_escape(media.power_profile) << "\","
        << "\"ppd_available\":" << (ppd_available ? "true" : "false") << ","
+       << "\"supported_profiles\":[";
+    for (size_t i = 0; i < supported_profiles.size(); ++i) {
+        if (i > 0) js << ",";
+        js << "\"" << json_escape(supported_profiles[i]) << "\"";
+    }
+    js << "],"
        << "\"zram_active\":" << (zram_active ? "true" : "false") << ","
        << "\"sinks\":";
     write_audio_items_json(js, sinks);
@@ -2047,6 +2070,12 @@ void toggle_mic_mute(AppState *state) {
 void set_power_profile(AppState *state, const std::string &profile) {
     if (profile != "performance" && profile != "balanced" && profile != "power-saver") return;
     if (!has_executable("powerprofilesctl")) return;
+    auto supported = list_supported_power_profiles();
+    if (!supported.empty() && std::find(supported.begin(), supported.end(), profile) == supported.end()) {
+        append_app_log("[Power] 当前硬件/虚拟机电源驱动不支持 '" + profile + "' 档位，维持现有设置");
+        push_audio_power_state(state);
+        return;
+    }
     std::string out;
     int rc = 1;
     bool ok = run_argv_capture({"powerprofilesctl", "set", profile}, out, rc) && rc == 0;
@@ -2417,6 +2446,9 @@ bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
     }
     xml << "    <keybind key=\"" << sc.lock_screen << "\">\n"
         << "      <action name=\"Execute\" command=\"spinel-lock\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"A-space\">\n"
+        << "      <action name=\"Execute\" command=\"spinel-shell --launcher\" />\n"
         << "    </keybind>\n"
         << "    <keybind key=\"A-Tab\">\n"
         << "      <action name=\"NextWindow\" />\n"

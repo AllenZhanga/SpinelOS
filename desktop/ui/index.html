@@ -455,7 +455,7 @@
           <div class="perf-row">
             <div class="perf-row-info">
               <strong>系统性能与功耗模式</strong>
-              <span class="muted-hint">调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）</span>
+              <span class="muted-hint" id="power-profile-hint">调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）</span>
             </div>
             <div class="pill-group">
               <button class="pill-btn" data-power-profile="power-saver" data-cmd="system:power-profile:power-saver">省电</button>
@@ -540,6 +540,10 @@
       <div class="inst-section">
         <h3>内置窗口与终端常用快捷键</h3>
         <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info"><strong>全局搜索启动器 (Spotlight)</strong><span class="muted-hint">一键搜索应用、Steam 游戏与系统设置项</span></div>
+            <div class="footer-actions"><span class="kbd-cap">Alt + Space</span></div>
+          </div>
           <div class="perf-row">
             <div class="perf-row-info"><strong>切换窗口 / 关闭窗口</strong><span class="muted-hint">桌面全局窗口切换与关闭快捷键</span></div>
             <div class="footer-actions"><span class="kbd-cap">Alt + Tab</span><span class="kbd-cap">Alt + F4</span></div>
@@ -646,6 +650,16 @@
           </div>
         </div>
         <div class="wallpaper-grid" id="theme-grid"></div>
+        <div class="perf-row" style="margin-top: 12px;">
+          <div class="perf-row-info">
+            <strong>自定义桌面壁纸图片</strong>
+            <span class="muted-hint" id="wp-image-label">当前使用主题内置极光渐变</span>
+          </div>
+          <div class="footer-actions">
+            <button type="button" class="btn small primary" data-cmd="wallpaper:pick-image">选择图片...</button>
+            <button type="button" class="btn small" id="btn-wp-clear" data-cmd="wallpaper:clear-image">恢复主题渐变</button>
+          </div>
+        </div>
       </div>
 
       <div class="inst-section">

@@ -56,3 +56,5 @@ void set_active_theme(AppState *state, const std::string &theme_id);
 void push_theme_state(AppState *state);
 void sync_labwc_window_theme(bool is_light);
 void export_custom_theme_template();
+std::string get_custom_wallpaper_image();
+void set_custom_wallpaper_image(AppState *state, const std::string &path);

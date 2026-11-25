@@ -112,6 +112,28 @@ struct NativeShellState {
     GtkWidget *splash_da = nullptr;
     guint splash_timer = 0;
     double splash_elapsed = 0.0;
+
+    // Spotlight Global Launcher
+    struct LauncherEntry {
+        std::string title;
+        std::string subtitle;
+        std::string keywords;
+        std::string cmd;
+        std::string icon_path;
+        std::string kind;
+    };
+    GtkWindow *launcher_backdrop_win = nullptr;
+    GtkWindow *launcher_win = nullptr;
+    GtkWidget *launcher_entry = nullptr;
+    GtkWidget *launcher_list = nullptr;
+    std::vector<LauncherEntry> launcher_entries;
+    bool launcher_was_active = false;
+
+    // Custom desktop wallpaper image cache
+    std::string custom_wallpaper_path;
+    cairo_surface_t *wallpaper_surf = nullptr;
+    int wallpaper_w = 0;
+    int wallpaper_h = 0;
     GtkWidget *cc_net_val = nullptr;
     GtkWidget *cc_gpu_badge = nullptr;
     GtkWidget *cc_mem_val = nullptr;
@@ -1314,7 +1336,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(clip_btn), cpop);
 
     ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
-    GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "游戏与启动中心", "games:open");
+    GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "全局搜索 / 启动器 (Alt+Space)", "launcher:toggle");
     ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
 
     GtkWidget *power_btn = gtk_menu_button_new();
@@ -1364,8 +1386,55 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
 /* ==================== 2. Native Desktop Wallpaper + Shortcuts + Context Menu ==================== */
 
+cairo_surface_t *get_cached_wallpaper_surface(NativeShellState *ns, int w, int h) {
+    if (!ns || ns->custom_wallpaper_path.empty() || w <= 0 || h <= 0) return nullptr;
+    if (ns->wallpaper_surf && ns->wallpaper_w == w && ns->wallpaper_h == h) {
+        return ns->wallpaper_surf;
+    }
+    if (ns->wallpaper_surf) {
+        cairo_surface_destroy(ns->wallpaper_surf);
+        ns->wallpaper_surf = nullptr;
+    }
+
+    GdkPixbuf *raw = gdk_pixbuf_new_from_file(ns->custom_wallpaper_path.c_str(), nullptr);
+    if (!raw) return nullptr;
+    int rw = gdk_pixbuf_get_width(raw);
+    int rh = gdk_pixbuf_get_height(raw);
+    if (rw <= 0 || rh <= 0) {
+        g_object_unref(raw);
+        return nullptr;
+    }
+
+    double scale = std::max(static_cast<double>(w) / rw, static_cast<double>(h) / rh);
+    int sw = std::max(w, static_cast<int>(std::ceil(rw * scale)));
+    int sh = std::max(h, static_cast<int>(std::ceil(rh * scale)));
+    GdkPixbuf *scaled = (rw == sw && rh == sh) ? raw : gdk_pixbuf_scale_simple(raw, sw, sh, GDK_INTERP_BILINEAR);
+    if (scaled != raw) g_object_unref(raw);
+    if (!scaled) return nullptr;
+
+    int off_x = std::max(0, (sw - w) / 2);
+    int off_y = std::max(0, (sh - h) / 2);
+    GdkPixbuf *cropped = (sw == w && sh == h)
+        ? scaled
+        : gdk_pixbuf_new_subpixbuf(scaled, off_x, off_y, std::min(w, sw - off_x), std::min(h, sh - off_y));
+    cairo_surface_t *surf = pixbuf_to_cairo_surface(cropped);
+    if (cropped != scaled) g_object_unref(cropped);
+    g_object_unref(scaled);
+
+    ns->wallpaper_surf = surf;
+    ns->wallpaper_w = w;
+    ns->wallpaper_h = h;
+    return surf;
+}
+
 void draw_desktop_wallpaper(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
+    if (cairo_surface_t *wp = get_cached_wallpaper_surface(ns, w, h)) {
+        cairo_set_source_surface(cr, wp, 0.0, 0.0);
+        cairo_paint(cr);
+        return;
+    }
+
     const ThemeSpec &t = ns->theme;
 
     cairo_pattern_t *base = cairo_pattern_create_linear(0, 0, w, h);
@@ -2933,7 +3002,48 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-cc-chip-btn:hover { background-color: " + std::string(cc_chip_hover) + "; }\n"
         ".spinel-cc-scale trough { min-height: 12px; border-radius: 999px; background-color: " + std::string(trough_bg) + "; }\n"
         ".spinel-cc-scale highlight { min-height: 12px; border-radius: 999px; background-color: " + std::string(fill_bg) + "; }\n"
-        ".spinel-cc-scale slider { min-width: 15px; min-height: 15px; border-radius: 999px; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.30); }\n";
+        ".spinel-cc-scale slider { min-width: 15px; min-height: 15px; border-radius: 999px; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.30); }\n"
+        ".spinel-launcher-panel {\n"
+        "  background-color: " + t.popover_bg + ";\n"
+        "  border: 1px solid " + t.cc_border + ";\n"
+        "  border-radius: 18px;\n"
+        "  padding: 12px;\n"
+        "  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.45);\n"
+        "  color: " + t.bar_fg + ";\n"
+        "}\n"
+        ".spinel-launcher-search {\n"
+        "  background-color: " + std::string(cc_chip_bg) + ";\n"
+        "  border: 1px solid " + t.bar_border + ";\n"
+        "  border-radius: 12px;\n"
+        "  padding: 6px 12px;\n"
+        "}\n"
+        ".spinel-launcher-entry {\n"
+        "  background: transparent;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  color: " + t.bar_fg + ";\n"
+        "  font-size: 15px;\n"
+        "  font-weight: 500;\n"
+        "}\n"
+        ".spinel-launcher-list {\n"
+        "  background: transparent;\n"
+        "}\n"
+        ".spinel-launcher-list row {\n"
+        "  background: transparent;\n"
+        "  border-radius: 10px;\n"
+        "  padding: 6px 10px;\n"
+        "  margin: 2px 0;\n"
+        "}\n"
+        ".spinel-launcher-list row:hover { background-color: " + std::string(cc_chip_bg) + "; }\n"
+        ".spinel-launcher-list row:selected {\n"
+        "  background-color: " + t.cc_accent + ";\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-launcher-list row:selected .spinel-cc-title,\n"
+        ".spinel-launcher-list row:selected .spinel-cc-sub,\n"
+        ".spinel-launcher-list row:selected .spinel-cc-badge {\n"
+        "  color: #ffffff;\n"
+        "}\n";
 
     GdkDisplay *display = gdk_display_get_default();
     if (!display) return;
@@ -2943,6 +3053,308 @@ void apply_native_css(NativeShellState *ns) {
             display, GTK_STYLE_PROVIDER(ns->css_provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
     }
     gtk_css_provider_load_from_string(ns->css_provider, css_str.c_str());
+}
+
+void set_launcher_visible(NativeShellState *ns, bool visible);
+
+void draw_launcher_row_icon(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ctx = static_cast<DesktopIconDrawCtx *>(user_data);
+    double sz = std::min(w, h);
+    draw_app_icon(ctx->ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz, ctx->path, ctx->kind);
+}
+
+void rebuild_launcher_index(NativeShellState *ns) {
+    if (!ns) return;
+    ns->launcher_entries.clear();
+    ns->desktop_apps = list_desktop_apps();
+    bool steam_installed = has_executable("steam");
+
+    ns->launcher_entries = {
+        {"Spinel 终端", "原生多标签 Wayland 终端 (Super+Enter)", "terminal ptyxis shell console bash", "launch:terminal", "", "terminal"},
+        {"应用商店", "一键安装 Steam / 浏览器 / Flatpak / 系统更新", "store app market pacman flatpak", "store:open", "", "store"},
+        {"游戏与启动中心", "浏览 Steam 游戏库、启动大屏模式与调节游戏性能", "games library launcher center", "games:open", "", "games"},
+        {"文件管理 (Thunar)", "浏览本地文件、压缩包与挂载盘", "files thunar folder manager", "launch:files", "", "files"},
+        {steam_installed ? "Steam 客户端" : "安装 Steam 客户端",
+         steam_installed ? "启动 Valve Steam 游戏平台" : "前往应用商店一键安装 Steam",
+         "steam valve game", steam_installed ? "launch:steam" : "store:open:steam",
+         find_app_icon_path(ns->desktop_apps, {"steam"}), "steam"},
+        {"主机大屏模式 (Gamescope)", "全屏主机手柄界面与游戏性能调优", "gamepad gamescope bigpicture console", "launch:steam-gamepadui", "", "gamepad"},
+        {"控制中心", "快速调整音量、亮度、GameMode 与 MangoHud", "control center audio volume brightness", "cc:toggle", "", "settings"},
+        {"区域截图", "框选屏幕区域并复制到剪贴板", "screenshot area capture snip", "system:screenshot:area", "", "settings"},
+        {"全屏截图", "保存全屏截图到 ~/Pictures", "screenshot full screen capture", "system:screenshot:full", "", "settings"},
+        {"锁定屏幕", "锁定当前 Wayland 桌面会话 (Super+L)", "lock screen swaylock", "system:lock", "", "settings"},
+        {"系统设置 · Wi-Fi 与代理", "无线网络与 HTTP/SOCKS 系统代理", "settings wifi network proxy", "settings:open:wifi", "", "settings"},
+        {"系统设置 · 蓝牙与设备", "手柄、耳机与蓝牙外设配对", "settings bluetooth bt gamepad", "settings:open:bt", "", "settings"},
+        {"系统设置 · 显示与缩放", "屏幕分辨率、刷新率与 HiDPI 缩放", "settings display resolution scale monitor", "settings:open:display", "", "settings"},
+        {"系统设置 · 声音与电源", "输出设备、麦克风与功耗模式", "settings audio sound power battery", "settings:open:audio", "", "settings"},
+        {"系统设置 · 键盘与快捷键", "自定义截图、锁屏、终端等全局热键", "settings shortcuts keyboard hotkeys", "settings:open:shortcuts", "", "settings"},
+        {"系统设置 · 游戏性能预设", "MangoHud / GameMode / 帧率上限 / FSR", "settings perf mangohud gamemode fsr", "settings:open:perf", "", "settings"},
+        {"系统设置 · 主题壁纸与输入法", "切换浅深色主题、自定义壁纸与 Fcitx5 拼音", "settings theme wallpaper appearance ime fcitx5 rime", "settings:open:appearance", "", "settings"},
+        {"系统设置 · 权限与安全", "Flatpak 应用权限与 Portal 弹窗管理", "settings permissions security flatpak polkit", "settings:open:perms", "", "settings"},
+        {"系统设置 · 进程与内存监控", "查看系统 PSS 内存与实时 CPU 占用", "settings process monitor memory cpu", "settings:open:procs", "", "settings"},
+        {"系统设置 · 日志与诊断", "导出与排查桌面及启动日志", "settings logs debug diagnostic", "settings:open:logs", "", "settings"}
+    };
+
+    if (ns->telemetry.is_live) {
+        ns->launcher_entries.push_back({
+            "安装 SpinelOS 到硬盘", "启动系统图形安装向导", "installer disk setup live", "installer:open", "", "installer"
+        });
+    }
+
+    for (const auto &app : ns->desktop_apps) {
+        std::string lid = to_lower_copy(app.id);
+        if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal") continue;
+        ns->launcher_entries.push_back({
+            app.name,
+            !app.category.empty() ? ("已安装应用 · " + app.category) : "已安装桌面应用",
+            app.id + " " + app.category,
+            "app:launch:" + app.id,
+            app.icon_path,
+            match_app_kind(app.id + " " + app.name)
+        });
+    }
+
+    for (const auto &g : list_steam_games()) {
+        ns->launcher_entries.push_back({
+            g.name,
+            "Steam 本地游戏",
+            "steam game " + g.appid,
+            "steam:launch:" + g.appid,
+            !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}),
+            "steam"
+        });
+    }
+}
+
+void populate_launcher_results(NativeShellState *ns, const std::string &query) {
+    if (!ns || !ns->launcher_list) return;
+    while (GtkWidget *c = gtk_widget_get_first_child(ns->launcher_list)) {
+        gtk_list_box_remove(GTK_LIST_BOX(ns->launcher_list), c);
+    }
+
+    std::string q = to_lower_copy(trim_copy(query));
+    struct Scored {
+        int score = 0;
+        const NativeShellState::LauncherEntry *entry = nullptr;
+    };
+    std::vector<Scored> matches;
+
+    for (const auto &e : ns->launcher_entries) {
+        if (q.empty()) {
+            matches.push_back({100, &e});
+            continue;
+        }
+        std::string lt = to_lower_copy(e.title);
+        std::string ls = to_lower_copy(e.subtitle);
+        std::string lk = to_lower_copy(e.keywords);
+        int sc = 0;
+        if (lt.rfind(q, 0) == 0) sc = 300;
+        else if (lt.find(q) != std::string::npos) sc = 220;
+        else if (lk.find(q) != std::string::npos) sc = 160;
+        else if (ls.find(q) != std::string::npos) sc = 120;
+        if (sc > 0) matches.push_back({sc, &e});
+    }
+
+    std::stable_sort(matches.begin(), matches.end(), [](const Scored &a, const Scored &b) {
+        return a.score > b.score;
+    });
+    if (matches.size() > 10) matches.resize(10);
+
+    for (const auto &m : matches) {
+        const auto *e = m.entry;
+        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        GtkWidget *da = gtk_drawing_area_new();
+        gtk_widget_set_size_request(da, 28, 28);
+        auto *ctx = new DesktopIconDrawCtx{ns, e->icon_path, e->kind};
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_launcher_row_icon, ctx, free_desktop_icon_ctx);
+
+        GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
+        gtk_widget_set_hexpand(col, TRUE);
+        GtkWidget *t = gtk_label_new(e->title.c_str());
+        gtk_widget_add_css_class(t, "spinel-cc-title");
+        gtk_widget_set_halign(t, GTK_ALIGN_START);
+        gtk_label_set_ellipsize(GTK_LABEL(t), PANGO_ELLIPSIZE_END);
+        GtkWidget *s = gtk_label_new(e->subtitle.c_str());
+        gtk_widget_add_css_class(s, "spinel-cc-sub");
+        gtk_widget_set_halign(s, GTK_ALIGN_START);
+        gtk_label_set_ellipsize(GTK_LABEL(s), PANGO_ELLIPSIZE_END);
+        gtk_box_append(GTK_BOX(col), t);
+        gtk_box_append(GTK_BOX(col), s);
+
+        GtkWidget *enter_lbl = gtk_label_new("↵");
+        gtk_widget_add_css_class(enter_lbl, "spinel-cc-badge");
+
+        gtk_box_append(GTK_BOX(row_box), da);
+        gtk_box_append(GTK_BOX(row_box), col);
+        gtk_box_append(GTK_BOX(row_box), enter_lbl);
+
+        GtkWidget *row = gtk_list_box_row_new();
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
+        g_object_set_data_full(G_OBJECT(row), "launcher-cmd", g_strdup(e->cmd.c_str()), g_free);
+        gtk_list_box_append(GTK_LIST_BOX(ns->launcher_list), row);
+    }
+
+    if (GtkListBoxRow *first = gtk_list_box_get_row_at_index(GTK_LIST_BOX(ns->launcher_list), 0)) {
+        gtk_list_box_select_row(GTK_LIST_BOX(ns->launcher_list), first);
+    }
+}
+
+void activate_selected_launcher_row(NativeShellState *ns, GtkListBoxRow *row = nullptr) {
+    if (!ns || !ns->launcher_list) return;
+    if (!row) row = gtk_list_box_get_selected_row(GTK_LIST_BOX(ns->launcher_list));
+    if (!row) return;
+    const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(row), "launcher-cmd"));
+    std::string cmd_copy = cmd ? cmd : "";
+    set_launcher_visible(ns, false);
+    if (!cmd_copy.empty()) trigger_cmd(ns->app_state, cmd_copy);
+}
+
+void set_launcher_visible(NativeShellState *ns, bool visible) {
+    if (!ns || !ns->launcher_win) return;
+    ns->launcher_was_active = false;
+    if (ns->launcher_backdrop_win) {
+        gtk_widget_set_visible(GTK_WIDGET(ns->launcher_backdrop_win), visible ? TRUE : FALSE);
+        if (visible) gtk_window_present(ns->launcher_backdrop_win);
+    }
+    if (visible) {
+        rebuild_launcher_index(ns);
+        gtk_editable_set_text(GTK_EDITABLE(ns->launcher_entry), "");
+        populate_launcher_results(ns, "");
+        gtk_layer_set_keyboard_mode(ns->launcher_win, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
+        gtk_widget_set_visible(GTK_WIDGET(ns->launcher_win), TRUE);
+        gtk_window_present(ns->launcher_win);
+        gtk_widget_grab_focus(ns->launcher_entry);
+    } else {
+        gtk_layer_set_keyboard_mode(ns->launcher_win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+        gtk_widget_set_visible(GTK_WIDGET(ns->launcher_win), FALSE);
+    }
+}
+
+void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
+    GtkWindow *backdrop = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(backdrop, "SpinelLauncherBackdrop");
+    gtk_widget_add_css_class(GTK_WIDGET(backdrop), "spinel-transparent");
+    gtk_layer_init_for_window(backdrop);
+    gtk_layer_set_namespace(backdrop, "spinel-launcher-backdrop");
+    gtk_layer_set_layer(backdrop, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_exclusive_zone(backdrop, -1);
+    gtk_layer_set_keyboard_mode(backdrop, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    GtkWidget *bg = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_hexpand(bg, TRUE);
+    gtk_widget_set_vexpand(bg, TRUE);
+    GtkGesture *bclick = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bclick), 0);
+    g_signal_connect(bclick, "pressed", G_CALLBACK(+[](GtkGestureClick *, int, double, double, gpointer d) {
+        set_launcher_visible(static_cast<NativeShellState *>(d), false);
+    }), ns);
+    gtk_widget_add_controller(bg, GTK_EVENT_CONTROLLER(bclick));
+    gtk_window_set_child(backdrop, bg);
+    gtk_widget_set_visible(GTK_WIDGET(backdrop), FALSE);
+    ns->launcher_backdrop_win = backdrop;
+
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelLauncher");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, 580, -1);
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-launcher");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 130);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(panel, "spinel-launcher-panel");
+    gtk_widget_set_size_request(panel, 580, -1);
+    gtk_widget_set_margin_top(panel, 6);
+    gtk_widget_set_margin_bottom(panel, 10);
+    gtk_widget_set_margin_start(panel, 10);
+    gtk_widget_set_margin_end(panel, 10);
+
+    GtkWidget *search_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_add_css_class(search_row, "spinel-launcher-search");
+    GtkWidget *ico = gtk_drawing_area_new();
+    gtk_widget_set_size_request(ico, 18, 18);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ico), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Search)), nullptr);
+
+    GtkWidget *entry = gtk_entry_new();
+    gtk_widget_add_css_class(entry, "spinel-launcher-entry");
+    gtk_entry_set_has_frame(GTK_ENTRY(entry), FALSE);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "搜索应用、Steam 游戏、系统设置或命令...");
+    gtk_widget_set_hexpand(entry, TRUE);
+
+    GtkWidget *esc_hint = gtk_label_new("Esc 关闭");
+    gtk_widget_add_css_class(esc_hint, "spinel-cc-badge");
+
+    gtk_box_append(GTK_BOX(search_row), ico);
+    gtk_box_append(GTK_BOX(search_row), entry);
+    gtk_box_append(GTK_BOX(search_row), esc_hint);
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 360);
+
+    GtkWidget *list = gtk_list_box_new();
+    gtk_widget_add_css_class(list, "spinel-launcher-list");
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(list), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list);
+
+    gtk_box_append(GTK_BOX(panel), search_row);
+    gtk_box_append(GTK_BOX(panel), scroll);
+    gtk_window_set_child(win, panel);
+
+    ns->launcher_win = win;
+    ns->launcher_entry = entry;
+    ns->launcher_list = list;
+
+    g_signal_connect(entry, "changed", G_CALLBACK(+[](GtkEditable *ed, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        populate_launcher_results(n, gtk_editable_get_text(ed));
+    }), ns);
+    g_signal_connect(entry, "activate", G_CALLBACK(+[](GtkEntry *, gpointer d) {
+        activate_selected_launcher_row(static_cast<NativeShellState *>(d));
+    }), ns);
+    g_signal_connect(list, "row-activated", G_CALLBACK(+[](GtkListBox *, GtkListBoxRow *row, gpointer d) {
+        activate_selected_launcher_row(static_cast<NativeShellState *>(d), row);
+    }), ns);
+
+    GtkEventController *key_ctl = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(key_ctl, GTK_PHASE_CAPTURE);
+    g_signal_connect(key_ctl, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (keyval == GDK_KEY_Escape) {
+            set_launcher_visible(n, false);
+            return TRUE;
+        }
+        if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Up) {
+            GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(n->launcher_list));
+            int cur = sel ? gtk_list_box_row_get_index(sel) : 0;
+            int next = (keyval == GDK_KEY_Down) ? (cur + 1) : std::max(0, cur - 1);
+            if (GtkListBoxRow *target = gtk_list_box_get_row_at_index(GTK_LIST_BOX(n->launcher_list), next)) {
+                gtk_list_box_select_row(GTK_LIST_BOX(n->launcher_list), target);
+                gtk_widget_grab_focus(GTK_WIDGET(n->launcher_entry));
+            }
+            return TRUE;
+        }
+        return FALSE;
+    }), ns);
+    gtk_widget_add_controller(GTK_WIDGET(win), key_ctl);
+
+    g_signal_connect(win, "notify::is-active", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n || !gtk_widget_get_visible(GTK_WIDGET(obj))) return;
+        bool active = gtk_window_is_active(GTK_WINDOW(obj));
+        if (active) n->launcher_was_active = true;
+        else if (n->launcher_was_active) set_launcher_visible(n, false);
+    }), ns);
 }
 
 void close_startup_splash(NativeShellState *ns) {
@@ -3082,6 +3494,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     state->native = ns;
 
     ns->theme = get_active_theme();
+    ns->custom_wallpaper_path = get_custom_wallpaper_image();
     apply_native_css(ns);
     ns->telemetry = collect_telemetry();
     ns->desktop_apps = list_desktop_apps();
@@ -3090,6 +3503,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     build_native_top_bar(app, ns);
     build_native_dock(app, ns);
     build_native_control_center(app, ns);
+    build_native_launcher(app, ns);
     show_desktop_startup_splash(app, ns);
 
     native_shell_sync_telemetry(state);
@@ -3107,6 +3521,10 @@ void shutdown_native_shell(AppState *state) {
             gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
         }
         g_object_unref(ns->css_provider);
+    }
+    if (ns->wallpaper_surf) {
+        cairo_surface_destroy(ns->wallpaper_surf);
+        ns->wallpaper_surf = nullptr;
     }
     for (auto &kv : ns->surface_cache) {
         if (kv.second) cairo_surface_destroy(kv.second);
@@ -3195,6 +3613,14 @@ void native_shell_sync_theme(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
     ns->theme = get_active_theme();
+    std::string next_wp = get_custom_wallpaper_image();
+    if (next_wp != ns->custom_wallpaper_path) {
+        ns->custom_wallpaper_path = next_wp;
+        if (ns->wallpaper_surf) {
+            cairo_surface_destroy(ns->wallpaper_surf);
+            ns->wallpaper_surf = nullptr;
+        }
+    }
     apply_native_css(ns);
     if (ns->desktop_bg_da) gtk_widget_queue_draw(ns->desktop_bg_da);
     if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
@@ -3278,4 +3704,10 @@ void native_shell_toggle_cc(AppState *state) {
     if (!state || !state->native || !state->native->cc_win) return;
     bool vis = gtk_widget_get_visible(GTK_WIDGET(state->native->cc_win));
     native_shell_set_cc_visible(state, !vis);
+}
+
+void native_shell_toggle_launcher(AppState *state) {
+    if (!state || !state->native || !state->native->launcher_win) return;
+    bool vis = gtk_widget_get_visible(GTK_WIDGET(state->native->launcher_win));
+    set_launcher_visible(state->native, !vis);
 }

@@ -502,6 +502,20 @@
     if (Array.isArray(data.themes)) availableThemes = data.themes;
     if (data.active) applyUiTheme(data.active);
     const grid = document.getElementById("theme-grid");
+    const wpLabel = document.getElementById("wp-image-label");
+    const wpClearBtn = document.getElementById("btn-wp-clear");
+    if (wpLabel) {
+      const p = String(data.wallpaper_image || "").trim();
+      if (p) {
+        const name = p.split("/").pop() || p;
+        wpLabel.textContent = `当前图片: ${name} (${p})`;
+      } else {
+        wpLabel.textContent = "当前使用主题内置极光渐变";
+      }
+    }
+    if (wpClearBtn) {
+      wpClearBtn.disabled = !String(data.wallpaper_image || "").trim();
+    }
     if (!grid || !Array.isArray(availableThemes)) return;
     grid.innerHTML = "";
     availableThemes.forEach((t) => {
@@ -1227,11 +1241,22 @@
     renderAudioDeviceList("audio-sink-list", data.sinks, "settings:audio-sink", "未检测到音频输出设备");
     renderAudioDeviceList("audio-source-list", data.sources, "settings:audio-source", "未检测到麦克风输入设备");
 
+    const supported = Array.isArray(data.supported_profiles) && data.supported_profiles.length > 0
+      ? data.supported_profiles
+      : ["power-saver", "balanced", "performance"];
     document.querySelectorAll("#tab-audio [data-power-profile]").forEach((btn) => {
       const p = btn.getAttribute("data-power-profile");
+      const isSup = supported.includes(p);
       btn.classList.toggle("active", p === data.power_profile);
-      btn.disabled = !data.ppd_available;
+      btn.disabled = !data.ppd_available || !isSup;
+      btn.title = (!isSup && data.ppd_available) ? "当前硬件/虚拟机电源驱动不支持该档位" : "";
     });
+    const ppHint = document.getElementById("power-profile-hint");
+    if (ppHint) {
+      ppHint.textContent = (!supported.includes("performance") && data.ppd_available)
+        ? "当前驱动仅支持「省电 / 平衡」档位（虚拟机或占位驱动不支持性能档）"
+        : "调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）";
+    }
     const sumEl = document.getElementById("power-hw-summary");
     if (sumEl) {
       const batText = (typeof data.battery_pct === "number" && data.battery_pct >= 0)

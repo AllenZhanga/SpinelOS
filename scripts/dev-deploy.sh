@@ -249,7 +249,7 @@ fi
 
 if command -v fcitx5 >/dev/null 2>&1; then
   sleep 0.4
-  nohup fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1 </dev/null &
+  setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true
 fi
 echo "Done! spinel-shell restarted on ${WAYLAND_DISPLAY}."
 EOF

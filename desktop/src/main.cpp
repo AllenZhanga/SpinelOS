@@ -30,30 +30,27 @@ namespace {
 
 GtkApplication *g_app = nullptr;
 
-void notify_dbus_action(const char *bus_name, const char *obj_path, const char *action_name) {
+void notify_dbus_action(const char *bus_name, const char *obj_path, const char *action_name, bool sync = false) {
     GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
     if (!bus) return;
     GVariantBuilder empty_params;
     g_variant_builder_init(&empty_params, G_VARIANT_TYPE("av"));
     GVariantBuilder empty_platform;
     g_variant_builder_init(&empty_platform, G_VARIANT_TYPE("a{sv}"));
-    g_dbus_connection_call(
-        bus,
-        bus_name,
-        obj_path,
-        "org.gtk.Actions",
-        "Activate",
-        g_variant_new("(s@av@a{sv})",
-                      action_name,
-                      g_variant_builder_end(&empty_params),
-                      g_variant_builder_end(&empty_platform)),
-        nullptr,
-        G_DBUS_CALL_FLAGS_NO_AUTO_START,
-        1000,
-        nullptr,
-        nullptr,
-        nullptr
-    );
+    GVariant *args = g_variant_new("(s@av@a{sv})",
+                                   action_name,
+                                   g_variant_builder_end(&empty_params),
+                                   g_variant_builder_end(&empty_platform));
+    if (sync) {
+        GVariant *res = g_dbus_connection_call_sync(
+            bus, bus_name, obj_path, "org.gtk.Actions", "Activate",
+            args, nullptr, G_DBUS_CALL_FLAGS_NO_AUTO_START, 600, nullptr, nullptr);
+        if (res) g_variant_unref(res);
+    } else {
+        g_dbus_connection_call(
+            bus, bus_name, obj_path, "org.gtk.Actions", "Activate",
+            args, nullptr, G_DBUS_CALL_FLAGS_NO_AUTO_START, 1000, nullptr, nullptr, nullptr);
+    }
     g_object_unref(bus);
 }
 
@@ -384,6 +381,9 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
     add_act("sync-telemetry", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         push_all_telemetry(static_cast<AppState *>(d));
     }));
+    add_act("toggle-launcher", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        native_shell_toggle_launcher(static_cast<AppState *>(d));
+    }));
 }
 
 void on_activate(GtkApplication *app, gpointer user_data) {
@@ -415,6 +415,7 @@ void native_shell_sync_theme(AppState *) { notify_dbus_action("org.spinelos.shel
 void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-perf"); }
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
+void native_shell_toggle_launcher(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher"); }
 #endif
 
 void handle_shell_command(AppState *state, const std::string &cmd) {
@@ -519,6 +520,52 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         native_shell_toggle_cc(state);
     } else if (cmd == "cc:close") {
         native_shell_set_cc_visible(state, false);
+    } else if (cmd == "launcher:toggle" || cmd == "launcher:open") {
+        native_shell_set_cc_visible(state, false);
+        native_shell_toggle_launcher(state);
+    } else if (cmd == "wallpaper:clear-image") {
+        set_custom_wallpaper_image(state, "");
+#if !SPINEL_HAS_WEBKIT
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
+#endif
+#if SPINEL_HAS_WEBKIT
+    } else if (cmd == "wallpaper:pick-image") {
+        GtkFileDialog *dlg = gtk_file_dialog_new();
+        gtk_file_dialog_set_title(dlg, "选择自定义桌面壁纸图片");
+        GtkFileFilter *flt = gtk_file_filter_new();
+        gtk_file_filter_set_name(flt, "图片文件 (PNG / JPG / WebP)");
+        gtk_file_filter_add_mime_type(flt, "image/png");
+        gtk_file_filter_add_mime_type(flt, "image/jpeg");
+        gtk_file_filter_add_mime_type(flt, "image/webp");
+        GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+        g_list_store_append(filters, flt);
+        gtk_file_dialog_set_filters(dlg, G_LIST_MODEL(filters));
+        gtk_file_dialog_set_default_filter(dlg, flt);
+        g_object_unref(flt);
+        g_object_unref(filters);
+
+        fs::path pic_dir = fs::path(home_dir()) / "Pictures";
+        std::error_code ec;
+        GFile *init_folder = g_file_new_for_path(
+            fs::is_directory(pic_dir, ec) ? pic_dir.c_str() : home_dir().c_str());
+        gtk_file_dialog_set_initial_folder(dlg, init_folder);
+        g_object_unref(init_folder);
+
+        gtk_file_dialog_open(dlg, state->settings_win, nullptr,
+            +[](GObject *src, GAsyncResult *res, gpointer data) {
+                auto *st = static_cast<AppState *>(data);
+                GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, nullptr);
+                if (file) {
+                    char *path = g_file_get_path(file);
+                    if (path && *path && st && !st->shutting_down.load()) {
+                        set_custom_wallpaper_image(st, path);
+                    }
+                    g_free(path);
+                    g_object_unref(file);
+                }
+            }, state);
+        g_object_unref(dlg);
+#endif
     } else if (cmd.rfind("system:audio-set:", 0) == 0) {
         int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
         spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
@@ -746,6 +793,10 @@ int main(int argc, char **argv) {
 #if !SPINEL_HAS_WEBKIT
     if (argc > 1 && std::string(argv[1]) == "--clip-hook") {
         return run_clipboard_hook_from_stdin();
+    }
+    if (argc > 1 && std::string(argv[1]) == "--launcher") {
+        notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher", true);
+        return 0;
     }
 #endif
     ensure_display_env();

@@ -342,9 +342,11 @@ void push_theme_state(AppState *state) {
     ThemeSpec active = get_active_theme();
     auto list = list_available_themes();
 
+    std::string wp_img = get_custom_wallpaper_image();
     std::ostringstream js;
     js << "window.__spinelThemeData && window.__spinelThemeData({"
        << "\"active\":" << theme_to_json(active) << ","
+       << "\"wallpaper_image\":\"" << json_escape(wp_img) << "\","
        << "\"themes\":[";
     for (size_t i = 0; i < list.size(); ++i) {
         if (i > 0) js << ",";
@@ -406,4 +408,22 @@ void export_custom_theme_template() {
         }
     }
     spawn_argv_detached({"thunar", dir.string()});
+}
+
+std::string get_custom_wallpaper_image() {
+    fs::path cfg = fs::path(home_dir()) / ".config/spinelos/wallpaper_image.conf";
+    std::string p = trim_copy(read_first_line(cfg.string(), ""));
+    if (p.empty()) return "";
+    std::error_code ec;
+    if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec)) return "";
+    return p;
+}
+
+void set_custom_wallpaper_image(AppState *state, const std::string &path) {
+    fs::path cfg = fs::path(home_dir()) / ".config/spinelos/wallpaper_image.conf";
+    std::string clean = trim_copy(path);
+    write_text_file(cfg.string(), clean.empty() ? "" : (clean + "\n"));
+    append_app_log(clean.empty() ? "[Theme] 已恢复默认主题渐变壁纸" : ("[Theme] 已应用自定义壁纸: " + clean));
+    push_theme_state(state);
+    native_shell_sync_wallpaper(state);
 }

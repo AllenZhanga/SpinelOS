@@ -32,7 +32,8 @@
 
 很多 Linux 游戏发行版只是在 KDE 或 GNOME 上预装驱动和 Steam。**SpinelOS 希望做得更轻、更统一**：
 
-- **完全独立的桌面外壳**：不依赖 KDE / GNOME / XFCE 整套桌面环境，由自研的 C++20 程序 [`spinel-shell`](desktop/)（`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`）承担顶栏、Dock、控制中心、设置、应用商店、游戏中心与 Live 安装器；底层仅由极轻量的 `labwc`（`wlroots`）负责 Wayland/DRM 合成与 `XWayland` 兼容。
+- **完全独立的桌面外壳与双进程低内存架构**：不依赖 KDE / GNOME / XFCE 整套桌面环境，由自研的 C++20 桌面核心 [`spinel-shell`](desktop/)（纯 `GTK4 + Cairo + gtk4-layer-shell`，常驻内存仅约 **75 MB PSS**）承担顶栏、Dock、桌面、Control Center、Spotlight 全局启动器与剪贴板守护；设置、应用商店、游戏中心与安装向导拆分为按需拉起的 `spinel-webui`（`WebKitGTK 6.0`），关闭即释放全部内存。底层仅由极轻量的 `labwc`（`wlroots`）负责 Wayland/DRM 合成与 `XWayland` 兼容。
+- **自研多标签终端与彩色开机体验**：自研基于 `GTK4 + VTE4` 的多标签终端 `spinel-terminal`（`Ctrl+T` 继承工作目录、内置搜索与主题同步）；配置彩色尖晶石晶体 Logo、静默无感 GRUB 与 Plymouth 开机动画。
 - **为桌面体验与游戏玩家同步打磨**：兼顾主机大屏模式、桌面级窗口多任务、开箱中文环境与透明的系统权限/进程控制。
 
 ---
@@ -40,30 +41,26 @@
 ## 核心特性
 
 ### 1. 独立设计的 Spinel Shell 桌面体验
-- **全局动态顶部菜单栏**：随当前焦点应用自动切换菜单项，右上角集成状态监控与弹出式控制中心。
-- **悬浮 Dock 与统一主题引擎**：遵循 [UI 设计规范](docs/UI_SPEC.md)，内置 4 套主题并支持 `~/.config/spinelos/themes/*.theme` 扩展：
-  - **macOS 浅色液态玻璃**（`tahoe-light`，默认）
-  - **尖晶石深蓝极光**（`crystal-aurora`）
-  - **黑曜星云霓虹**（`obsidian-neon`）
-  - **森境翡翠极光**（`emerald-nordic`）
-- **一致的多窗口原生架构**：顶栏与 Dock 常驻轻量运行，设置、应用商店、游戏中心、安装器按需独立拉起并在关闭时自动释放内存；虚拟机/无 3D 加速环境下自动降级渲染特效以保障响应速度。
+- **全局动态顶部菜单栏 & 剪贴板历史**：随当前焦点应用自动切换菜单项，右上角集成 `wl-clip-persist` 剪贴板守护（10 条历史记录）、Bento 风格控制中心与状态监控。
+- **Spotlight 全局搜索启动器 (`Alt + Space`)**：一键模糊搜索已安装桌面应用、本地 Steam 游戏、系统设置直达页与快捷操作。
+- **悬浮 Dock 与桌面交互**：支持桌面图标左键双击打开、Dock 常驻图标拖拽排序与右键菜单（保留/移除/显示/关闭应用）；遵循 [UI 设计规范](docs/UI_SPEC.md)，内置 4 套主题（默认 `tahoe-light` 浅色液态玻璃），支持 `.theme` 扩展及**自定义本地壁纸图片**。
 
 ### 2. 开箱即用的 PC / 掌机游戏环境
 - **全系主流 GPU 驱动预置**（见 [packages.custom.x86_64](archiso/packages.custom.x86_64)）：
   - **AMD**：`mesa` + `vulkan-radeon`（含 32 位 `lib32-*`）
   - **Intel**：`mesa` + `vulkan-intel`（含 32 位 `lib32-*`）
   - **NVIDIA**：`nvidia-open` + `nvidia-utils` + `lib32-nvidia-utils`（适配 RTX 20/30/40/50 及 GTX 16 系）
-- **游戏栈即装即玩**：预集成 `[multilib]`、Steam、Proton 兼容预设、Gamescope、MangoHud、GameMode、PipeWire 与蓝牙手柄支持。
+- **游戏栈即装即玩（开源合规设计）**：ISO 预集成 `[multilib]`、Gamescope、MangoHud、GameMode、PipeWire 与蓝牙手柄支持；专有 `Steam` 客户端未预捆绑在商业发行镜像中，首次点击桌面/Dock/游戏中心图标可通过**应用商店一键在线安装**（ISO 构建同时导出 `spinelos-packages-licenses.tsv` 与 `NOTICE-THIRD-PARTY.txt`）。
 - **游戏与启动中心**：自动扫描本地 Steam 游戏库与封面图，可直接从桌面/游戏中心一键直达 **Steam 客户端** 或 **Gamescope 主机大屏模式**，并在设置页可视化开关 MangoHud HUD、GameMode 与渲染分辨率。
 
 ### 3. 真正面向中文用户的日用体验
-- **中文输入法开箱可用**：内置 **Fcitx5 Wayland**、中文拼音（`fcitx5-chinese-addons`）及 **Rime / 雾凇拼音** 一键切换，并与桌面浅/深色主题自动联动。
-- **系统级代理自动接管**：在「系统设置 → Wi-Fi 与网络」配置 HTTP / SOCKS 代理后，自动同步至桌面启动的浏览器与 Steam（遇到未加载代理的旧 Steam 更新进程会自动重启接管，解决首启更新缓慢问题）。
+- **中文输入法开箱可用**：内置 **Fcitx5 Wayland**、默认中文拼音（`fcitx5-chinese-addons`，禁用生僻 ExtB 字符并预置 `Noto Color Emoji` 彩色 Emoji 回退）及可选 **Rime 雾凇拼音**，配合 9-patch 磨砂浅/深色皮肤。
+- **系统级代理自动接管**：在「系统设置 → Wi-Fi 与网络」配置 HTTP / SOCKS 代理后，自动同步至桌面启动的浏览器与 Steam。
 - **日常工具精简完备**：
-  - 原生多标签终端 **Ptyxis**（预设 `Ctrl+T` 新开标签页，自动跟随系统浅/深色切换）
-  - **Thunar** 文件管理（含压缩包插件与 GVFS）、Mousepad、Ristretto
-  - **应用商店**：整合系统软件源（`pacman`）与 Flatpak / Flathub 一键安装主流浏览器、Heroic、Lutris、Discord、OBS 等
-  - **进程监控 / 权限与安全 / 系统日志**：设置内直接查看 CPU 与内存占用并结束异常进程、用通俗条目管理 Flatpak / Portal 应用授权与管理员提权弹窗、导出桌面与系统排障日志
+  - 自研轻量多标签终端 **`spinel-terminal`**（`Super+Enter` / `Ctrl+T` / `Ctrl+Shift+C/V` / `Ctrl+F`，原生跟随系统主题）
+  - **Thunar** 文件管理（含压缩包插件与 GVFS）、Mousepad、Ristretto、自定义截图 (`spinel-screenshot`) 与晶石圆环锁屏 (`spinel-lock`)
+  - **应用商店**：整合系统软件源（`pacman`）与 Flatpak / Flathub 一键安装 Steam、Chrome、Firefox、Heroic、Lutris、Discord、OBS 等
+  - **分类系统设置**：网络与蓝牙、显示与缩放、声音与电源、交互式全局快捷键录制（自动同步 `labwc`）、进程与 `PSS` 内存监控、权限与安全、系统日志导出
 
 ---
 
@@ -71,7 +68,7 @@
 
 | 维度 | 传统游戏桌面（KDE / GNOME / XFCE） | **SpinelOS (`Spinel Shell + labwc`)** |
 | :--- | :--- | :--- |
-| **桌面外壳** | 完整桌面套件，服务与后台组件多 | 自研 C++20 `GTK4 + WebKitGTK 6.0` 外壳 + `labwc` 合成器 |
+| **桌面外壳** | 完整桌面套件，服务与后台组件多 | 自研 C++20 `spinel-shell`（纯 GTK4 + Cairo）+ 按需 `spinel-webui` + `labwc` 合成器 |
 | **主题与交互一致性** | 常混用 GTK3/GTK4/Qt 多套风格，顶栏/设置体验割裂 | 全局统一 [UI_SPEC.md](docs/UI_SPEC.md) 设计规范，主题一键同步到壁纸、顶栏、Dock、窗口装饰与终端 |
 | **国内网络与中文开箱度** | 装机后往往需手动配置 `fcitx5` 环境变量与 Steam 代理 | 开箱预设 Wayland IME、`xdg-desktop-portal` 授权链与代理环境变量同步 |
 | **可定制性** | 修改全局桌面交互需维护插件或 Patch 上游 | 桌面、顶栏、应用商店、设置全部在本仓库 [desktop/](desktop/) 内掌控，热部署秒级迭代 |
@@ -163,8 +160,8 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 **SpinelOS** is an Arch-based gaming Linux distribution featuring a **custom standalone Wayland desktop shell (`spinel-shell`)** built from scratch in **C++20 (`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`)** on top of the lightweight **`labwc`** compositor — without KDE, GNOME, or XFCE.
 
 - **Ready for Gaming**: Pre-configured `[multilib]`, AMD (`mesa`/`vulkan-radeon`), Intel (`mesa`/`vulkan-intel`), NVIDIA (`nvidia-open`), `steam`, `gamescope`, `mangohud`, `gamemode`, and `pipewire`.
-- **Cohesive Custom UI**: Unified global top menu bar, floating dock, control center, multi-theme engine (Light Liquid Glass, Crystal Aurora, Obsidian Neon, Emerald Nordic), Flatpak + `pacman` App Store, and built-in Process Monitor.
-- **Out-of-the-Box CJK & Proxy Workflow**: Fcitx5 Wayland + Rime/Pinyin IME, Ptyxis tabbed terminal (`Ctrl+T`), and GUI proxy toggles automatically propagated to Steam and browsers.
+- **Cohesive Custom UI**: Unified global top menu bar, Clipboard History (`wl-clip-persist`), Spotlight Launcher (`Alt+Space`), drag-to-reorder Dock, Bento Control Center, custom image wallpapers + multi-theme engine, Flatpak + `pacman` App Store, and `PSS`-accurate Process Monitor.
+- **Out-of-the-Box CJK & First-Party Terminal**: Fcitx5 Wayland (Pinyin + optional Rime-Ice + Noto Color Emoji), custom lightweight tabbed terminal `spinel-terminal` (`GTK4 + VTE4`), and GUI proxy toggles propagated to Steam and browsers.
 - **Build Your Own ISO**: Run `./scripts/build-iso.sh` on any Docker-enabled `x86_64` Linux host to generate `out/spinelos-*.iso`.
 
 ---
@@ -181,4 +178,4 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 ## 开源许可 (License)
 
 - 本仓库中的 **Spinel Shell 源码、UI 前端、内置主题配置与构建/安装脚本** 基于 [MIT License](LICENSE) 开源。
-- 构建生成的系统镜像及其中集成的第三方开源或专有组件（如 Arch Linux 基础包、Linux 内核、`labwc`、Mesa、NVIDIA 驱动、Ptyxis、Fcitx5、Steam 客户端等）各自遵循其原始开源或最终用户许可协议。
+- 构建生成的系统镜像及其中集成的第三方开源或专有组件（如上游 Linux 内核、`labwc`、Mesa、`spinel-terminal` 底层所链接的 `VTE4`、NVIDIA 驱动、Fcitx5 等）各自遵循其原始开源或最终用户许可协议；每次构建 ISO 均会在输出目录附带完整软件包及 GPL/开源许可清单（`spinelos-packages-licenses.tsv` 与 `NOTICE-THIRD-PARTY.txt`）。

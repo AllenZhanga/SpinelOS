@@ -32,6 +32,9 @@
     <keybind key="W-l">
       <action name="Execute" command="spinel-lock" />
     </keybind>
+    <keybind key="A-space">
+      <action name="Execute" command="spinel-shell --launcher" />
+    </keybind>
     <keybind key="A-Tab">
       <action name="NextWindow" />
     </keybind>
