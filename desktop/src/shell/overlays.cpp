@@ -1531,6 +1531,11 @@ void native_shell_step_switcher(AppState *state, bool prev) {
         item.title = w.title;
         item.icon_path = shell_internal::find_app_icon_path(ns->desktop_apps, {w.app_id, item.app_name, w.title});
         item.kind = shell_internal::match_app_kind(w.app_id + " " + w.title);
+        if (item.kind == "files" &&
+            (shell_internal::contains_ci(item.icon_path, "system-file-manager") ||
+             shell_internal::contains_ci(item.icon_path, "thunar"))) {
+            item.icon_path.clear();
+        }
         item.minimized = w.minimized;
         ns->switcher_items.push_back(std::move(item));
     }

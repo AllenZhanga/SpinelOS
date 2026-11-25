@@ -1325,7 +1325,11 @@ void rebuild_sidebar(FilesWin *fw) {
             gtk_box_append(GTK_BOX(hb), gtk_image_new_from_icon_name("drive-removable-media-symbolic"));
             GtkWidget *lbl = gtk_label_new(m.label.c_str());
             gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_END);
-            gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+            gtk_label_set_max_width_chars(GTK_LABEL(lbl), 14);
+            gtk_label_set_xalign(GTK_LABEL(lbl), 0.0f);
+            gtk_widget_set_hexpand(lbl, TRUE);
+            gtk_widget_set_halign(lbl, GTK_ALIGN_FILL);
+            gtk_widget_set_tooltip_text(btn, m.mount_path.c_str());
             gtk_box_append(GTK_BOX(hb), lbl);
             gtk_button_set_child(GTK_BUTTON(btn), hb);
 
@@ -1728,6 +1732,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     fw->win = win;
     gtk_window_set_default_size(win, 1020, 660);
+    gtk_window_set_icon_name(win, "spinel-files");
     gtk_widget_add_css_class(GTK_WIDGET(win), "sf-win");
 
     fw->root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1837,6 +1842,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
 
     GtkWidget *sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(sidebar, "sf-sidebar");
+    gtk_widget_set_hexpand(sidebar, FALSE);
     gtk_widget_set_size_request(sidebar, 204, -1);
 
     GtkWidget *places_lbl = gtk_label_new("常用位置");
@@ -1849,8 +1855,13 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     gtk_widget_set_halign(drives_lbl, GTK_ALIGN_START);
     fw->drives_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 
+    // Block child hexpand propagation (external drive rows) so sidebar stays ~212px wide.
     GtkWidget *side_scroll = gtk_scrolled_window_new();
+    gtk_widget_set_hexpand(side_scroll, FALSE);
+    gtk_widget_set_size_request(side_scroll, 212, -1);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(side_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(side_scroll), FALSE);
+    gtk_scrolled_window_set_max_content_width(GTK_SCROLLED_WINDOW(side_scroll), 216);
     gtk_box_append(GTK_BOX(sidebar), places_lbl);
     gtk_box_append(GTK_BOX(sidebar), fw->places_box);
     gtk_box_append(GTK_BOX(sidebar), drives_lbl);

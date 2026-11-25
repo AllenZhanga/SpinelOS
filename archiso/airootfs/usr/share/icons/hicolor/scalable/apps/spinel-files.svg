@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="55%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <linearGradient id="pocket" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.14"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#bg)"/>
+  <path d="M12 20a5 5 0 0 1 5-5h9.5l3.8 4.2H47a5 5 0 0 1 5 5V44a5 5 0 0 1-5 5H17a5 5 0 0 1-5-5V20z" fill="#ffffff" fill-opacity="0.42"/>
+  <rect x="16" y="19.5" width="32" height="10" rx="2.5" fill="#ffffff" fill-opacity="0.72"/>
+  <rect x="12" y="23" width="40" height="26" rx="6" fill="url(#pocket)"/>
+  <path d="M21 32h22M21 38.5h15" stroke="#0284c7" stroke-width="2.8" stroke-linecap="round"/>
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#sheen)"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14.2" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="1.2"/>
+</svg>

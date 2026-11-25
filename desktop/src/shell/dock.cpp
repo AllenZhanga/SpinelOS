@@ -205,6 +205,18 @@ void load_dock_pins(NativeShellState *ns) {
         spec.kind = cols.size() > 2 ? sanitize_pin_field(cols[2]) : "app";
         if (cols.size() > 3) spec.icon_keys = split_pin_csv(cols[3]);
         if (cols.size() > 4) spec.win_match = split_pin_csv(cols[4]);
+        if (spec.cmd == "launch:files") {
+            spec.kind = "files";
+            spec.icon_keys.erase(std::remove_if(spec.icon_keys.begin(), spec.icon_keys.end(), [](const std::string &k) {
+                std::string lk = to_lower_copy(k);
+                return lk == "system-file-manager" || lk == "thunar" || lk == "org.xfce.thunar";
+            }), spec.icon_keys.end());
+            auto has_match = [&](const char *m) {
+                return std::find(spec.win_match.begin(), spec.win_match.end(), m) != spec.win_match.end();
+            };
+            if (!has_match("spinel-files")) spec.win_match.push_back("spinel-files");
+            if (!has_match("org.spinelos.files")) spec.win_match.push_back("org.spinelos.files");
+        }
         ns->dock_pins.push_back(std::move(spec));
     }
 }
@@ -813,6 +825,10 @@ void rebuild_dock_items(NativeShellState *ns, const std::vector<TrackedWindowInf
         item.cmd = "window:toggle:" + std::to_string(w.id);
         item.icon_path = find_app_icon_path(ns->desktop_apps, {w.app_id, w.title});
         item.fallback_kind = match_app_kind(w.app_id + " " + w.title);
+        if (item.fallback_kind == "files" &&
+            (contains_ci(item.icon_path, "system-file-manager") || contains_ci(item.icon_path, "thunar"))) {
+            item.icon_path.clear();
+        }
         item.app_id = w.app_id;
         item.pinned = false;
         item.win_id = w.id;
