@@ -60,6 +60,8 @@ brightnessctl
 power-profiles-daemon
 zram-generator
 btrfs-progs
+ntfs-3g
+exfatprogs
 snapper
 reflector
 

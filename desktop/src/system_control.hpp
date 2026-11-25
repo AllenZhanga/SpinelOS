@@ -123,11 +123,15 @@ void kill_process_by_pid(AppState *state, int pid, bool force);
 
 bool is_valid_block_dev_path(const std::string &path);
 bool is_valid_audio_node_name(const std::string &node);
+bool is_valid_mnt_leaf(const std::string &leaf);
+std::string unescape_lsblk_value(const std::string &raw);
 void push_devices_state(AppState *state);
-void mount_block_device(AppState *state, const std::string &dev_path);
+void mount_block_device(AppState *state, const std::string &dev_path, bool read_only = false);
 void unmount_block_device(AppState *state, const std::string &dev_path);
 void eject_block_device(AppState *state, const std::string &disk_path);
 void open_mount_folder(AppState *state, const std::string &mount_path);
+void set_block_fstab_mount(AppState *state, const std::string &payload);
+void remove_block_fstab_mount(AppState *state, const std::string &payload);
 void disable_audio_device(AppState *state, const std::string &payload);
 void enable_audio_device(AppState *state, const std::string &node_name);
 

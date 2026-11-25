@@ -952,6 +952,35 @@
       </div>
     </div>
     </div>
+
+    <div id="dev-fstab-modal" class="store-modal-backdrop hidden">
+      <div class="store-modal-card glass">
+        <div class="sub-panel-head">
+          <strong id="dev-fstab-title">配置 /mnt 固定挂载</strong>
+          <button type="button" class="btn small ghost" id="btn-dev-fstab-cancel">取消</button>
+        </div>
+        <p id="dev-fstab-desc" class="muted-hint">将磁盘写入 /etc/fstab，实现开机自动挂载到 /mnt 目录（自动附加 nofail 保护，防止拔盘卡死）。</p>
+        <div id="dev-fstab-name-wrap">
+          <label class="muted-hint" for="dev-fstab-name-input" style="display:block;margin-bottom:4px;">挂载目录名（位于 /mnt/ 下，仅限英文、数字、下划线或连字符）</label>
+          <input type="text" id="dev-fstab-name-input" class="modal-input" placeholder="例如: jd_ssd3000" />
+        </div>
+        <div id="dev-fstab-mode-wrap">
+          <label class="muted-hint" for="dev-fstab-mode-select" style="display:block;margin-bottom:4px;">挂载读写权限</label>
+          <select id="dev-fstab-mode-select" class="modal-input">
+            <option value="ro">只读保护模式 (ro) — 推荐 Windows 双系统盘 / 备份盘</option>
+            <option value="rw">读写模式 (rw) — 确认 Windows 已完全关机</option>
+          </select>
+        </div>
+        <div id="dev-fstab-pass-wrap" class="hidden">
+          <label class="muted-hint" for="dev-fstab-pass-input" style="display:block;margin-bottom:4px;">管理员密码（用于写入 /etc/fstab）</label>
+          <input type="password" id="dev-fstab-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
+        </div>
+        <div class="modal-footer" style="margin-top: 4px;">
+          <span class="muted-hint" id="dev-fstab-hint">密码仅用于本次 sudo 授权，不会保存</span>
+          <button type="button" class="btn primary small" id="btn-dev-fstab-confirm">确认应用</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- 5a. Standalone System Monitor & Logs Window (?mode=monitor) -->
@@ -1213,6 +1242,15 @@
           <div class="footer-actions">
             <button type="button" class="btn small danger hidden" id="btn-store-cancel" data-cmd="store:cancel">停止下载</button>
             <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+          </div>
+        </div>
+        <div id="store-progress-wrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
+          <div class="progress-header">
+            <span id="store-progress-text" class="muted-hint">准备中...</span>
+            <strong id="store-progress-pct">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="store-progress-bar" class="progress-fill" style="width: 0%"></div>
           </div>
         </div>
         <pre id="store-log-box" class="log-box"></pre>

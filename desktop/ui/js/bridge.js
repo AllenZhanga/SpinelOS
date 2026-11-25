@@ -234,6 +234,17 @@
           <stop offset="0%" stop-color="#2dd4bf"/>
           <stop offset="100%" stop-color="#0f766e"/>
         </linearGradient>`,
+      gravitymark: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#0ea5e9"/>
+          <stop offset="52%" stop-color="#4f46e5"/>
+          <stop offset="100%" stop-color="#0f172a"/>
+        </linearGradient>`,
+      glmark2: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#34d399"/>
+          <stop offset="100%" stop-color="#0284c7"/>
+        </linearGradient>`,
       discord: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="#818cf8"/>
@@ -344,6 +355,15 @@
       protonup: `
         <circle cx="32" cy="32" r="17" fill="none" stroke="rgba(255,255,255,0.72)" stroke-width="2.4" stroke-dasharray="5 3"/>
         <path d="M32 42V22m0 0-7 7m7-7 7 7" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+      gravitymark: `
+        <circle cx="32" cy="32" r="18" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+        <circle cx="32" cy="32" r="11" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-dasharray="16 6"/>
+        <circle cx="32" cy="32" r="4.5" fill="#ffffff"/>
+        <circle cx="46" cy="21" r="2.8" fill="#fbbf24"/>`,
+      glmark2: `
+        <path d="M16 41a18 18 0 1 1 32 0" fill="none" stroke="rgba(255,255,255,0.88)" stroke-width="3.4" stroke-linecap="round"/>
+        <path d="M32 34l9-10" stroke="#fde047" stroke-width="3.4" stroke-linecap="round"/>
+        <circle cx="32" cy="34" r="3.4" fill="#ffffff"/>`,
       discord: `
         <rect x="14" y="20" width="36" height="24" rx="11" fill="#ffffff"/>
         <circle cx="25.5" cy="32" r="3.2" fill="#4f46e5"/>
@@ -398,6 +418,8 @@
     if (s.includes("heroic")) return "heroic";
     if (s.includes("lutris")) return "lutris";
     if (s.includes("protonup") || s.includes("pupgui")) return "protonup";
+    if (s.includes("gravitymark")) return "gravitymark";
+    if (s.includes("glmark2")) return "glmark2";
     if (s.includes("discord")) return "discord";
     if (s.includes("obs")) return "obs";
     if (s.includes("vlc")) return "vlc";
@@ -425,8 +447,14 @@
     for (const k of lowerKeys) {
       const hit = state.desktopApps.find((a) => {
         if (!a.icon_uri) return false;
-        const hay = `${a.id} ${a.icon} ${a.name}`.toLowerCase();
-        return hay.includes(k);
+        const aid = a.id.toLowerCase();
+        const aico = String(a.icon || "").toLowerCase();
+        const aname = a.name.toLowerCase();
+        const hay = `${aid} ${aico} ${aname}`;
+        return hay.includes(k) ||
+          (aid.length >= 3 && k.includes(aid)) ||
+          (aico.length >= 3 && k.includes(aico)) ||
+          (aname.length >= 3 && k.includes(aname));
       });
       if (hit) return hit.icon_uri;
     }
@@ -465,7 +493,7 @@
       baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer", appKeys: [] });
     }
 
-    const storeFeaturedIds = ["google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl", "lutris", "protonup-qt", "discord", "com.obsproject.studio"];
+    const storeFeaturedIds = ["google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl", "lutris", "protonup-qt", "gravitymark", "discord", "com.obsproject.studio"];
     state.desktopApps.forEach((app) => {
       if (storeFeaturedIds.includes(app.id.toLowerCase())) {
         baseShortcuts.push({

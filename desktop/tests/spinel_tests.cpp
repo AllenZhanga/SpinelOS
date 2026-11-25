@@ -452,6 +452,16 @@ void test_ipc_router() {
     EXPECT(!is_valid_block_dev_path("/tmp/sda1"));
     EXPECT(is_valid_audio_node_name("alsa_output.pci-0000_01_00.1.hdmi-stereo"));
     EXPECT(!is_valid_audio_node_name("alsa_output bad\nnode"));
+    EXPECT(is_valid_mnt_leaf("jd_ssd3000"));
+    EXPECT(is_valid_mnt_leaf("nvme1n1p2"));
+    EXPECT(!is_valid_mnt_leaf("../etc"));
+    EXPECT(!is_valid_mnt_leaf("bad name"));
+    EXPECT(unescape_lsblk_value("\\xe4\\xba\\xac\\xe4\\xb8\\x9cSSD3000") == "京东SSD3000");
+    EXPECT(unescape_lsblk_value("SSD360GB\\xef\\xbc\\x88\\xe4\\xb8\\x8d\\xe5\\x86\\x8d\\xe4\\xbd\\xbf\\xe7\\x94\\xa8\\xef\\xbc\\x89") == "SSD360GB（不再使用）");
+    EXPECT(unescape_lsblk_value("My\\x20Disk") == "My Disk");
+    EXPECT(dispatch_ipc_command(&dummy, "devices:mount-ro:/dev/bad", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "devices:fstab-set\ndev=/dev/bad\nname=x\nro=1", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "devices:fstab-remove\ndev=/dev/bad", mock_actions, &reply));
     last_tab.clear();
     EXPECT(dispatch_ipc_command(&dummy, "settings:open:devices", mock_actions, &reply));
     EXPECT(last_tab == "devices");

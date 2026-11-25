@@ -75,6 +75,10 @@ if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
   sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
+  if [ -f /tmp/spinel-dev/spinel-files.svg ]; then
+    sudo install -Dm644 /tmp/spinel-dev/spinel-files.svg /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
+    sudo gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+  fi
   if [ -f /tmp/spinel-dev/org.spinelos.files.desktop ]; then
     sudo install -Dm644 /tmp/spinel-dev/org.spinelos.files.desktop /usr/share/applications/org.spinelos.files.desktop
   fi
@@ -102,7 +106,7 @@ if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, Plymouth splash, labwc/terminal config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
     flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
-    zram-generator btrfs-progs snapper reflector \
+    zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
     spice-vdagent file-roller 7zip gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-rime fcitx5-gtk
@@ -118,7 +122,7 @@ if [ "$MODE" = "full" ]; then
   fi
   sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/grub/themes/spinelos /boot/grub/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/polkit-1/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/grub/themes/spinelos /boot/grub/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
@@ -161,6 +165,8 @@ if [ "$MODE" = "full" ]; then
   fi
   sudo install -Dm644 /tmp/spinel-dev/zram-generator.conf /etc/systemd/zram-generator.conf
   sudo install -Dm644 /tmp/spinel-dev/90-spinel-backlight.rules /etc/udev/rules.d/90-spinel-backlight.rules
+  sudo install -Dm644 /tmp/spinel-dev/49-spinelos-udisks.rules /etc/polkit-1/rules.d/49-spinelos-udisks.rules
+  sudo systemctl reload-or-restart polkit.service 2>/dev/null || true
   sudo install -Dm644 /tmp/spinel-dev/75-spinel-fonts.conf /etc/fonts/conf.d/75-spinel-fonts.conf
   if [ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]; then
     sudo ln -sf /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf /etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf
@@ -179,11 +185,21 @@ fi
 UID_NUM="$(id -u)"
 export XDG_RUNTIME_DIR="/run/user/${UID_NUM}"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+unset XDG_SESSION_ID || true
+export XDG_SESSION_TYPE=wayland
 export GDK_BACKEND=wayland
 export GTK_THEME=Adwaita
 export XMODIFIERS=@im=fcitx
 export QT_IM_MODULE=fcitx
 export SDL_IM_MODULE=fcitx
+
+launch_bg() {
+  if command -v systemd-run >/dev/null 2>&1 && systemctl --user is-active default.target >/dev/null 2>&1; then
+    systemd-run --user --collect --quiet "$@" >/dev/null 2>&1 || setsid -f "$@" >/dev/null 2>&1 </dev/null || true
+  else
+    setsid -f "$@" >/dev/null 2>&1 </dev/null || true
+  fi
+}
 
 WAYLAND_SOCK="$(ls "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n1 || true)"
 if [ -z "$WAYLAND_SOCK" ]; then
@@ -222,23 +238,27 @@ if [ -n "${LABWC_PID}" ] && [ -r "/proc/${LABWC_PID}/environ" ]; then
   fi
 fi
 
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE GTK_THEME XMODIFIERS QT_IM_MODULE SDL_IM_MODULE WLR_RENDERER GSK_RENDERER WEBKIT_DISABLE_DMABUF_RENDERER WEBKIT_DISABLE_COMPOSITING_MODE LIBGL_ALWAYS_SOFTWARE 2>/dev/null || true
+fi
+
 if [ "$MODE" = "full" ]; then
   pkill -HUP -x labwc 2>/dev/null || true
   if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev/null 2>&1; then
     pkill -x spice-vdagent 2>/dev/null || true
-    setsid -f spice-vdagent >/dev/null 2>&1 </dev/null || true
+    launch_bg spice-vdagent
   fi
   if [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]; then
-    pkill -f polkit-gnome-authentication-agent-1 2>/dev/null || true
+    pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true
     sleep 0.1
-    setsid -f /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null || true
+    launch_bg sh -c 'exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1'
   fi
   if command -v swayidle >/dev/null 2>&1; then
     pkill -x swayidle 2>/dev/null || true
     if grep -qx "idle_lock=true" "$HOME/.config/spinelos/power.conf" 2>/dev/null; then
-      setsid -f swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null || true
+      launch_bg sh -c "exec swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1"
     else
-      setsid -f swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1 </dev/null || true
+      launch_bg sh -c "exec swayidle -w before-sleep 'spinel-lock' >/tmp/spinel-idle.log 2>&1"
     fi
   fi
   if command -v systemctl >/dev/null 2>&1; then
@@ -255,21 +275,21 @@ fi
 pkill -x spinel-webui 2>/dev/null || true
 pkill -x spinel-shell 2>/dev/null || true
 sleep 0.3
-setsid -f /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1 </dev/null || true
+launch_bg sh -c 'exec /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1'
 
 if command -v mako >/dev/null 2>&1; then
   pkill -x mako 2>/dev/null || true
-  setsid -f mako >/tmp/spinel-mako.log 2>&1 </dev/null || true
+  launch_bg sh -c 'exec mako >/tmp/spinel-mako.log 2>&1'
 fi
 
 if command -v wl-clip-persist >/dev/null 2>&1; then
   pkill -x wl-clip-persist 2>/dev/null || true
-  setsid -f wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1 </dev/null || true
+  launch_bg sh -c 'exec wl-clip-persist --clipboard regular >/tmp/spinel-clip.log 2>&1'
 fi
 
 if command -v fcitx5 >/dev/null 2>&1; then
   sleep 0.4
-  setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true
+  launch_bg sh -c 'exec fcitx5 >/tmp/spinel-fcitx5.log 2>&1'
 fi
 echo "Done! spinel-shell restarted on ${WAYLAND_DISPLAY}."
 EOF
@@ -286,6 +306,7 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" \
     "${DEV_HOST}:/tmp/spinel-dev/"
@@ -315,6 +336,7 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinelos.svg" \
     "${ROOT_DIR}/archiso/airootfs/etc/systemd/zram-generator.conf" \
     "${ROOT_DIR}/archiso/airootfs/etc/udev/rules.d/90-spinel-backlight.rules" \
+    "${ROOT_DIR}/archiso/airootfs/etc/polkit-1/rules.d/49-spinelos-udisks.rules" \
     "${ROOT_DIR}/archiso/airootfs/etc/fonts/conf.d/75-spinel-fonts.conf" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/start-spinel-desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-install" \

@@ -2,6 +2,8 @@
 #include "sys_internal.hpp"
 #include "common.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -27,7 +29,11 @@ struct BlockDevEntry {
     bool removable = false;
     std::string fstype;
     std::string label;
+    std::string uuid;
     std::string mountpoint;
+    bool mounted_ro = false;
+    std::string fstab_mount;
+    bool fstab_ro = false;
     bool is_system = false;
 };
 
@@ -87,6 +93,24 @@ std::string format_bytes_human(unsigned long long bytes) {
     return oss.str();
 }
 
+std::string decode_mount_octal(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 3 < s.size() &&
+            s[i + 1] >= '0' && s[i + 1] <= '7' &&
+            s[i + 2] >= '0' && s[i + 2] <= '7' &&
+            s[i + 3] >= '0' && s[i + 3] <= '7') {
+            int val = ((s[i + 1] - '0') << 6) | ((s[i + 2] - '0') << 3) | (s[i + 3] - '0');
+            out.push_back(static_cast<char>(val));
+            i += 3;
+        } else {
+            out.push_back(s[i]);
+        }
+    }
+    return out;
+}
+
 std::map<std::string, std::string> parse_lsblk_kv_line(const std::string &line) {
     std::map<std::string, std::string> out;
     size_t i = 0;
@@ -98,22 +122,73 @@ std::map<std::string, std::string> parse_lsblk_kv_line(const std::string &line) 
         if (eq == std::string::npos) break;
         std::string key = line.substr(i, eq - i);
         i = eq + 1;
-        std::string val;
+        std::string raw;
         if (i < n && line[i] == '"') {
             ++i;
             while (i < n && line[i] != '"') {
-                if (line[i] == '\\' && i + 1 < n) ++i;
-                val.push_back(line[i++]);
+                if (line[i] == '\\' && i + 1 < n) {
+                    raw.push_back(line[i++]);
+                    raw.push_back(line[i++]);
+                } else {
+                    raw.push_back(line[i++]);
+                }
             }
             if (i < n && line[i] == '"') ++i;
         } else {
             while (i < n && !std::isspace(static_cast<unsigned char>(line[i]))) {
-                val.push_back(line[i++]);
+                raw.push_back(line[i++]);
             }
         }
-        out[std::move(key)] = std::move(val);
+        out[std::move(key)] = unescape_lsblk_value(raw);
     }
     return out;
+}
+
+struct FstabEntryInfo {
+    std::string mountpoint;
+    bool read_only = false;
+};
+
+void load_fstab_map(std::map<std::string, FstabEntryInfo> &by_spec) {
+    std::ifstream ifs("/etc/fstab");
+    if (!ifs.is_open()) return;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        std::string t = trim_copy(line);
+        if (t.empty() || t[0] == '#') continue;
+        std::istringstream iss(t);
+        std::string spec, mp, fstype, opts;
+        if (!(iss >> spec >> mp >> fstype >> opts)) continue;
+        mp = decode_mount_octal(mp);
+        bool ro = false;
+        std::stringstream oss(opts);
+        std::string tok;
+        while (std::getline(oss, tok, ',')) {
+            if (tok == "ro") { ro = true; break; }
+        }
+        by_spec[spec] = {mp, ro};
+    }
+}
+
+std::set<std::string> load_ro_mountpoints() {
+    std::set<std::string> ro_mps;
+    std::ifstream ifs("/proc/mounts");
+    if (!ifs.is_open()) return ro_mps;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        std::istringstream iss(line);
+        std::string dev, mp, fstype, opts;
+        if (!(iss >> dev >> mp >> fstype >> opts)) continue;
+        std::stringstream oss(opts);
+        std::string tok;
+        while (std::getline(oss, tok, ',')) {
+            if (tok == "ro") {
+                ro_mps.insert(decode_mount_octal(mp));
+                break;
+            }
+        }
+    }
+    return ro_mps;
 }
 
 bool is_protected_mount(const std::string &mp) {
@@ -125,10 +200,14 @@ std::vector<BlockDevEntry> collect_block_devices(bool include_system = false) {
     int rc = 1;
     if (!run_argv_capture({
             "lsblk", "-P", "-b", "-o",
-            "NAME,PATH,PKNAME,SIZE,TYPE,TRAN,RM,HOTPLUG,FSTYPE,LABEL,MOUNTPOINT,MODEL"
+            "NAME,PATH,PKNAME,SIZE,TYPE,TRAN,RM,HOTPLUG,FSTYPE,LABEL,MOUNTPOINT,MODEL,UUID"
         }, out, rc) || rc != 0) {
         return {};
     }
+
+    std::map<std::string, FstabEntryInfo> fstab_map;
+    load_fstab_map(fstab_map);
+    std::set<std::string> ro_mps = load_ro_mountpoints();
 
     struct DiskMeta {
         std::string path;
@@ -182,8 +261,25 @@ std::vector<BlockDevEntry> collect_block_devices(bool include_system = false) {
         e.label = trim_copy(kv["LABEL"]);
         if (e.label.empty() && dit != disk_meta.end()) e.label = dit->second.model;
         if (e.label.empty()) e.label = e.name;
+        e.uuid = trim_copy(kv["UUID"]);
         e.mountpoint = kv["MOUNTPOINT"];
+        e.mounted_ro = !e.mountpoint.empty() && ro_mps.count(e.mountpoint) > 0;
+        if (!e.uuid.empty()) {
+            auto fit = fstab_map.find("UUID=" + e.uuid);
+            if (fit != fstab_map.end()) {
+                e.fstab_mount = fit->second.mountpoint;
+                e.fstab_ro = fit->second.read_only;
+            }
+        }
+        if (e.fstab_mount.empty()) {
+            auto fit = fstab_map.find(e.path);
+            if (fit != fstab_map.end()) {
+                e.fstab_mount = fit->second.mountpoint;
+                e.fstab_ro = fit->second.read_only;
+            }
+        }
         e.is_system = is_protected_mount(e.mountpoint) ||
+                      is_protected_mount(e.fstab_mount) ||
                       (fstype == "vfat" && !e.removable && bytes <= 1073741824ULL);
         if (!include_system && e.is_system) continue;
         res.push_back(std::move(e));
@@ -451,13 +547,94 @@ std::vector<AudioDevEntry> collect_audio_devices() {
 }
 
 void emit_devices_feedback(AppState *state, bool ok, const std::string &msg) {
+    append_app_log(std::string("[Devices] ") + (ok ? "" : "[ERR] ") + msg);
     post_js_to_main(state,
         "window.__spinelDevicesAction && window.__spinelDevicesAction(" +
             std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");",
         false);
 }
 
+bool check_devices_sudo_nopass() {
+    std::string out;
+    int rc = 1;
+    return run_argv_capture({"sudo", "-n", "true"}, out, rc) && rc == 0;
+}
+
+bool is_valid_uuid_token(const std::string &uuid) {
+    if (uuid.empty() || uuid.size() > 64) return false;
+    for (char ch : uuid) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && c != '-') return false;
+    }
+    return true;
+}
+
+std::map<std::string, std::string> parse_kv_payload(const std::string &payload) {
+    std::map<std::string, std::string> kv;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        kv[line.substr(0, eq)] = line.substr(eq + 1);
+    }
+    return kv;
+}
+
+bool run_devices_sudo_script(const std::string &script,
+                             const std::vector<std::string> &script_args,
+                             const std::string &password,
+                             std::string &out,
+                             int &rc) {
+    bool nopass = check_devices_sudo_nopass();
+    if (!nopass && password.empty()) {
+        out = "需要当前用户管理员密码（sudo）才能修改 /etc/fstab。";
+        rc = 2;
+        return false;
+    }
+    std::vector<std::string> cmd = nopass
+        ? std::vector<std::string>{"sudo", "-n", "sh", "-c", script, "_"}
+        : std::vector<std::string>{"sudo", "-S", "-p", "", "sh", "-c", script, "_"};
+    cmd.insert(cmd.end(), script_args.begin(), script_args.end());
+    return run_argv_stdin_capture(cmd, nopass ? "" : password, out, rc) && rc == 0;
+}
+
 }  // namespace
+
+std::string unescape_lsblk_value(const std::string &raw) {
+    auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::string out;
+    out.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '\\' && i + 1 < raw.size()) {
+            char next = raw[i + 1];
+            if (next == 'x' && i + 3 < raw.size()) {
+                int h1 = hex_val(raw[i + 2]);
+                int h2 = hex_val(raw[i + 3]);
+                if (h1 >= 0 && h2 >= 0) {
+                    out.push_back(static_cast<char>((h1 << 4) | h2));
+                    i += 3;
+                    continue;
+                }
+            }
+            switch (next) {
+                case 'n': out.push_back('\n'); break;
+                case 'r': out.push_back('\r'); break;
+                case 't': out.push_back('\t'); break;
+                case '\\': out.push_back('\\'); break;
+                case '"': out.push_back('"'); break;
+                default: out.push_back(next); break;
+            }
+            ++i;
+        } else {
+            out.push_back(raw[i]);
+        }
+    }
+    return out;
+}
 
 bool is_valid_block_dev_path(const std::string &path) {
     if (path.rfind("/dev/", 0) != 0 || path.size() <= 5 || path.size() > 40) return false;
@@ -466,6 +643,15 @@ bool is_valid_block_dev_path(const std::string &path) {
     for (char ch : leaf) {
         unsigned char c = static_cast<unsigned char>(ch);
         if (!std::isalnum(c) && c != '_' && c != '-') return false;
+    }
+    return true;
+}
+
+bool is_valid_mnt_leaf(const std::string &leaf) {
+    if (leaf.empty() || leaf.size() > 48 || leaf == "." || leaf == "..") return false;
+    for (char ch : leaf) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && c != '_' && c != '-' && c != '.') return false;
     }
     return true;
 }
@@ -486,9 +672,12 @@ void push_devices_state(AppState *state) {
         auto usb = collect_usb_devices();
         auto inputs = collect_input_devices();
         auto audio = collect_audio_devices();
+        bool sudo_nopass = check_devices_sudo_nopass();
 
         std::ostringstream js;
-        js << "window.__spinelDevicesData && window.__spinelDevicesData({\"disks\":[";
+        js << "window.__spinelDevicesData && window.__spinelDevicesData({"
+           << "\"sudo_nopass\":" << (sudo_nopass ? "true" : "false") << ","
+           << "\"disks\":[";
         for (size_t i = 0; i < disks.size(); ++i) {
             if (i) js << ",";
             const auto &d = disks[i];
@@ -501,7 +690,11 @@ void push_devices_state(AppState *state) {
                << "\"removable\":" << (d.removable ? "true" : "false") << ","
                << "\"fstype\":\"" << json_escape(d.fstype) << "\","
                << "\"label\":\"" << json_escape(d.label) << "\","
-               << "\"mountpoint\":\"" << json_escape(d.mountpoint) << "\""
+               << "\"uuid\":\"" << json_escape(d.uuid) << "\","
+               << "\"mountpoint\":\"" << json_escape(d.mountpoint) << "\","
+               << "\"mounted_ro\":" << (d.mounted_ro ? "true" : "false") << ","
+               << "\"fstab_mount\":\"" << json_escape(d.fstab_mount) << "\","
+               << "\"fstab_ro\":" << (d.fstab_ro ? "true" : "false")
                << "}";
         }
         js << "],\"usb\":[";
@@ -544,18 +737,79 @@ void push_devices_state(AppState *state) {
     }).detach();
 }
 
-void mount_block_device(AppState *state, const std::string &dev_path) {
+void mount_block_device(AppState *state, const std::string &dev_path, bool read_only) {
     if (!state) return;
     if (!is_valid_block_dev_path(dev_path)) {
         emit_devices_feedback(state, false, "无效的设备路径: " + dev_path);
         return;
     }
-    std::thread([state, dev_path]() {
+    append_app_log(std::string("[Devices] 请求") + (read_only ? "只读挂载: " : "挂载: ") + dev_path);
+    std::thread([state, dev_path, read_only]() {
         std::string out;
         int rc = 1;
-        bool ok = run_argv_capture({"udisksctl", "mount", "--no-user-interaction", "-b", dev_path}, out, rc) && rc == 0;
+        auto run_udisks_mount = [&](bool ro, std::string &m_out, int &m_rc) {
+            std::vector<std::string> args = {"udisksctl", "mount", "--no-user-interaction"};
+            if (ro) args.insert(args.end(), {"-o", "ro"});
+            args.insert(args.end(), {"-b", dev_path});
+            return run_argv_capture(args, m_out, m_rc) && m_rc == 0;
+        };
+
+        bool ok = run_udisks_mount(read_only, out, rc);
+        bool used_ro_fallback = false;
+
+        if (!ok && !read_only) {
+            std::string low = out;
+            for (char &ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            const bool maybe_ntfs_dirty =
+                low.find("ntfs") != std::string::npos ||
+                low.find("dirty") != std::string::npos ||
+                low.find("hibernat") != std::string::npos ||
+                low.find("windows") != std::string::npos ||
+                low.find("unsafe") != std::string::npos ||
+                low.find("read-only") != std::string::npos ||
+                low.find("wrong fs type") != std::string::npos ||
+                low.find("superblock") != std::string::npos ||
+                low.find("mount exited") != std::string::npos ||
+                low.find("cannot mount") != std::string::npos ||
+                low.find("metadata") != std::string::npos;
+            if (maybe_ntfs_dirty) {
+                std::string ro_out;
+                int ro_rc = 1;
+                if (run_udisks_mount(true, ro_out, ro_rc)) {
+                    ok = true;
+                    used_ro_fallback = true;
+                    out = ro_out;
+                }
+            }
+        }
+
         std::string msg = trim_copy(out);
-        emit_devices_feedback(state, ok, ok ? (msg.empty() ? ("已挂载 " + dev_path) : msg) : ("挂载失败: " + (msg.empty() ? dev_path : msg)));
+        if (ok) {
+            if (used_ro_fallback) {
+                emit_devices_feedback(state, true,
+                    (msg.empty() ? ("已挂载 " + dev_path) : msg) +
+                    "（检测到 Windows 休眠或脏标志，已自动切换为【只读安全模式】以保护数据）");
+            } else if (read_only) {
+                emit_devices_feedback(state, true,
+                    (msg.empty() ? ("已只读挂载 " + dev_path) : msg) + "（只读模式）");
+            } else {
+                emit_devices_feedback(state, true, msg.empty() ? ("已挂载 " + dev_path) : msg);
+            }
+        } else {
+            std::string low = msg;
+            for (char &ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (low.find("not authorized") != std::string::npos ||
+                low.find("authentication agent") != std::string::npos) {
+                emit_devices_feedback(state, false,
+                    "挂载未获系统权限放行（" + msg + "）：请在「系统设置 → 权限与安全」启用认证代理，或更新系统规则 (--full)；也可在终端运行 sudo mount -o ro " + dev_path + " /mnt/win_data 抢救数据。");
+            } else if (low.find("bitlocker") != std::string::npos) {
+                emit_devices_feedback(state, false,
+                    "挂载失败：该分区可能已启用 Windows BitLocker 加密，需先在 Windows 或使用恢复密钥解锁。");
+            } else {
+                emit_devices_feedback(state, false,
+                    "挂载失败: " + (msg.empty() ? dev_path : msg) + "（如为重要 Windows 盘，可尝试「只读挂载」或在终端执行 sudo mount -o ro " + dev_path + " /mnt/win_data）");
+            }
+        }
         push_devices_state(state);
     }).detach();
 }
@@ -566,10 +820,19 @@ void unmount_block_device(AppState *state, const std::string &dev_path) {
         emit_devices_feedback(state, false, "无效的设备路径: " + dev_path);
         return;
     }
+    append_app_log("[Devices] 请求卸载分区: " + dev_path);
     std::thread([state, dev_path]() {
         std::string out;
         int rc = 1;
         bool ok = run_argv_capture({"udisksctl", "unmount", "--no-user-interaction", "-b", dev_path}, out, rc) && rc == 0;
+        if (!ok && check_devices_sudo_nopass()) {
+            std::string s_out;
+            int s_rc = 1;
+            if (run_argv_capture({"sudo", "-n", "umount", dev_path}, s_out, s_rc) && s_rc == 0) {
+                ok = true;
+                out.clear();
+            }
+        }
         std::string msg = trim_copy(out);
         emit_devices_feedback(state, ok, ok ? ("已安全卸载 " + dev_path) : ("卸载失败: " + (msg.empty() ? dev_path : msg)));
         push_devices_state(state);
@@ -582,6 +845,7 @@ void eject_block_device(AppState *state, const std::string &disk_path) {
         emit_devices_feedback(state, false, "无效的磁盘路径: " + disk_path);
         return;
     }
+    append_app_log("[Devices] 请求安全断电弹出磁盘: " + disk_path);
     std::thread([state, disk_path]() {
         auto devs = collect_block_devices(true);
         std::string out;
@@ -613,7 +877,183 @@ void open_mount_folder(AppState *state, const std::string &mount_path) {
         emit_devices_feedback(state, false, "挂载目录不可访问: " + mount_path);
         return;
     }
+    append_app_log("[Devices] 打开挂载目录: " + mount_path);
     spawn_argv_detached({"spinel-files", mount_path});
+}
+
+void set_block_fstab_mount(AppState *state, const std::string &payload) {
+    if (!state) return;
+    auto kv = parse_kv_payload(payload);
+    std::string dev_path = trim_copy(kv["dev"]);
+    std::string mnt_leaf = trim_copy(kv["name"]);
+    bool want_ro = (trim_copy(kv["ro"]) != "0");
+    std::string password = kv["password"];
+
+    if (!is_valid_block_dev_path(dev_path)) {
+        emit_devices_feedback(state, false, "无效的设备路径: " + dev_path);
+        return;
+    }
+    if (!is_valid_mnt_leaf(mnt_leaf)) {
+        emit_devices_feedback(state, false, "无效的 /mnt 目录名: " + mnt_leaf);
+        return;
+    }
+
+    append_app_log("[Devices] 请求设置 /etc/fstab 开机自动挂载: " + dev_path + " -> /mnt/" + mnt_leaf + (want_ro ? " (ro)" : " (rw)"));
+    std::thread([state, dev_path, mnt_leaf, want_ro, password]() {
+        auto devs = collect_block_devices(true);
+        const BlockDevEntry *found = nullptr;
+        for (const auto &d : devs) {
+            if (d.path == dev_path) { found = &d; break; }
+        }
+        if (!found) {
+            emit_devices_feedback(state, false, "未找到设备: " + dev_path);
+            return;
+        }
+        if (found->is_system) {
+            emit_devices_feedback(state, false, "系统关键分区不允许修改 fstab: " + dev_path);
+            return;
+        }
+        if (!is_valid_uuid_token(found->uuid)) {
+            emit_devices_feedback(state, false, "无法读取分区 UUID，请先格式化后再配置固定挂载: " + dev_path);
+            return;
+        }
+
+        std::string raw_fs = found->fstype;
+        std::string fstab_fs;
+        std::string opts_rw;
+        std::string opts_ro;
+        std::string uid_s = std::to_string(static_cast<unsigned long>(::getuid()));
+        std::string gid_s = std::to_string(static_cast<unsigned long>(::getgid()));
+
+        if (raw_fs == "ntfs") {
+            fstab_fs = "ntfs3";
+            opts_rw = "rw,uid=" + uid_s + ",gid=" + gid_s + ",dmask=022,fmask=133,nofail,x-systemd.device-timeout=5";
+            opts_ro = "ro,uid=" + uid_s + ",gid=" + gid_s + ",dmask=022,fmask=133,nofail,x-systemd.device-timeout=5";
+        } else if (raw_fs == "exfat" || raw_fs == "vfat") {
+            fstab_fs = raw_fs;
+            opts_rw = "rw,uid=" + uid_s + ",gid=" + gid_s + ",dmask=022,fmask=133,nofail,x-systemd.device-timeout=5";
+            opts_ro = "ro,uid=" + uid_s + ",gid=" + gid_s + ",dmask=022,fmask=133,nofail,x-systemd.device-timeout=5";
+        } else if (raw_fs == "ext4" || raw_fs == "ext3" || raw_fs == "ext2" ||
+                   raw_fs == "btrfs" || raw_fs == "xfs" || raw_fs == "f2fs") {
+            fstab_fs = raw_fs;
+            opts_rw = "defaults,nofail,x-systemd.device-timeout=5";
+            opts_ro = "defaults,ro,nofail,x-systemd.device-timeout=5";
+        } else {
+            emit_devices_feedback(state, false, "暂不支持将该文件系统写入 /etc/fstab: " + raw_fs);
+            return;
+        }
+
+        const std::string target = "/mnt/" + mnt_leaf;
+        const std::string script =
+            "set -eu; "
+            "DEV=\"$1\"; UUID=\"$2\"; TGT=\"$3\"; FST=\"$4\"; OPTS_RW=\"$5\"; OPTS_RO=\"$6\"; WANT_RO=\"$7\"; "
+            "[ -f /etc/fstab.spinelos.bak ] || cp -a /etc/fstab /etc/fstab.spinelos.bak; "
+            "write_fstab() { "
+            "  _opts=\"$1\"; "
+            "  _tmp=$(mktemp /tmp/spinel-fstab-XXXXXX); "
+            "  awk -v u=\"UUID=$UUID\" -v d=\"$DEV\" -v t=\"$TGT\" -v c=\"# SpinelOS auto-mount: $DEV\" '"
+            "    $0 == c { next } "
+            "    $0 ~ /^[[:space:]]*(#|$)/ { print; next } "
+            "    $1 == u || $1 == d || $2 == t { next } "
+            "    { print } "
+            "  ' /etc/fstab > \"$_tmp\"; "
+            "  printf '\\n# SpinelOS auto-mount: %s\\nUUID=%s\\t%s\\t%s\\t%s\\t0\\t0\\n' \"$DEV\" \"$UUID\" \"$TGT\" \"$FST\" \"$_opts\" >> \"$_tmp\"; "
+            "  chmod 644 \"$_tmp\"; "
+            "  mv \"$_tmp\" /etc/fstab; "
+            "}; "
+            "CUR=$(findmnt -n -o TARGET --source \"$DEV\" 2>/dev/null | head -n1 || true); "
+            "if [ -n \"$CUR\" ]; then umount \"$CUR\" || umount \"$DEV\"; fi; "
+            "mkdir -p \"$TGT\"; "
+            "if [ \"$WANT_RO\" = \"1\" ]; then "
+            "  write_fstab \"$OPTS_RO\"; "
+            "  systemctl daemon-reload >/dev/null 2>&1 || true; "
+            "  mount \"$TGT\"; "
+            "else "
+            "  write_fstab \"$OPTS_RW\"; "
+            "  systemctl daemon-reload >/dev/null 2>&1 || true; "
+            "  if ! mount \"$TGT\" 2>/tmp/spinel-fstab-mount.err; then "
+            "    if [ \"$FST\" = \"ntfs3\" ] && mount -t \"$FST\" -o \"$OPTS_RO\" \"UUID=$UUID\" \"$TGT\" >/dev/null 2>&1; then "
+            "      umount \"$TGT\" 2>/dev/null || true; "
+            "      write_fstab \"$OPTS_RO\"; "
+            "      systemctl daemon-reload >/dev/null 2>&1 || true; "
+            "      mount \"$TGT\"; "
+            "      echo '__SPINEL_RO_FALLBACK__'; "
+            "    else "
+            "      cat /tmp/spinel-fstab-mount.err >&2 || true; "
+            "      exit 1; "
+            "    fi; "
+            "  fi; "
+            "fi";
+
+        std::string out;
+        int rc = 1;
+        bool ok = run_devices_sudo_script(
+            script,
+            {dev_path, found->uuid, target, fstab_fs, opts_rw, opts_ro, want_ro ? "1" : "0"},
+            password, out, rc);
+
+        if (ok) {
+            bool ro_fb = (out.find("__SPINEL_RO_FALLBACK__") != std::string::npos);
+            if (ro_fb) {
+                emit_devices_feedback(state, true,
+                    "已固定并开机自动挂载到 " + target + "（检测到 Windows 休眠/脏标志，已自动设为只读保护模式）");
+            } else {
+                emit_devices_feedback(state, true,
+                    "已固定挂载并写入 /etc/fstab: " + target + (want_ro ? "（只读模式，含 nofail 保护）" : "（读写模式，含 nofail 保护）"));
+            }
+        } else {
+            emit_devices_feedback(state, false, "配置固定挂载失败: " + trim_copy(out));
+        }
+        push_devices_state(state);
+    }).detach();
+}
+
+void remove_block_fstab_mount(AppState *state, const std::string &payload) {
+    if (!state) return;
+    auto kv = parse_kv_payload(payload);
+    std::string dev_path = trim_copy(kv["dev"]);
+    std::string password = kv["password"];
+
+    if (!is_valid_block_dev_path(dev_path)) {
+        emit_devices_feedback(state, false, "无效的设备路径: " + dev_path);
+        return;
+    }
+
+    append_app_log("[Devices] 请求移除 /etc/fstab 开机自动挂载: " + dev_path);
+    std::thread([state, dev_path, password]() {
+        auto devs = collect_block_devices(true);
+        std::string uuid;
+        std::string old_mp;
+        for (const auto &d : devs) {
+            if (d.path == dev_path) {
+                uuid = d.uuid;
+                old_mp = d.fstab_mount;
+                break;
+            }
+        }
+        const std::string script =
+            "set -eu; "
+            "DEV=\"$1\"; UUID=\"$2\"; OLD_MP=\"$3\"; "
+            "TMP=$(mktemp /tmp/spinel-fstab-XXXXXX); "
+            "awk -v u=\"UUID=$UUID\" -v d=\"$DEV\" -v has_u=\"${UUID:+1}\" -v c=\"# SpinelOS auto-mount: $DEV\" '"
+            "  $0 == c { next } "
+            "  $0 ~ /^[[:space:]]*(#|$)/ { print; next } "
+            "  (has_u == \"1\" && $1 == u) || $1 == d { next } "
+            "  { print } "
+            "' /etc/fstab > \"$TMP\"; "
+            "chmod 644 \"$TMP\"; "
+            "mv \"$TMP\" /etc/fstab; "
+            "if [ -n \"$OLD_MP\" ] && mountpoint -q \"$OLD_MP\" 2>/dev/null; then umount \"$OLD_MP\" || true; fi; "
+            "if [ -n \"$OLD_MP\" ] && [ -d \"$OLD_MP\" ]; then rmdir \"$OLD_MP\" 2>/dev/null || true; fi; "
+            "systemctl daemon-reload >/dev/null 2>&1 || true";
+
+        std::string out;
+        int rc = 1;
+        bool ok = run_devices_sudo_script(script, {dev_path, uuid, old_mp}, password, out, rc);
+        emit_devices_feedback(state, ok,
+            ok ? ("已取消 " + dev_path + " 的开机自动挂载配置") : ("移除开机挂载失败: " + trim_copy(out)));
+        push_devices_state(state);
+    }).detach();
 }
 
 void disable_audio_device(AppState *state, const std::string &payload) {

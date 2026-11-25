@@ -685,7 +685,10 @@ bool dispatch_ipc_command(AppState *state,
             if (a.open_monitor) a.open_monitor(s, tab == "logs" ? "logs" : "procs");
         }},
         {"devices:mount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
-            mount_block_device(s, arg_or_param(r, "devices:mount:", {"dev", "path"}));
+            mount_block_device(s, arg_or_param(r, "devices:mount:", {"dev", "path"}), false);
+        }},
+        {"devices:mount-ro:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            mount_block_device(s, arg_or_param(r, "devices:mount-ro:", {"dev", "path"}), true);
         }},
         {"devices:unmount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             unmount_block_device(s, arg_or_param(r, "devices:unmount:", {"dev", "path"}));
@@ -695,6 +698,12 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"devices:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             open_mount_folder(s, arg_or_param(r, "devices:open:", {"path"}));
+        }},
+        {"devices:fstab-set", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            set_block_fstab_mount(s, r.legacy_raw);
+        }},
+        {"devices:fstab-remove", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            remove_block_fstab_mount(s, r.legacy_raw);
         }},
         {"devices:audio-enable:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             enable_audio_device(s, arg_or_param(r, "devices:audio-enable:", {"node", "name"}));

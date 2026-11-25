@@ -34,7 +34,8 @@ bool contains_ci(const std::string &hay, const std::string &needle) {
 std::string match_app_kind(const std::string &s) {
     std::string l = to_lower_copy(s);
     if (l.find("steam") != std::string::npos) return "steam";
-    if (l.find("gamescope") != std::string::npos) return "gamepad";
+    if (l.find("gamescope") != std::string::npos || l.find("gravitymark") != std::string::npos ||
+        l.find("glmark2") != std::string::npos) return "gamepad";
     if (l.find("chromium") != std::string::npos || l.find("chrome") != std::string::npos ||
         l.find("firefox") != std::string::npos) return "browser";
     if (l.find("spinel-files") != std::string::npos || l.find("org.spinelos.files") != std::string::npos ||
@@ -52,19 +53,30 @@ std::string match_app_kind(const std::string &s) {
 std::string find_app_icon_path(const std::vector<DesktopAppInfo> &apps,
                                const std::vector<std::string> &keys) {
     for (const auto &k : keys) {
-        std::string lk = to_lower_copy(k);
-        if (lk.empty()) continue;
-        for (const auto &a : apps) {
-            if (!a.icon_path.empty() && to_lower_copy(a.id) == lk) return a.icon_path;
-        }
-    }
-    for (const auto &k : keys) {
-        std::string lk = to_lower_copy(k);
+        std::string lk = to_lower_copy(trim_copy(k));
         if (lk.empty()) continue;
         for (const auto &a : apps) {
             if (a.icon_path.empty()) continue;
-            std::string hay = to_lower_copy(a.id + " " + a.icon_name + " " + a.name);
-            if (hay.find(lk) != std::string::npos) return a.icon_path;
+            if (to_lower_copy(a.id) == lk || to_lower_copy(a.icon_name) == lk || to_lower_copy(a.name) == lk) {
+                return a.icon_path;
+            }
+        }
+    }
+    for (const auto &k : keys) {
+        std::string lk = to_lower_copy(trim_copy(k));
+        if (lk.size() < 2) continue;
+        for (const auto &a : apps) {
+            if (a.icon_path.empty()) continue;
+            std::string lid = to_lower_copy(a.id);
+            std::string licon = to_lower_copy(a.icon_name);
+            std::string lname = to_lower_copy(a.name);
+            std::string hay = lid + " " + licon + " " + lname;
+            if (hay.find(lk) != std::string::npos ||
+                (lid.size() >= 3 && lk.find(lid) != std::string::npos) ||
+                (licon.size() >= 3 && lk.find(licon) != std::string::npos) ||
+                (lname.size() >= 3 && lk.find(lname) != std::string::npos)) {
+                return a.icon_path;
+            }
         }
     }
     return "";
@@ -836,6 +848,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     shell_internal::build_native_dock(app, ns);
     shell_internal::build_native_control_center(app, ns);
     shell_internal::build_native_launcher(app, ns);
+    shell_internal::build_native_switcher(app, ns);
     shell_internal::build_osd_window(app, ns);
     shell_internal::sync_monitor_wallpapers(app, ns);
     if (GdkDisplay *disp = gdk_display_get_default()) {
@@ -895,6 +908,17 @@ void native_shell_sync_telemetry(AppState *state) {
     NativeShellState *ns = state->native;
     bool prev_live = ns->telemetry.is_live;
     ns->telemetry = collect_telemetry();
+
+    static int app_refresh_tick = 0;
+    if (++app_refresh_tick >= 5) {
+        app_refresh_tick = 0;
+        auto fresh = list_desktop_apps();
+        if (fresh.size() != ns->desktop_apps.size()) {
+            ns->desktop_apps = std::move(fresh);
+            shell_internal::rebuild_desktop_shortcuts(ns);
+            shell_internal::rebuild_dock_items(ns, list_tracked_windows());
+        }
+    }
 
     if (ns->bar_mem_lbl) {
         std::string m = ns->telemetry.mem_used_mb > 0

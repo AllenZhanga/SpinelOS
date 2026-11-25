@@ -1001,7 +1001,7 @@ void restart_polkit_agent(AppState *state) {
         }
         return;
     }
-    spawn_argv_detached({"sh", "-c", "pkill -f polkit-gnome-authentication-agent-1 2>/dev/null || true; sleep 0.1; setsid -f /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null"});
+    spawn_argv_detached({"sh", "-c", "pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true; sleep 0.1; setsid -f /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null"});
     append_app_log("[Perms] 已启动 Polkit 管理员授权弹窗代理");
     if (state) {
         std::thread([state]() {

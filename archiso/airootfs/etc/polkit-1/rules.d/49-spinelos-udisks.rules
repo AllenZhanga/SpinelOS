@@ -1,0 +1,12 @@
+/* Allow wheel/gamer administrators to mount/unmount internal (e.g. Windows NVMe/SATA)
+ * and removable storage via udisks2 even when spawned from systemd --user or SSH
+ * dev-deploy sessions where no textual authentication agent is attached. */
+polkit.addRule(function(action, subject) {
+    if ((action.id === "org.freedesktop.udisks2.filesystem-mount" ||
+         action.id === "org.freedesktop.udisks2.filesystem-mount-system" ||
+         action.id === "org.freedesktop.udisks2.filesystem-unmount-others" ||
+         action.id === "org.freedesktop.udisks2.power-off-drive") &&
+        (subject.isInGroup("wheel") || subject.user === "gamer")) {
+        return polkit.Result.YES;
+    }
+});

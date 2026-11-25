@@ -215,7 +215,7 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
 
     static const char *kFeaturedStoreIds[] = {
         "google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl",
-        "lutris", "protonup-qt", "discord", "com.obsproject.studio"
+        "lutris", "protonup-qt", "gravitymark", "discord", "com.obsproject.studio"
     };
     for (const auto &app : ns->desktop_apps) {
         std::string lid = to_lower_copy(app.id);
@@ -335,6 +335,7 @@ void sync_monitor_wallpapers(GtkApplication *app, NativeShellState *ns) {
             ns->desktop_win, ns->bar_win, ns->dock_win,
             ns->cc_backdrop_win, ns->cc_win,
             ns->launcher_backdrop_win, ns->launcher_win,
+            ns->switcher_backdrop_win, ns->switcher_win,
             ns->osd_win
         };
         for (GtkWindow *w : shell_wins) {

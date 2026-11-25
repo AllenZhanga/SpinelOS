@@ -923,10 +923,100 @@
   window.__spinelDisplayAction = (ok, msg) => showFeedback("display-feedback", msg || (ok ? "已应用显示设置" : "应用失败"), !ok);
 
   /* ---------------- Device Manager ---------------- */
+  let pendingFstabOp = null;
+  let devicesSudoNopass = false;
+
+  function suggestMntFolderName(d) {
+    const ascii = String(d.label || "")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 28);
+    if (ascii.length >= 3) return ascii.toLowerCase();
+    return String(d.name || "disk").replace(/[^A-Za-z0-9._-]+/g, "_");
+  }
+
+  function closeFstabModal() {
+    pendingFstabOp = null;
+    document.getElementById("dev-fstab-modal")?.classList.add("hidden");
+  }
+
+  function openFstabModal(mode, d) {
+    pendingFstabOp = { mode, dev: d.path, label: d.label || d.name };
+    const modal = document.getElementById("dev-fstab-modal");
+    const title = document.getElementById("dev-fstab-title");
+    const desc = document.getElementById("dev-fstab-desc");
+    const nameWrap = document.getElementById("dev-fstab-name-wrap");
+    const modeWrap = document.getElementById("dev-fstab-mode-wrap");
+    const passWrap = document.getElementById("dev-fstab-pass-wrap");
+    const nameInput = document.getElementById("dev-fstab-name-input");
+    const modeSelect = document.getElementById("dev-fstab-mode-select");
+    const passInput = document.getElementById("dev-fstab-pass-input");
+    const confirmBtn = document.getElementById("btn-dev-fstab-confirm");
+
+    const isRemove = mode === "remove";
+    if (title) title.textContent = isRemove ? `取消开机挂载: ${d.label || d.name}` : `固定挂载到 /mnt: ${d.label || d.name}`;
+    if (desc) {
+      desc.textContent = isRemove
+        ? `将从 /etc/fstab 中移除 ${d.path} (${d.fstab_mount}) 的开机自动挂载配置，不会删除磁盘数据。`
+        : `将 ${d.path} 写入 /etc/fstab，实现每次开机自动挂载到 /mnt 目录（自动附加 nofail 保护，防止拔盘卡死）。`;
+    }
+    nameWrap?.classList.toggle("hidden", isRemove);
+    modeWrap?.classList.toggle("hidden", isRemove);
+    passWrap?.classList.toggle("hidden", devicesSudoNopass);
+    if (confirmBtn) confirmBtn.textContent = isRemove ? "确认移除" : "确认应用";
+    if (nameInput && !isRemove) nameInput.value = suggestMntFolderName(d);
+    if (modeSelect && !isRemove) modeSelect.value = (d.fstype === "ntfs" ? "ro" : "rw");
+    if (passInput) passInput.value = "";
+    modal?.classList.remove("hidden");
+    if (!isRemove) nameInput?.focus();
+    else passInput?.focus();
+  }
+
+  function submitFstabModal() {
+    if (!pendingFstabOp) return;
+    const pass = document.getElementById("dev-fstab-pass-input")?.value || "";
+    if (!devicesSudoNopass && !pass) {
+      document.getElementById("dev-fstab-pass-input")?.focus();
+      return;
+    }
+    if (pendingFstabOp.mode === "remove") {
+      sendCommand([
+        "devices:fstab-remove",
+        `dev=${pendingFstabOp.dev}`,
+        `password=${pass}`
+      ].join("\n"));
+    } else {
+      const name = (document.getElementById("dev-fstab-name-input")?.value || "").trim();
+      const modeVal = document.getElementById("dev-fstab-mode-select")?.value || "ro";
+      if (!/^[A-Za-z0-9._-]{1,48}$/.test(name) || name === "." || name === "..") {
+        showFeedback("devices-feedback", "挂载目录名仅支持 1~48 位英文、数字、下划线、点或连字符。", true);
+        return;
+      }
+      sendCommand([
+        "devices:fstab-set",
+        `dev=${pendingFstabOp.dev}`,
+        `name=${name}`,
+        `ro=${modeVal === "ro" ? "1" : "0"}`,
+        `password=${pass}`
+      ].join("\n"));
+    }
+    closeFstabModal();
+  }
+
+  document.getElementById("btn-dev-fstab-cancel")?.addEventListener("click", closeFstabModal);
+  document.getElementById("btn-dev-fstab-confirm")?.addEventListener("click", submitFstabModal);
+  document.getElementById("dev-fstab-modal")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "dev-fstab-modal") closeFstabModal();
+  });
+  document.getElementById("dev-fstab-pass-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); submitFstabModal(); }
+  });
+
   window.__spinelDevicesAction = (ok, msg) => showFeedback("devices-feedback", msg || (ok ? "外设操作完成" : "外设操作失败"), !ok);
 
   window.__spinelDevicesData = (data) => {
     if (!data) return;
+    devicesSudoNopass = Boolean(data.sudo_nopass);
     const disks = Array.isArray(data.disks) ? data.disks : [];
     const usb = Array.isArray(data.usb) ? data.usb : [];
     const inputs = Array.isArray(data.inputs) ? data.inputs : [];
@@ -951,10 +1041,11 @@
           title.className = "disk-title";
           title.textContent = `${d.label || d.name} (${d.path})`;
           const busLabel = d.removable ? "USB/外置" : (d.tran ? d.tran.toUpperCase() : "扩展磁盘");
-          const mountDesc = d.mountpoint ? `已挂载: ${d.mountpoint}` : "未挂载";
+          const mountDesc = d.mountpoint ? `已挂载: ${d.mountpoint}${d.mounted_ro ? " (只读)" : ""}` : "未挂载";
+          const fstabDesc = d.fstab_mount ? ` · 开机自动挂载: ${d.fstab_mount} (${d.fstab_ro ? "只读" : "读写"})` : "";
           const sub = document.createElement("div");
           sub.className = "disk-sub";
-          sub.textContent = `${busLabel} · ${d.size || "-"} · ${d.fstype || "-"} · ${mountDesc}`;
+          sub.textContent = `${busLabel} · ${d.size || "-"} · ${d.fstype || "-"} · ${mountDesc}${fstabDesc}`;
           left.append(title, sub);
 
           const actions = document.createElement("div");
@@ -977,7 +1068,30 @@
             mountBtn.className = "btn small primary";
             mountBtn.textContent = "挂载使用";
             mountBtn.setAttribute("data-cmd", `devices:mount:${d.path}`);
-            actions.appendChild(mountBtn);
+            const roBtn = document.createElement("button");
+            roBtn.type = "button";
+            roBtn.className = "btn small";
+            roBtn.textContent = "只读挂载";
+            roBtn.title = "仅读取数据（适合 Windows 休眠/快速启动盘或重要资料备份）";
+            roBtn.setAttribute("data-cmd", `devices:mount-ro:${d.path}`);
+            actions.append(mountBtn, roBtn);
+          }
+          if (d.uuid && d.fstype && d.fstype !== "未格式化") {
+            const fstabBtn = document.createElement("button");
+            fstabBtn.type = "button";
+            fstabBtn.className = d.fstab_mount ? "btn small" : "btn small";
+            fstabBtn.textContent = d.fstab_mount ? "取消开机挂载" : "固定到 /mnt";
+            fstabBtn.title = d.fstab_mount
+              ? "从 /etc/fstab 移除开机自动挂载"
+              : "写入 /etc/fstab，每次开机自动挂载到 /mnt 目录";
+            fstabBtn.addEventListener("click", () => {
+              if (d.fstab_mount && devicesSudoNopass) {
+                sendCommand(`devices:fstab-remove\ndev=${d.path}\npassword=`);
+              } else {
+                openFstabModal(d.fstab_mount ? "remove" : "set", d);
+              }
+            });
+            actions.appendChild(fstabBtn);
           }
           if (d.removable && d.parent_disk) {
             const ejectBtn = document.createElement("button");

@@ -142,26 +142,37 @@ std::string run_cmd_capture(const char *cmd) {
     return result;
 }
 
-bool run_argv_capture(const std::vector<std::string> &args, std::string &out, int &exit_code) {
+bool run_argv_stdin_capture(const std::vector<std::string> &args,
+                            const std::string &stdin_data,
+                            std::string &out,
+                            int &exit_code) {
     out.clear();
     exit_code = -1;
     if (args.empty()) return false;
 
-    int pipefd[2]{-1, -1};
-    if (pipe(pipefd) != 0) return false;
+    int in_pipe[2]{-1, -1};
+    int out_pipe[2]{-1, -1};
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0) {
+        if (in_pipe[0] >= 0) { close(in_pipe[0]); close(in_pipe[1]); }
+        if (out_pipe[0] >= 0) { close(out_pipe[0]); close(out_pipe[1]); }
+        return false;
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
         return false;
     }
 
     if (pid == 0) {
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[0]);
-        close(pipefd[1]);
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(out_pipe[1], STDERR_FILENO);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
 
         std::vector<char *> argv;
         argv.reserve(args.size() + 1);
@@ -172,13 +183,25 @@ bool run_argv_capture(const std::vector<std::string> &args, std::string &out, in
         _exit(127);
     }
 
-    close(pipefd[1]);
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    if (!stdin_data.empty()) {
+        std::string payload = stdin_data + "\n";
+        size_t written = 0;
+        while (written < payload.size()) {
+            ssize_t n = write(in_pipe[1], payload.data() + written, payload.size() - written);
+            if (n <= 0) break;
+            written += static_cast<size_t>(n);
+        }
+    }
+    close(in_pipe[1]);
+
     std::array<char, 512> buf{};
     ssize_t n = 0;
-    while ((n = read(pipefd[0], buf.data(), buf.size())) > 0) {
+    while ((n = read(out_pipe[0], buf.data(), buf.size())) > 0) {
         out.append(buf.data(), static_cast<size_t>(n));
     }
-    close(pipefd[0]);
+    close(out_pipe[0]);
 
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) return false;
@@ -187,6 +210,10 @@ bool run_argv_capture(const std::vector<std::string> &args, std::string &out, in
         out.pop_back();
     }
     return true;
+}
+
+bool run_argv_capture(const std::vector<std::string> &args, std::string &out, int &exit_code) {
+    return run_argv_stdin_capture(args, "", out, exit_code);
 }
 
 bool has_executable(const std::string &cmd) {

@@ -398,6 +398,20 @@
     });
   }
 
+  function setStoreProgress(visible, pct = 0, label = "") {
+    const wrap = document.getElementById("store-progress-wrap");
+    const bar = document.getElementById("store-progress-bar");
+    const pctEl = document.getElementById("store-progress-pct");
+    const textEl = document.getElementById("store-progress-text");
+    if (!wrap) return;
+    wrap.classList.toggle("hidden", !visible);
+    if (!visible) return;
+    const clamped = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    if (bar) bar.style.width = `${clamped}%`;
+    if (pctEl) pctEl.textContent = `${clamped}%`;
+    if (textEl && label) textEl.textContent = label;
+  }
+
   function executeStoreOp(action, op, password = "") {
     const logWrap = document.getElementById("store-log-wrap");
     const logBox = document.getElementById("store-log-box");
@@ -406,6 +420,7 @@
     if (logBox) logBox.textContent = "";
     const verbMap = { install: "正在下载安装", remove: "正在卸载", "sys-update": "正在执行", "mirror-test": "正在执行", "keyring-fix": "正在执行" };
     if (logTitle) logTitle.textContent = `${verbMap[action] || "正在执行"}: ${op.name || op.pkg}`;
+    setStoreProgress(action === "install" || action === "sys-update", 2, `${verbMap[action] || "正在执行"} ${op.name || op.pkg}...`);
     state.storeState.busy = true;
     state.storeState.active_id = op.id || op.pkg || "";
     state.storeState.active_action = action;
@@ -487,6 +502,10 @@
     }
   };
 
+  window.__spinelStoreProgress = (pct, label) => {
+    setStoreProgress(true, pct, label);
+  };
+
   window.__spinelStoreLog = (line) => {
     const logWrap = document.getElementById("store-log-wrap");
     const logBox = document.getElementById("store-log-box");
@@ -502,6 +521,15 @@
     state.storeState.active_id = "";
     state.storeState.active_action = "";
     const logTitle = document.getElementById("store-log-title");
+    if (ok && action === "install") {
+      setStoreProgress(true, 100, `安装完成: ${targetId}`);
+    } else if (action === "cancel") {
+      setStoreProgress(false);
+    } else if (!ok) {
+      setStoreProgress(false);
+    } else {
+      setStoreProgress(true, 100, `操作完成: ${targetId}`);
+    }
     if (logTitle) {
       if (action === "cancel") {
         logTitle.textContent = `已终止下载: ${targetId}`;

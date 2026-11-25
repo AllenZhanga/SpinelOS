@@ -51,6 +51,10 @@ constexpr StoreAppEntry kCatalog[] = {
      "统一管理独立游戏、Wine 环境与主机模拟器", "lutris", "Pacman 原生"},
     {"protonup", "ProtonUp-Qt", "游戏工具", "native", "protonup-qt",
      "图形化下载并管理 Steam Proton-GE / Wine-GE（宿主机原生版）", "protonup-qt", "原生安装"},
+    {"gravitymark", "GravityMark GPU", "游戏工具", "native", "gravitymark",
+     "跨平台 GPU 显卡基准与压力测试（支持 Vulkan / 光追跑分出分）", "gravitymark", "原生安装"},
+    {"glmark2", "glmark2 基准测试", "游戏工具", "pacman", "glmark2",
+     "开源轻量 OpenGL / Wayland 显卡跑分工具，官方源极速直装", "glmark2", "Pacman 原生"},
     {"discord", "Discord", "社交语音", "pacman", "discord",
      "玩家组队语音开黑与游戏社区聊天客户端", "discord", "Pacman 原生"},
     {"obs", "OBS Studio", "直播录屏", "pacman", "obs-studio",
@@ -103,6 +107,10 @@ bool is_native_app_installed(const std::string &app_id) {
         return has_executable("protonup-qt") ||
                fs::exists("/opt/protonup-qt/AppRun", ec);
     }
+    if (app_id == "gravitymark") {
+        return has_executable("gravitymark") ||
+               fs::exists("/opt/gravitymark/run_browser.sh", ec);
+    }
     return false;
 }
 
@@ -126,10 +134,12 @@ bool check_sudo_nopasswd() {
     return run_argv_capture({"sudo", "-n", "true"}, out, rc) && rc == 0;
 }
 
+enum class StoreIdleKind { Line, Progress, Done };
+
 struct StoreIdleMsg {
     AppState *state;
+    StoreIdleKind kind = StoreIdleKind::Line;
     std::string line;
-    bool is_done = false;
     int exit_code = 0;
     std::string target_id;
     std::string action;
@@ -139,7 +149,7 @@ gboolean on_store_idle(gpointer data) {
     std::unique_ptr<StoreIdleMsg> msg(static_cast<StoreIdleMsg *>(data));
     if (msg->state->shutting_down.load()) return G_SOURCE_REMOVE;
 
-    if (msg->is_done) {
+    if (msg->kind == StoreIdleKind::Done) {
         msg->state->store_busy.store(false);
         push_desktop_apps(msg->state);
         push_store_catalog(msg->state);
@@ -150,6 +160,16 @@ gboolean on_store_idle(gpointer data) {
                << (msg->exit_code == 0 ? "true" : "false") << ",\""
                << json_escape(msg->target_id) << "\",\""
                << json_escape(msg->action) << "\");";
+            eval_js(msg->state->store_view, js.str());
+        }
+        return G_SOURCE_REMOVE;
+    }
+
+    if (msg->kind == StoreIdleKind::Progress) {
+        if (msg->state->store_view) {
+            std::ostringstream js;
+            js << "window.__spinelStoreProgress && window.__spinelStoreProgress("
+               << msg->exit_code << ",\"" << json_escape(msg->line) << "\");";
             eval_js(msg->state->store_view, js.str());
         }
         return G_SOURCE_REMOVE;
@@ -166,12 +186,17 @@ gboolean on_store_idle(gpointer data) {
 
 void emit_store_line(AppState *state, const std::string &line) {
     if (!state || state->shutting_down.load()) return;
-    g_idle_add(on_store_idle, new StoreIdleMsg{state, line, false, 0, "", ""});
+    g_idle_add(on_store_idle, new StoreIdleMsg{state, StoreIdleKind::Line, line, 0, "", ""});
+}
+
+void emit_store_progress(AppState *state, int pct, const std::string &label) {
+    if (!state || state->shutting_down.load()) return;
+    g_idle_add(on_store_idle, new StoreIdleMsg{state, StoreIdleKind::Progress, label, pct, "", ""});
 }
 
 void emit_store_done(AppState *state, int exit_code, const std::string &target_id, const std::string &action) {
     if (!state || state->shutting_down.load()) return;
-    g_idle_add(on_store_idle, new StoreIdleMsg{state, "", true, exit_code, target_id, action});
+    g_idle_add(on_store_idle, new StoreIdleMsg{state, StoreIdleKind::Done, "", exit_code, target_id, action});
 }
 
 std::vector<std::pair<std::string, std::string>> build_proxy_env_pairs() {
@@ -195,6 +220,51 @@ bool is_multilib_enabled() {
         if (t == "[multilib]") return true;
     }
     return false;
+}
+
+bool extract_percent_hint(const std::string &line, int &pct_out) {
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] != '%' || i == 0) continue;
+        size_t j = i;
+        while (j > 0 && std::isdigit(static_cast<unsigned char>(line[j - 1]))) {
+            --j;
+        }
+        if (j < i) {
+            int v = std::atoi(line.substr(j, i - j).c_str());
+            if (v >= 0 && v <= 100) {
+                pct_out = v;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void dispatch_stream_segment(AppState *state, const std::string &raw, bool from_cr) {
+    std::string line = trim_copy(raw);
+    if (line.empty()) return;
+
+    const std::string prog_prefix = "__SPINEL_PROG__:";
+    if (line.rfind(prog_prefix, 0) == 0) {
+        std::string rest = line.substr(prog_prefix.size());
+        auto sep = rest.find(':');
+        if (sep != std::string::npos) {
+            int pct = std::atoi(rest.substr(0, sep).c_str());
+            std::string label = trim_copy(rest.substr(sep + 1));
+            emit_store_progress(state, pct, label);
+        }
+        return;
+    }
+
+    int pct = -1;
+    if (extract_percent_hint(line, pct)) {
+        emit_store_progress(state, pct, from_cr ? "正在下载/处理软件包..." : line);
+    }
+    // Suppress raw carriage-return progress redraws (curl/pacman/flatpak) from spamming the log box
+    if (from_cr) return;
+    if (line.find("% Total") != std::string::npos || line.find("Dload  Upload") != std::string::npos) return;
+
+    emit_store_line(state, line);
 }
 
 int run_streaming_command(AppState *state,
@@ -263,22 +333,29 @@ int run_streaming_command(AppState *state,
     }
     close(stdin_pipe[1]);
 
-    FILE *fp = fdopen(stdout_pipe[0], "r");
-    if (fp) {
-        std::array<char, 1024> buf{};
-        while (fgets(buf.data(), static_cast<int>(buf.size()), fp) != nullptr) {
-            std::string line(buf.data());
-            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-                line.pop_back();
-            }
-            if (!line.empty()) {
-                emit_store_line(state, line);
+    std::string pending;
+    std::array<char, 1024> buf{};
+    while (true) {
+        ssize_t n = read(stdout_pipe[0], buf.data(), buf.size());
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (n == 0) break;
+        for (ssize_t i = 0; i < n; ++i) {
+            char c = buf[static_cast<size_t>(i)];
+            if (c == '\r' || c == '\n') {
+                dispatch_stream_segment(state, pending, c == '\r');
+                pending.clear();
+            } else {
+                pending.push_back(c);
             }
         }
-        fclose(fp);
-    } else {
-        close(stdout_pipe[0]);
     }
+    if (!pending.empty()) {
+        dispatch_stream_segment(state, pending, false);
+    }
+    close(stdout_pipe[0]);
 
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
@@ -380,7 +457,7 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 return;
             }
         } else if (backend == "native") {
-            if (app_id != "chrome" && app_id != "heroic" && app_id != "protonup") {
+            if (app_id != "chrome" && app_id != "heroic" && app_id != "protonup" && app_id != "gravitymark") {
                 emit_store_line(state, "[ERROR] 不支持的原生应用 ID: " + app_id);
                 emit_store_done(state, 1, app_id, action);
                 return;
@@ -509,18 +586,49 @@ void start_store_action(AppState *state, const std::string &action, const std::s
             std::vector<std::string> cmd = base_sudo;
             append_proxy_env_prefix(cmd);
 
+            const std::string dl_fn =
+                "dl_progress() { "
+                "  _url=\"$1\"; _out=\"$2\"; _label=\"$3\"; "
+                "  _total=$(curl -fsSLI --connect-timeout 10 \"$_url\" 2>/dev/null | awk 'tolower($1)==\"content-length:\"{gsub(\"\\r\",\"\",$2); len=$2} END{print len+0}'); "
+                "  _cur=$(wc -c < \"$_out\" 2>/dev/null || echo 0); "
+                "  if [ \"${_total:-0}\" -gt 0 ] && [ \"$_cur\" -eq \"$_total\" ]; then "
+                "    echo \"__SPINEL_PROG__:92:${_label} 已缓存，准备安装...\"; return 0; "
+                "  fi; "
+                "  [ \"${_total:-0}\" -gt 0 ] && [ \"$_cur\" -gt \"$_total\" ] && rm -f \"$_out\"; "
+                "  curl -fL --silent --show-error --continue-at - --connect-timeout 15 --retry 2 -o \"$_out\" \"$_url\" & "
+                "  _pid=$!; "
+                "  _last_sz=$(wc -c < \"$_out\" 2>/dev/null || echo 0); "
+                "  while kill -0 \"$_pid\" 2>/dev/null && ! grep -q '^State:[[:space:]]*Z' \"/proc/$_pid/status\" 2>/dev/null; do "
+                "    sleep 1; "
+                "    _cur=$(wc -c < \"$_out\" 2>/dev/null || echo 0); "
+                "    _spd=$(( _cur - _last_sz )); [ \"$_spd\" -lt 0 ] && _spd=0; _last_sz=$_cur; "
+                "    _cur_mb=$(awk -v b=\"$_cur\" 'BEGIN{printf \"%.1f\", b/1048576}'); "
+                "    _spd_str=$(awk -v s=\"$_spd\" 'BEGIN{if(s>=1048576) printf \"%.1f MB/s\", s/1048576; else printf \"%.0f KB/s\", s/1024}'); "
+                "    if [ \"${_total:-0}\" -gt 0 ]; then "
+                "      _pct=$(awk -v c=\"$_cur\" -v t=\"$_total\" 'BEGIN{p=int(c*88/t)+4; if(p>92)p=92; print p}'); "
+                "      _tot_mb=$(awk -v b=\"$_total\" 'BEGIN{printf \"%.1f\", b/1048576}'); "
+                "      echo \"__SPINEL_PROG__:${_pct}:${_label} ${_cur_mb} / ${_tot_mb} MB (${_spd_str})\"; "
+                "    else "
+                "      echo \"__SPINEL_PROG__:25:${_label} ${_cur_mb} MB (${_spd_str})\"; "
+                "    fi; "
+                "  done; "
+                "  wait \"$_pid\"; "
+                "}; ";
+
             if (app_id == "chrome") {
                 if (action == "install") {
                     emit_store_line(state, "==> 正在确保 Google Chrome 宿主机运行依赖已就绪...");
                     emit_store_line(state, "==> 将直接下载 Google 官方稳定版并原生安装到 /opt/google/chrome（不经过 Flatpak）...");
                     cmd.insert(cmd.end(), {
                         "sh", "-c",
-                        "set -eu; "
+                        "set -eu; " + dl_fn +
                         "STG=$(mktemp -d /tmp/spinel-chrome-XXXXXX); "
                         "trap 'rm -rf \"$STG\"' EXIT; "
+                        "echo '__SPINEL_PROG__:3:正在检查 Chrome 运行依赖...'; "
                         "pacman -Sy --noconfirm --needed alsa-lib gtk3 libcups libdrm libxkbcommon nss xdg-utils ttf-liberation curl; "
                         "echo '==> 正在下载 google-chrome-stable_current_amd64.deb ...'; "
-                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/chrome.deb\" 'https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb'; "
+                        "dl_progress 'https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb' \"$STG/chrome.deb\" '正在下载 Chrome'; "
+                        "echo '__SPINEL_PROG__:94:正在解包安装 Google Chrome...'; "
                         "echo '==> 正在解包并安装到宿主机系统...'; "
                         "bsdtar -xf \"$STG/chrome.deb\" -C \"$STG\"; "
                         "mkdir -p \"$STG/root\"; "
@@ -556,13 +664,15 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                     emit_store_line(state, "==> 正在查询 Heroic Games Launcher 最新官方 Arch (.pacman) 原生包...");
                     cmd.insert(cmd.end(), {
                         "sh", "-c",
-                        "set -eu; "
+                        "set -eu; " + dl_fn +
                         "STG=$(mktemp -d /tmp/spinel-heroic-XXXXXX); "
                         "trap 'rm -rf \"$STG\"' EXIT; "
+                        "echo '__SPINEL_PROG__:4:正在获取 Heroic 最新版本信息...'; "
                         "URL=$(curl -fsSL --connect-timeout 15 'https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest' | grep -m1 -oE 'https://[^\"]+-linux-x64\\.pacman'); "
                         "[ -n \"$URL\" ] || { echo '[ERROR] 未获取到 Heroic 官方 .pacman 下载地址'; exit 1; }; "
                         "echo \"==> 正在下载 $URL ...\"; "
-                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/heroic.pacman\" \"$URL\"; "
+                        "dl_progress \"$URL\" \"$STG/heroic.pacman\" '正在下载 Heroic'; "
+                        "echo '__SPINEL_PROG__:94:正在通过 Pacman 安装 Heroic...'; "
                         "echo '==> 正在通过 Pacman 原生安装 Heroic ...'; "
                         "pacman -Sy --noconfirm --needed >/dev/null 2>&1 || true; "
                         "pacman -U --noconfirm \"$STG/heroic.pacman\"; "
@@ -582,14 +692,16 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                     emit_store_line(state, "==> 正在查询 ProtonUp-Qt 最新官方版本（宿主机原生解包安装）...");
                     cmd.insert(cmd.end(), {
                         "sh", "-c",
-                        "set -eu; "
+                        "set -eu; " + dl_fn +
                         "STG=$(mktemp -d /tmp/spinel-protonup-XXXXXX); "
                         "trap 'rm -rf \"$STG\"' EXIT; "
+                        "echo '__SPINEL_PROG__:4:正在获取 ProtonUp-Qt 最新版本信息...'; "
                         "URL=$(curl -fsSL --connect-timeout 15 'https://api.github.com/repos/DavidoTek/ProtonUp-Qt/releases/latest' | grep -m1 -oE 'https://[^\"]+-x86_64\\.AppImage'); "
                         "[ -n \"$URL\" ] || { echo '[ERROR] 未获取到 ProtonUp-Qt 官方下载地址'; exit 1; }; "
                         "echo \"==> 正在下载 $URL ...\"; "
-                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/ProtonUp-Qt.AppImage\" \"$URL\"; "
+                        "dl_progress \"$URL\" \"$STG/ProtonUp-Qt.AppImage\" '正在下载 ProtonUp-Qt'; "
                         "chmod +x \"$STG/ProtonUp-Qt.AppImage\"; "
+                        "echo '__SPINEL_PROG__:94:正在解包安装 ProtonUp-Qt...'; "
                         "echo '==> 正在解包安装到 /opt/protonup-qt ...'; "
                         "(cd \"$STG\" && ./ProtonUp-Qt.AppImage --appimage-extract >/dev/null); "
                         "rm -rf /opt/protonup-qt; "
@@ -612,6 +724,71 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                         "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
                         "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
                         "echo '==> 已卸载 ProtonUp-Qt。'"
+                    });
+                }
+            } else if (app_id == "gravitymark") {
+                if (action == "install") {
+                    if (proxy_envs.empty()) {
+                        emit_store_line(state, "[提示] GravityMark 安装包（约 184 MB）托管于海外官方源（tellusim.com），支持断点续传；若国内直连较慢，建议先在「系统设置 → 网络」开启代理，或先试用轻量版 glmark2。");
+                    }
+                    emit_store_line(state, "==> 正在确保 GravityMark 宿主机运行依赖已就绪...");
+                    emit_store_line(state, "==> 正在查询 Tellusim 官方最新 Linux 原生安装包...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; " + dl_fn +
+                        "CACHE_DIR=/var/cache/spinelos/gravitymark; "
+                        "STG=$(mktemp -d /tmp/spinel-gravitymark-XXXXXX); "
+                        "trap 'rm -rf \"$STG\"' EXIT; "
+                        "mkdir -p \"$CACHE_DIR\"; "
+                        "echo '__SPINEL_PROG__:3:正在检查 GravityMark 运行依赖...'; "
+                        "pacman -Sy --noconfirm --needed libglvnd libx11 libxext libxrandr libxcb vulkan-icd-loader curl libarchive; "
+                        "ARCH=$(uname -m); "
+                        "if [ \"$ARCH\" = \"aarch64\" ]; then "
+                        "  URL=$(curl -fsSL --connect-timeout 15 'https://gravitymark.tellusim.com/' | grep -m1 -oE 'https://tellusim\\.com/download/GravityMark_[0-9.]+_arm64\\.run' || true); "
+                        "  [ -n \"$URL\" ] || URL='https://tellusim.com/download/GravityMark_1.89_arm64.run'; "
+                        "else "
+                        "  URL=$(curl -fsSL --connect-timeout 15 'https://gravitymark.tellusim.com/' | grep -m1 -oE 'https://tellusim\\.com/download/GravityMark_[0-9.]+\\.run' || true); "
+                        "  [ -n \"$URL\" ] || URL='https://tellusim.com/download/GravityMark_1.89.run'; "
+                        "fi; "
+                        "RUN_FILE=\"$CACHE_DIR/$(basename \"$URL\")\"; "
+                        "echo \"==> 正在下载 $URL（支持断点续传）...\"; "
+                        "dl_progress \"$URL\" \"$RUN_FILE\" '正在下载 GravityMark'; "
+                        "mkdir -p \"$STG/src\"; "
+                        "echo '__SPINEL_PROG__:94:正在解包安装 GravityMark 到 /opt/gravitymark...'; "
+                        "echo '==> 正在解包并安装到 /opt/gravitymark ...'; "
+                        "sh \"$RUN_FILE\" --tar xf -C \"$STG/src\"; "
+                        "rm -rf /opt/gravitymark; "
+                        "mkdir -p /opt/gravitymark/bin; "
+                        "for f in \"$STG/src/bin\"/*; do "
+                        "  [ -e \"$f\" ] || continue; "
+                        "  case \"$f\" in "
+                        "    *.so) install -m644 \"$f\" /opt/gravitymark/bin/ ;; "
+                        "    *) install -m755 \"$f\" /opt/gravitymark/bin/ ;; "
+                        "  esac; "
+                        "done; "
+                        "install -m644 \"$STG/src/browser.zip\" \"$STG/src/data.zip\" /opt/gravitymark/; "
+                        "for s in \"$STG/src\"/run_*.sh; do "
+                        "  [ -f \"$s\" ] && install -m755 \"$s\" /opt/gravitymark/ || true; "
+                        "done; "
+                        "printf '#!/bin/sh\\ncd /opt/gravitymark && exec /opt/gravitymark/run_browser.sh \"$@\"\\n' > /usr/bin/gravitymark; "
+                        "chmod 755 /usr/bin/gravitymark; "
+                        "mkdir -p /usr/share/icons/hicolor/scalable/apps; "
+                        "bsdtar -xOf \"$STG/src/browser.zip\" browser/images/gravitymark.svg > /usr/share/icons/hicolor/scalable/apps/gravitymark.svg 2>/dev/null || true; "
+                        "printf '[Desktop Entry]\\nType=Application\\nName=GravityMark\\nComment=Cross-platform GPU benchmark and stress test\\nComment[zh_CN]=跨平台 GPU 显卡性能基准与压力测试\\nExec=/usr/bin/gravitymark\\nIcon=gravitymark\\nCategories=Game;Utility;System;\\nTerminal=false\\n' > /usr/share/applications/gravitymark.desktop; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "rm -rf \"$CACHE_DIR\"; "
+                        "echo '==> GravityMark 宿主机原生安装完成！'"
+                    });
+                } else {
+                    emit_store_line(state, "==> 正在卸载宿主机原生 GravityMark ...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "rm -rf /opt/gravitymark /var/cache/spinelos/gravitymark /usr/bin/gravitymark /usr/share/applications/gravitymark.desktop /usr/share/icons/hicolor/scalable/apps/gravitymark.svg; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> 已卸载 GravityMark。'"
                     });
                 }
             }
@@ -693,6 +870,18 @@ void launch_store_app(AppState *state, const std::string &app_id) {
         launch_browser_command({entry->pkg}, "Store:" + app_id);
     } else if (app_id == "heroic") {
         spawn_argv_logged({has_executable("heroic") ? "heroic" : "/opt/Heroic/heroic"}, "Store:heroic");
+    } else if (app_id == "gravitymark") {
+        spawn_argv_logged({has_executable("gravitymark") ? "gravitymark" : "/opt/gravitymark/run_browser.sh"}, "Store:gravitymark");
+    } else if (app_id == "glmark2") {
+        const char *cmd =
+            "if command -v glmark2-wayland >/dev/null 2>&1 && [ -n \"${WAYLAND_DISPLAY:-}\" ]; then "
+            "glmark2-wayland; else glmark2; fi; "
+            "printf '\\n测试完成，按 Enter 键关闭窗口...'; read -r _";
+        if (has_executable("spinel-terminal")) {
+            spawn_argv_logged({"spinel-terminal", "-T", "glmark2 显卡基准测试", "--", "sh", "-c", cmd}, "Store:glmark2");
+        } else {
+            spawn_argv_logged({"sh", "-c", cmd}, "Store:glmark2");
+        }
     } else if (app_id == "obs") {
         spawn_argv_logged({"obs"}, "Store:" + app_id);
     } else {
