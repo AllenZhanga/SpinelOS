@@ -397,13 +397,14 @@ if [[ -f /mnt/etc/default/grub ]]; then
   set_grub_kv GRUB_GFXMODE 'auto'
   set_grub_kv GRUB_GFXPAYLOAD_LINUX 'keep'
   set_grub_kv GRUB_THEME '"/boot/grub/themes/spinelos/theme.txt"'
+  set_grub_kv GRUB_DISABLE_RECOVERY 'false'
   if [[ "$OS_PROBER" == "true" ]]; then
     set_grub_kv GRUB_TIMEOUT_STYLE 'menu'
     set_grub_kv GRUB_TIMEOUT '3'
     set_grub_kv GRUB_DISABLE_OS_PROBER 'false'
   else
     set_grub_kv GRUB_TIMEOUT_STYLE 'hidden'
-    set_grub_kv GRUB_TIMEOUT '1'
+    set_grub_kv GRUB_TIMEOUT '2'
   fi
 fi
 

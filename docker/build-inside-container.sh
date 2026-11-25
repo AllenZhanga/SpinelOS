@@ -102,7 +102,7 @@ rm -f "${PROFILE_DIR}/syslinux/splash.png"
 rm -f "${PROFILE_DIR}"/efiboot/loader/entries/*speech*.conf
 
 if [ -f "${PROFILE_DIR}/efiboot/loader/loader.conf" ]; then
-  sed -i 's/^timeout .*/timeout 0/' "${PROFILE_DIR}/efiboot/loader/loader.conf"
+  sed -i 's/^timeout .*/timeout 2/' "${PROFILE_DIR}/efiboot/loader/loader.conf"
 fi
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
   if [ -f "$cfg" ]; then
@@ -110,15 +110,63 @@ for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
     sed -i '/^options / s/$/ quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
   fi
 done
+if [ -f "${PROFILE_DIR}/efiboot/loader/entries/01-archiso-linux.conf" ]; then
+  cat > "${PROFILE_DIR}/efiboot/loader/entries/02-archiso-safe-linux.conf" <<'EOF'
+title    SpinelOS Safe Graphics & Debug (%ARCH%, UEFI)
+sort-key 02
+linux    /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
+initrd   /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
+options  archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
+EOF
+fi
+
 for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
   if [ -f "$cfg" ]; then
     sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux live medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
     sed -i 's/^MENU BACKGROUND splash.png/# SpinelOS dark menu/' "$cfg"
-    sed -i 's/^TIMEOUT 150/TIMEOUT 10/' "$cfg"
-    sed -i 's/^timeout=15/timeout=1/' "$cfg"
+    sed -i 's/^TIMEOUT 150/TIMEOUT 20/' "$cfg"
+    sed -i 's/^timeout=15/timeout=2/' "$cfg"
     sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
   fi
 done
+
+for gcfg in "${PROFILE_DIR}/grub/grub.cfg" "${PROFILE_DIR}/grub/loopback.cfg"; do
+  if [ -f "$gcfg" ]; then
+    python3 - "$gcfg" <<'PY' || true
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+txt = p.read_text()
+safe_block = """
+menuentry "SpinelOS Safe Graphics & Debug (%ARCH%, UEFI/BIOS)" --class recovery --class gnu-linux --class os --id 'archlinux-safe' {
+    set gfxpayload=keep
+    linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
+    initrd /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
+}
+"""
+marker = "--id 'archlinux-accessibility'"
+if marker in txt:
+    idx = txt.find(marker)
+    end = txt.find("}\n", idx)
+    if end != -1:
+        txt = txt[:end+2] + safe_block + txt[end+2:]
+        p.write_text(txt)
+PY
+  fi
+done
+
+if [ -f "${PROFILE_DIR}/syslinux/archiso_sys-linux.cfg" ]; then
+  cat >> "${PROFILE_DIR}/syslinux/archiso_sys-linux.cfg" <<'EOF'
+
+LABEL archsafe
+TEXT HELP
+Boot SpinelOS with safe basic graphics (nomodeset, verbose logs, no NVIDIA/Plymouth).
+ENDTEXT
+MENU LABEL SpinelOS Safe Graphics & Debug (%ARCH%, BIOS)
+LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
+INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
+EOF
+fi
 
 cat <<'EOF' >> "${PROFILE_DIR}/profiledef.sh"
 

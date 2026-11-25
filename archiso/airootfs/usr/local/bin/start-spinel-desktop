@@ -27,8 +27,20 @@ if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; the
   IS_VM=1
 fi
 
+SAFE_GFX=0
+if grep -qw "nomodeset" /proc/cmdline 2>/dev/null || ! ls /dev/dri/renderD* >/dev/null 2>&1; then
+  SAFE_GFX=1
+fi
+
 # Work around WebKitGTK DMABUF & VM hardware cursor issues on NVIDIA or virtualized GPUs
-if [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
+if [ "${SAFE_GFX}" -eq 1 ]; then
+  export WLR_RENDERER=pixman
+  export WLR_NO_HARDWARE_CURSORS=1
+  export GSK_RENDERER=cairo
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
+  export WEBKIT_DISABLE_COMPOSITING_MODE=1
+  export LIBGL_ALWAYS_SOFTWARE=1
+elif [ -d /sys/module/nvidia ] || lspci -n 2>/dev/null | grep -qi "10de:"; then
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GBM_BACKEND=nvidia-drm
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
