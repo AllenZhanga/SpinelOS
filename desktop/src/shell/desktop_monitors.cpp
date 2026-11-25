@@ -214,8 +214,8 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
     }
 
     static const char *kFeaturedStoreIds[] = {
-        "com.google.chrome", "chromium", "firefox", "com.heroicgameslauncher.hgl",
-        "lutris", "discord", "com.obsproject.studio"
+        "google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl",
+        "lutris", "protonup-qt", "discord", "com.obsproject.studio"
     };
     for (const auto &app : ns->desktop_apps) {
         std::string lid = to_lower_copy(app.id);

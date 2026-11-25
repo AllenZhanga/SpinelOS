@@ -38,19 +38,19 @@ struct StoreAppEntry {
 
 constexpr StoreAppEntry kCatalog[] = {
     {"steam", "Steam 客户端", "游戏平台", "pacman", "steam",
-     "Valve 官方 PC 游戏与 Proton 平台（自动启用 multilib 与系统代理）", "steam", "一键安装"},
-    {"chrome", "Google Chrome", "浏览器", "flatpak", "com.google.Chrome",
-     "Google 官方浏览器（Flathub 海外源，国内直连较慢建议开启代理）", "flatpak run com.google.Chrome", "Flatpak · 需代理"},
+     "Valve 官方 PC 游戏与 Proton 平台（自动启用 multilib 与系统代理）", "steam", "Pacman 原生"},
+    {"chrome", "Google Chrome", "浏览器", "native", "google-chrome-stable",
+     "Google 官方浏览器（宿主机原生安装，直接调用主机显卡驱动）", "google-chrome-stable", "原生安装"},
     {"chromium", "Chromium", "浏览器", "pacman", "chromium",
-     "官方软件源高速开源浏览器，国内镜像源极速直下", "chromium --ozone-platform-hint=auto", "Pacman 高速"},
+     "官方软件源高速开源浏览器，国内镜像源极速直下", "chromium --ozone-platform-hint=auto", "Pacman 原生"},
     {"firefox", "Firefox", "浏览器", "pacman", "firefox",
-     "Mozilla 开源隐私浏览器，国内镜像极速直下", "firefox", "Pacman 高速"},
-    {"heroic", "Heroic Games Launcher", "游戏平台", "flatpak", "com.heroicgameslauncher.hgl",
-     "Epic Games、GOG 与 Amazon Prime 游戏库跨平台启动器", "flatpak run com.heroicgameslauncher.hgl", "Flatpak 免密"},
+     "Mozilla 开源隐私浏览器，国内镜像极速直下", "firefox", "Pacman 原生"},
+    {"heroic", "Heroic Games Launcher", "游戏平台", "native", "heroic",
+     "Epic Games、GOG 与 Amazon Prime 游戏库（官方 Arch 原生包）", "heroic", "原生安装"},
     {"lutris", "Lutris", "游戏平台", "pacman", "lutris",
      "统一管理独立游戏、Wine 环境与主机模拟器", "lutris", "Pacman 原生"},
-    {"protonup", "ProtonUp-Qt", "游戏工具", "flatpak", "net.davidotek.pupgui2",
-     "图形化下载并管理 Steam Proton-GE / Wine-GE 兼容层", "flatpak run net.davidotek.pupgui2", "Flatpak 免密"},
+    {"protonup", "ProtonUp-Qt", "游戏工具", "native", "protonup-qt",
+     "图形化下载并管理 Steam Proton-GE / Wine-GE（宿主机原生版）", "protonup-qt", "原生安装"},
     {"discord", "Discord", "社交语音", "pacman", "discord",
      "玩家组队语音开黑与游戏社区聊天客户端", "discord", "Pacman 原生"},
     {"obs", "OBS Studio", "直播录屏", "pacman", "obs-studio",
@@ -86,6 +86,24 @@ bool is_pacman_pkg_installed(const std::string &pkg) {
     std::string out;
     int rc = 1;
     return run_argv_capture({"pacman", "-Qq", pkg}, out, rc) && rc == 0;
+}
+
+bool is_native_app_installed(const std::string &app_id) {
+    std::error_code ec;
+    if (app_id == "chrome") {
+        return has_executable("google-chrome-stable") ||
+               fs::exists("/opt/google/chrome/google-chrome", ec);
+    }
+    if (app_id == "heroic") {
+        return is_pacman_pkg_installed("heroic") ||
+               is_pacman_pkg_installed("heroic-games-launcher-bin") ||
+               has_executable("heroic");
+    }
+    if (app_id == "protonup") {
+        return has_executable("protonup-qt") ||
+               fs::exists("/opt/protonup-qt/AppRun", ec);
+    }
+    return false;
 }
 
 bool is_flatpak_app_installed(const std::string &app_id) {
@@ -298,9 +316,15 @@ void push_store_catalog(AppState *state) {
     for (const auto &app : kCatalog) {
         if (!first) js << ",";
         first = false;
-        bool installed = std::string(app.backend) == "flatpak"
-            ? is_flatpak_app_installed(app.pkg)
-            : is_pacman_pkg_installed(app.pkg);
+        bool installed = false;
+        std::string bkend(app.backend);
+        if (bkend == "flatpak") {
+            installed = is_flatpak_app_installed(app.pkg);
+        } else if (bkend == "native") {
+            installed = is_native_app_installed(app.id);
+        } else {
+            installed = is_pacman_pkg_installed(app.pkg);
+        }
         js << "{"
            << "\"id\":\"" << json_escape(app.id) << "\","
            << "\"name\":\"" << json_escape(app.name) << "\","
@@ -352,6 +376,12 @@ void start_store_action(AppState *state, const std::string &action, const std::s
             }
             if (!has_flatpak_cli()) {
                 emit_store_line(state, "[ERROR] 系统尚未安装 flatpak。请先通过系统更新 (--full) 或在商店安装 flatpak 包。");
+                emit_store_done(state, 1, app_id, action);
+                return;
+            }
+        } else if (backend == "native") {
+            if (app_id != "chrome" && app_id != "heroic" && app_id != "protonup") {
+                emit_store_line(state, "[ERROR] 不支持的原生应用 ID: " + app_id);
                 emit_store_done(state, 1, app_id, action);
                 return;
             }
@@ -467,6 +497,125 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                     "flatpak", "uninstall", "--user", "-y", "--noninteractive", pkg
                 }, "", proxy_envs);
             }
+        } else if (backend == "native") {
+            bool nopass = check_sudo_nopasswd();
+            if (!nopass && password.empty()) {
+                emit_store_line(state, "[ERROR] 原生安装/卸载应用需要当前用户管理员密码。");
+                emit_store_done(state, 2, app_id, action);
+                return;
+            }
+            std::vector<std::string> base_sudo = make_sudo_cmd(nopass);
+            std::string pwd_in = nopass ? "" : password;
+            std::vector<std::string> cmd = base_sudo;
+            append_proxy_env_prefix(cmd);
+
+            if (app_id == "chrome") {
+                if (action == "install") {
+                    emit_store_line(state, "==> 正在确保 Google Chrome 宿主机运行依赖已就绪...");
+                    emit_store_line(state, "==> 将直接下载 Google 官方稳定版并原生安装到 /opt/google/chrome（不经过 Flatpak）...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "STG=$(mktemp -d /tmp/spinel-chrome-XXXXXX); "
+                        "trap 'rm -rf \"$STG\"' EXIT; "
+                        "pacman -Sy --noconfirm --needed alsa-lib gtk3 libcups libdrm libxkbcommon nss xdg-utils ttf-liberation curl; "
+                        "echo '==> 正在下载 google-chrome-stable_current_amd64.deb ...'; "
+                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/chrome.deb\" 'https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb'; "
+                        "echo '==> 正在解包并安装到宿主机系统...'; "
+                        "bsdtar -xf \"$STG/chrome.deb\" -C \"$STG\"; "
+                        "mkdir -p \"$STG/root\"; "
+                        "bsdtar -xf \"$STG\"/data.tar.* -C \"$STG/root\"; "
+                        "rm -rf /opt/google/chrome; "
+                        "mkdir -p /opt/google; "
+                        "cp -a \"$STG/root/opt/google/chrome\" /opt/google/chrome; "
+                        "[ -f /opt/google/chrome/chrome-sandbox ] && chmod 4755 /opt/google/chrome/chrome-sandbox || true; "
+                        "ln -sf /opt/google/chrome/google-chrome /usr/bin/google-chrome-stable; "
+                        "ln -sf /opt/google/chrome/google-chrome /usr/bin/google-chrome; "
+                        "install -Dm644 \"$STG/root/usr/share/applications/google-chrome.desktop\" /usr/share/applications/google-chrome.desktop; "
+                        "for sz in 16 24 32 48 64 128 256; do "
+                        "  [ -f \"/opt/google/chrome/product_logo_${sz}.png\" ] && install -Dm644 \"/opt/google/chrome/product_logo_${sz}.png\" \"/usr/share/icons/hicolor/${sz}x${sz}/apps/google-chrome.png\"; "
+                        "done; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> Google Chrome 宿主机原生安装完成！'"
+                    });
+                } else {
+                    emit_store_line(state, "==> 正在卸载宿主机原生 Google Chrome ...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "rm -rf /opt/google/chrome /usr/bin/google-chrome-stable /usr/bin/google-chrome /usr/share/applications/google-chrome.desktop; "
+                        "rm -f /usr/share/icons/hicolor/*/apps/google-chrome.png; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> 已卸载 Google Chrome。'"
+                    });
+                }
+            } else if (app_id == "heroic") {
+                if (action == "install") {
+                    emit_store_line(state, "==> 正在查询 Heroic Games Launcher 最新官方 Arch (.pacman) 原生包...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "STG=$(mktemp -d /tmp/spinel-heroic-XXXXXX); "
+                        "trap 'rm -rf \"$STG\"' EXIT; "
+                        "URL=$(curl -fsSL --connect-timeout 15 'https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest' | grep -m1 -oE 'https://[^\"]+-linux-x64\\.pacman'); "
+                        "[ -n \"$URL\" ] || { echo '[ERROR] 未获取到 Heroic 官方 .pacman 下载地址'; exit 1; }; "
+                        "echo \"==> 正在下载 $URL ...\"; "
+                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/heroic.pacman\" \"$URL\"; "
+                        "echo '==> 正在通过 Pacman 原生安装 Heroic ...'; "
+                        "pacman -Sy --noconfirm --needed >/dev/null 2>&1 || true; "
+                        "pacman -U --noconfirm \"$STG/heroic.pacman\"; "
+                        "echo '==> Heroic Games Launcher 原生安装完成！'"
+                    });
+                } else {
+                    emit_store_line(state, "==> 正在卸载原生 Heroic Games Launcher ...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "PKG=$(pacman -Qq heroic 2>/dev/null || pacman -Qq heroic-games-launcher-bin 2>/dev/null || pacman -Qqo /usr/bin/heroic 2>/dev/null || true); "
+                        "[ -n \"$PKG\" ] && pacman -Rns --noconfirm \"$PKG\" || echo '==> 未检测到 Pacman 中的 Heroic 包。'"
+                    });
+                }
+            } else if (app_id == "protonup") {
+                if (action == "install") {
+                    emit_store_line(state, "==> 正在查询 ProtonUp-Qt 最新官方版本（宿主机原生解包安装）...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "STG=$(mktemp -d /tmp/spinel-protonup-XXXXXX); "
+                        "trap 'rm -rf \"$STG\"' EXIT; "
+                        "URL=$(curl -fsSL --connect-timeout 15 'https://api.github.com/repos/DavidoTek/ProtonUp-Qt/releases/latest' | grep -m1 -oE 'https://[^\"]+-x86_64\\.AppImage'); "
+                        "[ -n \"$URL\" ] || { echo '[ERROR] 未获取到 ProtonUp-Qt 官方下载地址'; exit 1; }; "
+                        "echo \"==> 正在下载 $URL ...\"; "
+                        "curl -fL --connect-timeout 15 --retry 2 -o \"$STG/ProtonUp-Qt.AppImage\" \"$URL\"; "
+                        "chmod +x \"$STG/ProtonUp-Qt.AppImage\"; "
+                        "echo '==> 正在解包安装到 /opt/protonup-qt ...'; "
+                        "(cd \"$STG\" && ./ProtonUp-Qt.AppImage --appimage-extract >/dev/null); "
+                        "rm -rf /opt/protonup-qt; "
+                        "mv \"$STG/squashfs-root\" /opt/protonup-qt; "
+                        "printf '#!/bin/sh\\nexec /opt/protonup-qt/AppRun \"$@\"\\n' > /usr/bin/protonup-qt; "
+                        "chmod 755 /usr/bin/protonup-qt; "
+                        "ICON_SRC=$(find /opt/protonup-qt -maxdepth 3 \\( -name '*pupgui2*.png' -o -name '.DirIcon' \\) | head -n1 || true); "
+                        "[ -n \"$ICON_SRC\" ] && install -Dm644 \"$ICON_SRC\" /usr/share/icons/hicolor/256x256/apps/protonup-qt.png || true; "
+                        "printf '[Desktop Entry]\\nType=Application\\nName=ProtonUp-Qt\\nComment=Install Wine-GE and Proton-GE for Steam and Lutris\\nExec=/usr/bin/protonup-qt\\nIcon=protonup-qt\\nCategories=Game;Utility;\\nTerminal=false\\n' > /usr/share/applications/protonup-qt.desktop; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> ProtonUp-Qt 原生安装完成！'"
+                    });
+                } else {
+                    emit_store_line(state, "==> 正在卸载宿主机原生 ProtonUp-Qt ...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "rm -rf /opt/protonup-qt /usr/bin/protonup-qt /usr/share/applications/protonup-qt.desktop /usr/share/icons/hicolor/*/apps/protonup-qt.*; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> 已卸载 ProtonUp-Qt。'"
+                    });
+                }
+            }
+            rc = run_streaming_command(state, cmd, pwd_in);
         } else {
             bool nopass = check_sudo_nopasswd();
             if (!nopass && password.empty()) {
@@ -542,6 +691,8 @@ void launch_store_app(AppState *state, const std::string &app_id) {
         launch_steam_client(state);
     } else if (app_id == "chromium" || app_id == "firefox" || app_id == "chrome") {
         launch_browser_command({entry->pkg}, "Store:" + app_id);
+    } else if (app_id == "heroic") {
+        spawn_argv_logged({has_executable("heroic") ? "heroic" : "/opt/Heroic/heroic"}, "Store:heroic");
     } else if (app_id == "obs") {
         spawn_argv_logged({"obs"}, "Store:" + app_id);
     } else {

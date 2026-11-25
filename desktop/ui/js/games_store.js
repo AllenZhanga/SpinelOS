@@ -421,7 +421,7 @@
 
   function requestStoreOp(action, op) {
     if (state.storeState.busy) return;
-    if (op.backend === "pacman" && !state.storeState.sudo_nopass) {
+    if ((op.backend === "pacman" || op.backend === "native") && !state.storeState.sudo_nopass) {
       state.pendingStoreOp = { action, op };
       const box = document.getElementById("store-pass-box");
       const title = document.getElementById("store-pass-title");

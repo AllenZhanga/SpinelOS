@@ -465,7 +465,7 @@
       baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer", appKeys: [] });
     }
 
-    const storeFeaturedIds = ["com.google.chrome", "chromium", "firefox", "com.heroicgameslauncher.hgl", "lutris", "discord", "com.obsproject.studio"];
+    const storeFeaturedIds = ["google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl", "lutris", "protonup-qt", "discord", "com.obsproject.studio"];
     state.desktopApps.forEach((app) => {
       if (storeFeaturedIds.includes(app.id.toLowerCase())) {
         baseShortcuts.push({
