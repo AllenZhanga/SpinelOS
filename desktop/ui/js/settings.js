@@ -6,6 +6,7 @@
   let procTimerId = null;
   let lastProcPayload = null;
   let procSortBy = "cpu";
+  let currentSettingsTab = "";
 
   function switchSettingsTab(tab) {
     const titles = {
@@ -21,6 +22,11 @@
     };
     const tabs = Object.keys(titles);
     const target = tabs.includes(tab) ? tab : "wifi";
+    if (currentSettingsTab === "audio" && target !== "audio") {
+      sendCommand("settings:audio-test-mic:stop");
+      sendCommand("settings:audio-test-speaker:stop");
+    }
+    currentSettingsTab = target;
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
       if (body) body.classList.toggle("hidden", t !== target);
@@ -325,6 +331,14 @@
     });
   }
 
+  window.__spinelMicLevel = (pct, active = true) => {
+    const fill = document.getElementById("audio-mic-level-fill");
+    const chip = document.getElementById("audio-mic-level-chip");
+    const val = Math.max(0, Math.min(100, Number(pct) || 0));
+    if (fill) fill.style.width = `${active ? val : 0}%`;
+    if (chip) chip.textContent = active ? `电平 ${val}%` : "电平 --";
+  };
+
   window.__spinelAudioPowerData = (data) => {
     if (!data) return;
     const outSlider = document.getElementById("audio-out-slider");
@@ -343,6 +357,36 @@
 
     renderAudioDeviceList("audio-sink-list", data.sinks, "settings:audio-sink", "未检测到音频输出设备");
     renderAudioDeviceList("audio-source-list", data.sources, "settings:audio-source", "未检测到麦克风输入设备");
+
+    const spkMode = data.speaker_testing || "idle";
+    document.querySelectorAll("#tab-audio [data-speaker-test]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-speaker-test") === spkMode);
+    });
+    const spkStatus = document.getElementById("audio-speaker-test-status");
+    if (spkStatus) {
+      if (spkMode === "left") spkStatus.textContent = "正在播放左声道测试音（仅左声道发声）...";
+      else if (spkMode === "right") spkStatus.textContent = "正在播放右声道测试音（仅右声道发声）...";
+      else if (spkMode === "stereo") spkStatus.textContent = "正在播放立体声测试音（双声道均衡）...";
+      else spkStatus.textContent = data.audio_test_hint || "点击测试左/右声道或立体声扬声器输出";
+    }
+
+    const micTesting = Boolean(data.mic_testing);
+    const micTestBtn = document.getElementById("btn-mic-test");
+    const micTestStatus = document.getElementById("audio-mic-test-status");
+    if (micTestBtn) {
+      micTestBtn.classList.toggle("is-testing", micTesting);
+      micTestBtn.textContent = micTesting ? "停止麦克风测试" : "测试麦克风（回听自己声音）";
+    }
+    if (micTestStatus) {
+      if (micTesting) {
+        micTestStatus.textContent = data.mic_muted
+          ? "正在监听（麦克风当前已静音，取消静音即可听到声音）"
+          : (data.audio_test_hint || "正在实时监听：对着麦克风说话即可在当前输出设备中听到自己声音");
+      } else {
+        micTestStatus.textContent = "点击开启实时监听与音量电平检测（建议使用耳机防止啸叫）";
+      }
+    }
+    if (!micTesting) window.__spinelMicLevel(0, false);
 
     const supported = Array.isArray(data.supported_profiles) && data.supported_profiles.length > 0
       ? data.supported_profiles

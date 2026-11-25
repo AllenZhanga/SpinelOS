@@ -2,6 +2,7 @@
 
 #include "app_state.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -155,6 +156,11 @@ void push_audio_power_state(AppState *state);
 void set_audio_default_node(AppState *state, int id, bool is_sink);
 void set_mic_volume(AppState *state, int pct);
 void toggle_mic_mute(AppState *state);
+bool is_valid_audio_test_channel(const std::string &ch);
+std::vector<uint8_t> build_speaker_test_wav(const std::string &ch, int sample_rate = 48000);
+void test_audio_speaker(AppState *state, const std::string &ch);
+void toggle_mic_test(AppState *state, const std::string &mode = "toggle");
+void stop_audio_tests(AppState *state);
 void set_power_profile(AppState *state, const std::string &profile);
 bool get_idle_lock_enabled();
 void set_idle_lock_enabled(AppState *state, bool enabled);

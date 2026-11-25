@@ -154,6 +154,9 @@ gboolean on_app_window_close_request(GtkWindow *win, gpointer user_data) {
 void on_app_window_destroy(GtkWidget *, gpointer user_data) {
     auto *ctx = static_cast<AppWindowSlotCtx *>(user_data);
     if (ctx) {
+        if (ctx->state && ctx->view_slot == &ctx->state->settings_view) {
+            stop_audio_tests(ctx->state);
+        }
         if (ctx->win_slot) *ctx->win_slot = nullptr;
         if (ctx->view_slot) *ctx->view_slot = nullptr;
         delete ctx;
@@ -639,6 +642,7 @@ int main(int argc, char **argv) {
     g_signal_connect(app, "activate", G_CALLBACK(on_webui_activate), &state);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     state.shutting_down.store(true);
+    stop_audio_tests(&state);
     if (state.install_thread.joinable()) {
         state.install_thread.join();
     }

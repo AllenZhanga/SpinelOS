@@ -744,6 +744,12 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:mic-vol:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             set_mic_volume(s, std::atoi(arg_or_param(r, "settings:mic-vol:", {"value", "pct"}).c_str()));
         }},
+        {"settings:audio-test-speaker:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            test_audio_speaker(s, arg_or_param(r, "settings:audio-test-speaker:", {"channel", "value"}));
+        }},
+        {"settings:audio-test-mic:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            toggle_mic_test(s, arg_or_param(r, "settings:audio-test-mic:", {"mode", "action"}));
+        }},
         {"window:toggle:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
             uint64_t wid = std::strtoull(arg_or_param(r, "window:toggle:", {"id", "wid"}).c_str(), nullptr, 10);
             if (wid > 0 && a.window_toggle) a.window_toggle(wid);

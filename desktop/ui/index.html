@@ -584,6 +584,14 @@
         </div>
         <div class="part-section" style="margin-bottom: 10px;">
           <input type="range" id="audio-out-slider" min="0" max="100" value="75" style="width: 100%;" />
+          <div class="audio-test-bar">
+            <span class="muted-hint" id="audio-speaker-test-status">点击测试左/右声道或立体声扬声器输出</span>
+            <div class="pill-group">
+              <button class="pill-btn" data-speaker-test="left" data-cmd="settings:audio-test-speaker:left">测试左声道</button>
+              <button class="pill-btn" data-speaker-test="right" data-cmd="settings:audio-test-speaker:right">测试右声道</button>
+              <button class="pill-btn" data-speaker-test="stereo" data-cmd="settings:audio-test-speaker:stereo">立体声测试音</button>
+            </div>
+          </div>
         </div>
         <div id="audio-sink-list" class="disk-list">
           <div class="disk-empty">正在检测音频输出设备...</div>
@@ -603,6 +611,18 @@
         </div>
         <div class="part-section" style="margin-bottom: 10px;">
           <input type="range" id="audio-mic-slider" min="0" max="100" value="100" style="width: 100%;" />
+          <div class="audio-mic-test-panel">
+            <div class="audio-test-bar">
+              <div class="audio-mic-test-left">
+                <button class="btn small" id="btn-mic-test" data-cmd="settings:audio-test-mic:toggle">测试麦克风（回听自己声音）</button>
+                <span class="muted-hint" id="audio-mic-test-status">点击开启实时监听与音量电平检测（建议使用耳机防止啸叫）</span>
+              </div>
+              <span class="status-chip" id="audio-mic-level-chip">电平 --</span>
+            </div>
+            <div class="audio-meter-track">
+              <div class="audio-meter-fill" id="audio-mic-level-fill"></div>
+            </div>
+          </div>
         </div>
         <div id="audio-source-list" class="disk-list">
           <div class="disk-empty">正在检测麦克风设备...</div>

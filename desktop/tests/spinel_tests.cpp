@@ -452,6 +452,34 @@ void test_ipc_router() {
     EXPECT(!is_valid_block_dev_path("/tmp/sda1"));
     EXPECT(is_valid_audio_node_name("alsa_output.pci-0000_01_00.1.hdmi-stereo"));
     EXPECT(!is_valid_audio_node_name("alsa_output bad\nnode"));
+    EXPECT(is_valid_audio_test_channel("left"));
+    EXPECT(is_valid_audio_test_channel("right"));
+    EXPECT(is_valid_audio_test_channel("stereo"));
+    EXPECT(is_valid_audio_test_channel("stop"));
+    EXPECT(!is_valid_audio_test_channel("left;rm -rf /"));
+    {
+        auto left_wav = build_speaker_test_wav("left", 48000);
+        auto right_wav = build_speaker_test_wav("right", 48000);
+        auto stereo_wav = build_speaker_test_wav("stereo", 48000);
+        EXPECT(left_wav.size() > 44 && left_wav[0] == 'R' && left_wav[1] == 'I' && left_wav[8] == 'W');
+        EXPECT(right_wav.size() > 44 && stereo_wav.size() > left_wav.size());
+        long long l_energy = 0, r_energy = 0;
+        for (size_t off = 44; off + 3 < left_wav.size(); off += 4) {
+            int16_t ls = static_cast<int16_t>(left_wav[off] | (left_wav[off + 1] << 8));
+            int16_t rs = static_cast<int16_t>(left_wav[off + 2] | (left_wav[off + 3] << 8));
+            l_energy += std::abs(static_cast<int>(ls));
+            r_energy += std::abs(static_cast<int>(rs));
+        }
+        EXPECT(l_energy > 0 && r_energy == 0);
+        long long rl_energy = 0, rr_energy = 0;
+        for (size_t off = 44; off + 3 < right_wav.size(); off += 4) {
+            int16_t ls = static_cast<int16_t>(right_wav[off] | (right_wav[off + 1] << 8));
+            int16_t rs = static_cast<int16_t>(right_wav[off + 2] | (right_wav[off + 3] << 8));
+            rl_energy += std::abs(static_cast<int>(ls));
+            rr_energy += std::abs(static_cast<int>(rs));
+        }
+        EXPECT(rl_energy == 0 && rr_energy > 0);
+    }
     EXPECT(is_valid_mnt_leaf("jd_ssd3000"));
     EXPECT(is_valid_mnt_leaf("nvme1n1p2"));
     EXPECT(!is_valid_mnt_leaf("../etc"));
@@ -487,6 +515,8 @@ void test_ipc_router() {
     EXPECT(!parse_ipv4_mask_prefix("255.0.255.0", pfx));
     dummy.shutting_down.store(true);
     EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-speaker:stop", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-mic:stop", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "settings:net-ip-apply\ndevice=eth0\nmethod=auto", mock_actions, &reply));
 }
 
