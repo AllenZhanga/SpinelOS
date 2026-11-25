@@ -944,6 +944,35 @@ void apply_native_css(NativeShellState *ns) {
         ".spinel-launcher-list row:selected .spinel-launcher-enter {\n"
         "  background-color: rgba(255, 255, 255, 0.22);\n"
         "  color: #ffffff;\n"
+        "}\n"
+        ".spinel-switcher-panel {\n"
+        "  background-color: " + t.popover_bg + ";\n"
+        "  border: 1px solid " + t.cc_border + ";\n"
+        "  border-radius: 22px;\n"
+        "  padding: 16px 18px 13px 18px;\n"
+        "  box-shadow: " + std::string(launcher_shadow) + ";\n"
+        "  color: " + t.bar_fg + ";\n"
+        "}\n"
+        ".spinel-switcher-card {\n"
+        "  background: transparent;\n"
+        "  border: 2px solid transparent;\n"
+        "  border-radius: 16px;\n"
+        "  padding: 12px 10px 10px 10px;\n"
+        "  min-width: 108px;\n"
+        "}\n"
+        ".spinel-switcher-card:hover { background-color: " + std::string(cc_chip_bg) + "; }\n"
+        ".spinel-switcher-card.is-selected {\n"
+        "  background-color: " + std::string(cc_chip_hover) + ";\n"
+        "  border-color: " + t.cc_accent + ";\n"
+        "}\n"
+        ".spinel-switcher-app {\n"
+        "  font-size: 12.5px; font-weight: 700; color: " + t.bar_fg + ";\n"
+        "}\n"
+        ".spinel-switcher-title {\n"
+        "  font-size: 10.5px; color: " + std::string(cc_sub_fg) + ";\n"
+        "}\n"
+        ".spinel-switcher-hint {\n"
+        "  font-size: 11px; color: " + std::string(cc_sub_fg) + "; margin-top: 4px;\n"
         "}\n";
 
     GdkDisplay *display = gdk_display_get_default();
@@ -1101,6 +1130,250 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
     }), ns);
 }
 
+std::string resolve_switcher_app_name(const NativeShellState *ns, const TrackedWindowInfo &w) {
+    std::string hay = to_lower_copy(w.app_id + " " + w.title);
+    if (hay.find("系统监视器") != std::string::npos || hay.find("spinel monitor") != std::string::npos) return "系统监视器";
+    if (hay.find("spinel doctor") != std::string::npos) return "Spinel Doctor";
+    if (hay.find("系统设置") != std::string::npos || hay.find("settings") != std::string::npos) return "系统设置";
+    if (hay.find("游戏与启动中心") != std::string::npos || hay.find("app-games") != std::string::npos) return "游戏中心";
+    if (hay.find("应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) return "应用商店";
+    if (hay.find("安装") != std::string::npos || hay.find("installer") != std::string::npos) return "系统安装";
+    if (hay.find("spinel-files") != std::string::npos || hay.find("org.spinelos.files") != std::string::npos ||
+        hay.find("文件管理") != std::string::npos) return "Spinel Files";
+    if (hay.find("spinel-terminal") != std::string::npos || hay.find("org.spinelos.terminal") != std::string::npos ||
+        hay.find("终端") != std::string::npos) return "Spinel 终端";
+    if (hay.find("chromium") != std::string::npos) return "Chromium";
+    if (hay.find("chrome") != std::string::npos) return "Google Chrome";
+    if (hay.find("firefox") != std::string::npos) return "Firefox";
+    if (hay.find("steam") != std::string::npos) return hay.find("gamescope") != std::string::npos ? "主机大屏" : "Steam";
+    if (hay.find("antigravity") != std::string::npos) return "Antigravity";
+    if (hay.find("monocloud") != std::string::npos) return "MonoCloud";
+
+    if (ns) {
+        std::string laid = to_lower_copy(trim_copy(w.app_id));
+        std::string ltitle = to_lower_copy(trim_copy(w.title));
+        for (const auto &a : ns->desktop_apps) {
+            std::string aid = to_lower_copy(a.id);
+            std::string aname = to_lower_copy(a.name);
+            if ((!laid.empty() && (aid == laid || (!aid.empty() && laid.find(aid) != std::string::npos))) ||
+                (!ltitle.empty() && aname.size() >= 3 && ltitle.find(aname) != std::string::npos)) {
+                return a.name;
+            }
+        }
+    }
+    return !w.app_id.empty() ? w.app_id : (!w.title.empty() ? w.title : "应用窗口");
+}
+
+void update_switcher_selection_ui(NativeShellState *ns) {
+    if (!ns) return;
+    int n = static_cast<int>(ns->switcher_cards.size());
+    for (int i = 0; i < n; ++i) {
+        if (!ns->switcher_cards[i]) continue;
+        if (i == ns->switcher_index) gtk_widget_add_css_class(ns->switcher_cards[i], "is-selected");
+        else gtk_widget_remove_css_class(ns->switcher_cards[i], "is-selected");
+    }
+    if (ns->switcher_hint_lbl && ns->switcher_index >= 0 &&
+        ns->switcher_index < static_cast<int>(ns->switcher_items.size())) {
+        const auto &cur = ns->switcher_items[static_cast<size_t>(ns->switcher_index)];
+        std::string txt = cur.app_name;
+        if (!cur.title.empty() && cur.title != cur.app_name) {
+            txt += " — " + cur.title;
+        }
+        if (cur.minimized) txt += " (已最小化)";
+        txt += "  ·  Alt+Tab 切换 / Enter 确认 / Esc 取消";
+        gtk_label_set_text(GTK_LABEL(ns->switcher_hint_lbl), txt.c_str());
+    }
+}
+
+void close_switcher(NativeShellState *ns, bool activate_selected) {
+    if (!ns || !ns->switcher_win) return;
+    uint64_t target_id = 0;
+    if (activate_selected && ns->switcher_index >= 0 &&
+        ns->switcher_index < static_cast<int>(ns->switcher_items.size())) {
+        target_id = ns->switcher_items[static_cast<size_t>(ns->switcher_index)].win_id;
+    }
+    ns->switcher_was_active = false;
+    gtk_layer_set_keyboard_mode(ns->switcher_win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    gtk_widget_set_visible(GTK_WIDGET(ns->switcher_win), FALSE);
+    if (ns->switcher_backdrop_win) {
+        gtk_widget_set_visible(GTK_WIDGET(ns->switcher_backdrop_win), FALSE);
+    }
+    if (target_id > 0) {
+        activate_tracked_window(target_id);
+    }
+}
+
+void rebuild_switcher_cards(NativeShellState *ns) {
+    if (!ns || !ns->switcher_flow) return;
+    while (GtkWidget *c = gtk_widget_get_first_child(ns->switcher_flow)) {
+        gtk_flow_box_remove(GTK_FLOW_BOX(ns->switcher_flow), c);
+    }
+    ns->switcher_cards.clear();
+
+    int total = static_cast<int>(ns->switcher_items.size());
+    int per_row = std::clamp(total, 1, 7);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(ns->switcher_flow), static_cast<guint>(per_row));
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(ns->switcher_flow), 7);
+
+    for (int i = 0; i < total; ++i) {
+        const auto &it = ns->switcher_items[static_cast<size_t>(i)];
+        GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+        gtk_widget_add_css_class(card, "spinel-switcher-card");
+        gtk_widget_set_size_request(card, 114, 108);
+        gtk_widget_set_halign(card, GTK_ALIGN_CENTER);
+
+        GtkWidget *da = gtk_drawing_area_new();
+        gtk_widget_set_size_request(da, 58, 58);
+        gtk_widget_set_halign(da, GTK_ALIGN_CENTER);
+        auto *ctx = new DesktopIconDrawCtx{ns, it.icon_path, it.kind};
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_desktop_icon_cb, ctx, free_desktop_icon_ctx);
+
+        GtkWidget *app_lbl = gtk_label_new(it.app_name.c_str());
+        gtk_widget_add_css_class(app_lbl, "spinel-switcher-app");
+        gtk_widget_set_halign(app_lbl, GTK_ALIGN_CENTER);
+        gtk_label_set_ellipsize(GTK_LABEL(app_lbl), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars(GTK_LABEL(app_lbl), 13);
+
+        std::string sub = (!it.title.empty() && it.title != it.app_name)
+            ? it.title
+            : (it.minimized ? "已最小化" : "运行中");
+        GtkWidget *sub_lbl = gtk_label_new(sub.c_str());
+        gtk_widget_add_css_class(sub_lbl, "spinel-switcher-title");
+        gtk_widget_set_halign(sub_lbl, GTK_ALIGN_CENTER);
+        gtk_label_set_ellipsize(GTK_LABEL(sub_lbl), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars(GTK_LABEL(sub_lbl), 14);
+
+        gtk_box_append(GTK_BOX(card), da);
+        gtk_box_append(GTK_BOX(card), app_lbl);
+        gtk_box_append(GTK_BOX(card), sub_lbl);
+
+        GtkGesture *tap = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(tap), GDK_BUTTON_PRIMARY);
+        g_object_set_data(G_OBJECT(card), "sw-idx", GINT_TO_POINTER(i));
+        g_signal_connect(tap, "pressed", G_CALLBACK(+[](GtkGestureClick *g, int, double, double, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
+            int idx = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sw-idx"));
+            n->switcher_index = idx;
+            close_switcher(n, true);
+        }), ns);
+        gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(tap));
+
+        ns->switcher_cards.push_back(card);
+        gtk_flow_box_append(GTK_FLOW_BOX(ns->switcher_flow), card);
+    }
+}
+
+void build_native_switcher(GtkApplication *app, NativeShellState *ns) {
+    GtkWindow *backdrop = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(backdrop, "SpinelSwitcherBackdrop");
+    gtk_window_set_decorated(backdrop, FALSE);
+    gtk_widget_add_css_class(GTK_WIDGET(backdrop), "spinel-transparent");
+    gtk_layer_init_for_window(backdrop);
+    gtk_layer_set_namespace(backdrop, "spinel-switcher-backdrop");
+    gtk_layer_set_layer(backdrop, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(backdrop, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+    gtk_layer_set_exclusive_zone(backdrop, -1);
+    gtk_layer_set_keyboard_mode(backdrop, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    GtkWidget *bg = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_hexpand(bg, TRUE);
+    gtk_widget_set_vexpand(bg, TRUE);
+    GtkGesture *bclick = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bclick), 0);
+    g_signal_connect(bclick, "pressed", G_CALLBACK(+[](GtkGestureClick *, int, double, double, gpointer d) {
+        close_switcher(static_cast<NativeShellState *>(d), false);
+    }), ns);
+    gtk_widget_add_controller(bg, GTK_EVENT_CONTROLLER(bclick));
+    gtk_window_set_child(backdrop, bg);
+    gtk_widget_set_visible(GTK_WIDGET(backdrop), FALSE);
+    ns->switcher_backdrop_win = backdrop;
+
+    GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
+    gtk_window_set_title(win, "SpinelSwitcher");
+    gtk_window_set_decorated(win, FALSE);
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
+    gtk_window_set_default_size(win, -1, -1);
+    gtk_layer_init_for_window(win);
+    gtk_layer_set_namespace(win, "spinel-switcher");
+    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_add_css_class(panel, "spinel-switcher-panel");
+    gtk_widget_set_margin_top(panel, 28);
+    gtk_widget_set_margin_bottom(panel, 48);
+    gtk_widget_set_margin_start(panel, 36);
+    gtk_widget_set_margin_end(panel, 36);
+
+    GtkWidget *flow = gtk_flow_box_new();
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow), GTK_SELECTION_NONE);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flow), TRUE);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 10);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 10);
+    gtk_widget_set_halign(flow, GTK_ALIGN_CENTER);
+
+    GtkWidget *hint = gtk_label_new("Alt+Tab 切换 / Enter 确认 / Esc 取消");
+    gtk_widget_add_css_class(hint, "spinel-switcher-hint");
+    gtk_widget_set_halign(hint, GTK_ALIGN_CENTER);
+    gtk_label_set_ellipsize(GTK_LABEL(hint), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(hint), 68);
+
+    gtk_box_append(GTK_BOX(panel), flow);
+    gtk_box_append(GTK_BOX(panel), hint);
+    gtk_window_set_child(win, panel);
+
+    ns->switcher_win = win;
+    ns->switcher_flow = flow;
+    ns->switcher_hint_lbl = hint;
+
+    GtkEventController *key_ctl = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(key_ctl, GTK_PHASE_CAPTURE);
+    g_signal_connect(key_ctl, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        int total = static_cast<int>(n->switcher_items.size());
+        if (keyval == GDK_KEY_Escape) {
+            close_switcher(n, false);
+            return TRUE;
+        }
+        if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter || keyval == GDK_KEY_space) {
+            close_switcher(n, true);
+            return TRUE;
+        }
+        if (total > 0 && (keyval == GDK_KEY_Right || keyval == GDK_KEY_Down || keyval == GDK_KEY_Tab)) {
+            n->switcher_index = (n->switcher_index + 1) % total;
+            update_switcher_selection_ui(n);
+            return TRUE;
+        }
+        if (total > 0 && (keyval == GDK_KEY_Left || keyval == GDK_KEY_Up || keyval == GDK_KEY_ISO_Left_Tab)) {
+            n->switcher_index = (n->switcher_index + total - 1) % total;
+            update_switcher_selection_ui(n);
+            return TRUE;
+        }
+        return FALSE;
+    }), ns);
+    g_signal_connect(key_ctl, "key-released", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n || !n->switcher_win || !gtk_widget_get_visible(GTK_WIDGET(n->switcher_win))) return;
+        if (keyval == GDK_KEY_Alt_L || keyval == GDK_KEY_Alt_R ||
+            keyval == GDK_KEY_Meta_L || keyval == GDK_KEY_Meta_R) {
+            close_switcher(n, true);
+        }
+    }), ns);
+    gtk_widget_add_controller(GTK_WIDGET(win), key_ctl);
+
+    g_signal_connect(win, "notify::is-active", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n || !gtk_widget_get_visible(GTK_WIDGET(obj))) return;
+        bool active = gtk_window_is_active(GTK_WINDOW(obj));
+        if (active) n->switcher_was_active = true;
+        else if (n->switcher_was_active) close_switcher(n, false);
+    }), ns);
+}
+
 void close_startup_splash(NativeShellState *ns) {
     if (!ns) return;
     if (ns->splash_timer) {
@@ -1228,7 +1501,54 @@ void native_shell_toggle_cc(AppState *state) {
 void native_shell_toggle_launcher(AppState *state) {
     if (!state || !state->native || !state->native->launcher_win) return;
     bool vis = gtk_widget_get_visible(GTK_WIDGET(state->native->launcher_win));
+    if (!vis) shell_internal::close_switcher(state->native, false);
     shell_internal::set_launcher_visible(state->native, !vis);
+}
+
+void native_shell_step_switcher(AppState *state, bool prev) {
+    if (!state || !state->native || !state->native->switcher_win) return;
+    NativeShellState *ns = state->native;
+    if (gtk_widget_get_visible(GTK_WIDGET(ns->switcher_win))) {
+        int total = static_cast<int>(ns->switcher_items.size());
+        if (total > 0) {
+            ns->switcher_index = (ns->switcher_index + (prev ? (total - 1) : 1)) % total;
+            shell_internal::update_switcher_selection_ui(ns);
+        }
+        return;
+    }
+
+    auto wins = list_tracked_windows_mru();
+    if (wins.empty()) return;
+
+    shell_internal::set_launcher_visible(ns, false);
+    native_shell_set_cc_visible(state, false);
+    ns->desktop_apps = list_desktop_apps();
+    ns->switcher_items.clear();
+    for (const auto &w : wins) {
+        NativeShellState::SwitcherItem item;
+        item.win_id = w.id;
+        item.app_name = shell_internal::resolve_switcher_app_name(ns, w);
+        item.title = w.title;
+        item.icon_path = shell_internal::find_app_icon_path(ns->desktop_apps, {w.app_id, item.app_name, w.title});
+        item.kind = shell_internal::match_app_kind(w.app_id + " " + w.title);
+        item.minimized = w.minimized;
+        ns->switcher_items.push_back(std::move(item));
+    }
+
+    int total = static_cast<int>(ns->switcher_items.size());
+    ns->switcher_index = prev ? (total - 1) : (total > 1 ? 1 : 0);
+    ns->switcher_was_active = false;
+    shell_internal::rebuild_switcher_cards(ns);
+    shell_internal::update_switcher_selection_ui(ns);
+
+    if (ns->switcher_backdrop_win) {
+        gtk_widget_set_visible(GTK_WIDGET(ns->switcher_backdrop_win), TRUE);
+        gtk_window_present(ns->switcher_backdrop_win);
+    }
+    gtk_layer_set_keyboard_mode(ns->switcher_win, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
+    gtk_widget_set_visible(GTK_WIDGET(ns->switcher_win), TRUE);
+    gtk_window_present(ns->switcher_win);
+    gtk_widget_grab_focus(GTK_WIDGET(ns->switcher_win));
 }
 
 void native_shell_show_osd(AppState *state, const std::string &kind, int value, bool muted) {

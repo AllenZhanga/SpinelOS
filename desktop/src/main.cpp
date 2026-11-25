@@ -443,6 +443,14 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
     add_act("toggle-launcher", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         native_shell_toggle_launcher(static_cast<AppState *>(d));
     }));
+    GSimpleAction *switcher_act = g_simple_action_new("switcher", G_VARIANT_TYPE_STRING);
+    g_signal_connect(switcher_act, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *param, gpointer d) {
+        const char *dir = param ? g_variant_get_string(param, nullptr) : nullptr;
+        bool prev = (dir && std::string(dir) == "prev");
+        native_shell_step_switcher(static_cast<AppState *>(d), prev);
+    }), state);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(switcher_act));
+    g_object_unref(switcher_act);
     GSimpleAction *osd_act = g_simple_action_new("osd", G_VARIANT_TYPE_STRING);
     g_signal_connect(osd_act, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *param, gpointer d) {
         const char *op = param ? g_variant_get_string(param, nullptr) : nullptr;
@@ -498,6 +506,9 @@ void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
 void native_shell_toggle_launcher(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher"); }
+void native_shell_step_switcher(AppState *, bool prev) {
+    notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "switcher", false, prev ? "prev" : "next");
+}
 void native_shell_show_osd(AppState *, const std::string &, int, bool) {}
 #endif
 
@@ -584,6 +595,11 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && std::string(argv[1]) == "--launcher") {
         notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher", true);
+        return 0;
+    }
+    if (argc > 1 && std::string(argv[1]) == "--switcher") {
+        const char *dir = (argc > 2 && argv[2] && std::string(argv[2]) == "prev") ? "prev" : "next";
+        notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "switcher", true, dir);
         return 0;
     }
     if (argc > 2 && std::string(argv[1]) == "--osd") {

@@ -16,6 +16,7 @@ namespace {
 
 struct TrackedWindow {
     uint64_t id = 0;
+    uint64_t last_active_seq = 0;
     zwlr_foreign_toplevel_handle_v1 *handle = nullptr;
     std::string title;
     std::string app_id;
@@ -66,6 +67,8 @@ void on_output_leave(void *, zwlr_foreign_toplevel_handle_v1 *, wl_output *) {}
 
 void on_state(void *data, zwlr_foreign_toplevel_handle_v1 *, wl_array *state_arr) {
     auto *w = static_cast<TrackedWindow *>(data);
+    static uint64_t s_active_seq = 0;
+    bool was_active = w->activated;
     w->activated = false;
     w->minimized = false;
     w->maximized = false;
@@ -79,6 +82,9 @@ void on_state(void *data, zwlr_foreign_toplevel_handle_v1 *, wl_array *state_arr
             case ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED: w->maximized = true; break;
             default: break;
         }
+    }
+    if (w->activated && (!was_active || w->last_active_seq == 0)) {
+        w->last_active_seq = ++s_active_seq;
     }
 }
 
@@ -263,6 +269,33 @@ std::vector<TrackedWindowInfo> list_tracked_windows() {
     return out;
 }
 
+std::vector<TrackedWindowInfo> list_tracked_windows_mru() {
+    std::vector<const TrackedWindow *> refs;
+    refs.reserve(g_ctx.windows.size());
+    for (const auto &w : g_ctx.windows) {
+        if (w->ready) refs.push_back(w.get());
+    }
+    std::stable_sort(refs.begin(), refs.end(), [](const TrackedWindow *a, const TrackedWindow *b) {
+        if (a->activated != b->activated) return a->activated > b->activated;
+        if (a->minimized != b->minimized) return !a->minimized;
+        if (a->last_active_seq != b->last_active_seq) return a->last_active_seq > b->last_active_seq;
+        return a->id > b->id;
+    });
+    std::vector<TrackedWindowInfo> out;
+    out.reserve(refs.size());
+    for (const auto *w : refs) {
+        TrackedWindowInfo info;
+        info.id = w->id;
+        info.title = w->title;
+        info.app_id = w->app_id;
+        info.activated = w->activated;
+        info.minimized = w->minimized;
+        info.maximized = w->maximized;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
 void push_windows_to_ui(AppState *state) {
     if (!state || state->shutting_down.load()) return;
 
@@ -301,6 +334,18 @@ void toggle_or_activate_window(uint64_t id) {
         if (g_ctx.seat) {
             zwlr_foreign_toplevel_handle_v1_activate(w->handle, g_ctx.seat);
         }
+    }
+    wl_display_flush(g_ctx.display);
+}
+
+void activate_tracked_window(uint64_t id) {
+    TrackedWindow *w = find_window_by_id(id);
+    if (!w || !w->handle || !g_ctx.display) return;
+    if (w->minimized) {
+        zwlr_foreign_toplevel_handle_v1_unset_minimized(w->handle);
+    }
+    if (g_ctx.seat) {
+        zwlr_foreign_toplevel_handle_v1_activate(w->handle, g_ctx.seat);
     }
     wl_display_flush(g_ctx.display);
 }

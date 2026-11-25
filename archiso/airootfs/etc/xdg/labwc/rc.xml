@@ -61,7 +61,10 @@
       <action name="Execute" command="spinel-shell --osd bright-down" />
     </keybind>
     <keybind key="A-Tab">
-      <action name="NextWindow" />
+      <action name="Execute" command="spinel-shell --switcher next" />
+    </keybind>
+    <keybind key="A-S-Tab">
+      <action name="Execute" command="spinel-shell --switcher prev" />
     </keybind>
     <keybind key="A-F4">
       <action name="Close" />

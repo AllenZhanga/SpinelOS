@@ -14,4 +14,5 @@ void native_shell_sync_perf(AppState *state);
 void native_shell_toggle_cc(AppState *state);
 void native_shell_set_cc_visible(AppState *state, bool visible);
 void native_shell_toggle_launcher(AppState *state);
+void native_shell_step_switcher(AppState *state, bool prev);
 void native_shell_show_osd(AppState *state, const std::string &kind, int value, bool muted = false);

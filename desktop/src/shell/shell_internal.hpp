@@ -159,6 +159,24 @@ struct NativeShellState {
     std::vector<LauncherEntry> launcher_entries;
     bool launcher_was_active = false;
 
+    // Alt+Tab App / Window Switcher
+    struct SwitcherItem {
+        uint64_t win_id = 0;
+        std::string app_name;
+        std::string title;
+        std::string icon_path;
+        std::string kind;
+        bool minimized = false;
+    };
+    GtkWindow *switcher_backdrop_win = nullptr;
+    GtkWindow *switcher_win = nullptr;
+    GtkWidget *switcher_flow = nullptr;
+    GtkWidget *switcher_hint_lbl = nullptr;
+    std::vector<SwitcherItem> switcher_items;
+    std::vector<GtkWidget *> switcher_cards;
+    int switcher_index = 0;
+    bool switcher_was_active = false;
+
     // Custom desktop wallpaper image cache (keyed by path@WxH for multi-monitor support)
     std::string custom_wallpaper_path;
     std::map<std::string, cairo_surface_t *> wallpaper_surfs;
@@ -264,6 +282,7 @@ void build_native_dock(GtkApplication *app, NativeShellState *ns);
 void build_native_control_center(GtkApplication *app, NativeShellState *ns);
 void apply_native_css(NativeShellState *ns);
 void build_native_launcher(GtkApplication *app, NativeShellState *ns);
+void build_native_switcher(GtkApplication *app, NativeShellState *ns);
 void close_startup_splash(NativeShellState *ns);
 void show_desktop_startup_splash(GtkApplication *app, NativeShellState *ns);
 void build_osd_window(GtkApplication *app, NativeShellState *ns);
