@@ -490,7 +490,7 @@
       { label: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [] }
     ];
     if (state.isLiveEnv) {
-      baseShortcuts.push({ label: "安装 SpinelOS", cmd: "installer:open", kind: "installer", appKeys: [] });
+      baseShortcuts.push({ label: "安装 Spinel OS", cmd: "installer:open", kind: "installer", appKeys: [] });
     }
 
     const storeFeaturedIds = ["google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl", "lutris", "protonup-qt", "gravitymark", "discord", "com.obsproject.studio"];
@@ -733,15 +733,15 @@
 
     const pinned = [
       { title: "游戏与应用中心", cmd: "games:open", kind: "games", appKeys: [], match: ["游戏与启动中心"] },
-      { title: "应用商店", cmd: "store:open", kind: "store", appKeys: [], match: ["spinelos 应用商店"] },
+      { title: "应用商店", cmd: "store:open", kind: "store", appKeys: [], match: ["spinel os 应用商店", "spinelos 应用商店"] },
       { title: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"], match: ["steam"] },
       { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [], match: ["gamescope"] },
       { title: "Spinel Files 文件管理", cmd: "launch:files", kind: "files", appKeys: ["org.spinelos.files", "thunar", "org.xfce.thunar"], match: ["spinel-files", "org.spinelos.files", "thunar"] },
       { title: "终端", cmd: "launch:terminal", kind: "terminal", appKeys: ["org.spinelos.terminal", "org.gnome.ptyxis", "ptyxis", "foot"], match: ["spinel-terminal", "org.spinelos.terminal", "spinel 终端", "ptyxis", "foot"] },
-      { title: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [], match: ["spinelos 系统设置"] }
+      { title: "系统设置", cmd: "settings:open:display", kind: "settings", appKeys: [], match: ["spinel os 系统设置", "spinelos 系统设置"] }
     ];
     if (state.isLiveEnv) {
-      pinned.push({ title: "安装 SpinelOS 到硬盘", cmd: "installer:open", kind: "installer", appKeys: [], match: ["安装 spinel"] });
+      pinned.push({ title: "安装 Spinel OS 到硬盘", cmd: "installer:open", kind: "installer", appKeys: [], match: ["安装 spinel"] });
     }
 
     pinnedEl.innerHTML = "";

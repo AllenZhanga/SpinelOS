@@ -526,7 +526,7 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 std::vector<std::string> cmd = base_sudo;
                 append_proxy_env_prefix(cmd);
                 cmd.insert(cmd.end(), {"pacman", "-Syu", "--noconfirm"});
-                emit_store_line(state, "==> 正在全面更新 SpinelOS 系统软件包...");
+                emit_store_line(state, "==> 正在全面更新 Spinel OS 系统软件包...");
                 rc = run_streaming_command(state, cmd, pwd_in);
                 if (rc == 0 && !state->store_cancel_requested.load() && has_flatpak_cli()) {
                     emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SpinelOS Desktop</title>
+  <title>Spinel OS Desktop</title>
   <link rel="icon" type="image/png" href="spinel-logo.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -11,8 +11,8 @@
   <!-- 1. macOS-style Top Menu Bar (?mode=bar) -->
   <header id="top-bar" class="hidden">
     <div class="bar-left">
-      <button class="bar-brand-btn" data-cmd="games:open" title="SpinelOS 游戏与应用中心" aria-label="SpinelOS 菜单">
-        <img src="spinel-logo.png" alt="SpinelOS" style="width:18px;height:18px;object-fit:contain;" />
+      <button class="bar-brand-btn" data-cmd="games:open" title="Spinel OS 游戏与应用中心" aria-label="Spinel OS 菜单">
+        <img src="spinel-logo.png" alt="Spinel OS" style="width:18px;height:18px;object-fit:contain;" />
       </button>
       <span id="bar-active-app" class="active-app-name">访达</span>
       <button class="menu-link" data-cmd="games:open">游戏库</button>
@@ -142,7 +142,7 @@
             <span class="cc-hub-badge" id="cc-gpu-short">GPU</span>
           </div>
           <div class="cc-hub-meta">
-            <strong>SpinelOS 控制</strong>
+            <strong>Spinel OS 控制</strong>
             <small id="cc-mem-val">内存 --</small>
           </div>
           <div class="cc-hub-actions">
@@ -255,7 +255,7 @@
         <div class="storage-grid" id="storage-cache-summary">
           <div class="status-row"><span>Steam 着色器缓存 (shadercache)</span><strong id="cache-shader-sz">--</strong></div>
           <div class="status-row"><span>未完成下载缓存 (downloading)</span><strong id="cache-dl-sz">--</strong></div>
-          <div class="status-row"><span>SpinelOS 运行日志</span><strong id="cache-logs-sz">--</strong></div>
+          <div class="status-row"><span>Spinel OS 运行日志</span><strong id="cache-logs-sz">--</strong></div>
           <div class="status-row"><span>系统 Pacman 包缓存 (只读统计)</span><strong id="cache-pacman-sz">--</strong></div>
         </div>
         <div id="storage-feedback" class="feedback-banner hidden"></div>
@@ -377,7 +377,7 @@
           <span>权限与安全</span>
         </button>
       </nav>
-      <div class="settings-sidebar-foot">SpinelOS Gaming</div>
+      <div class="settings-sidebar-foot">Spinel OS</div>
     </aside>
 
     <div class="settings-main">
@@ -892,16 +892,16 @@
       </div>
 
       <div class="inst-section">
-        <h3>关于 SpinelOS</h3>
+        <h3>关于 Spinel OS</h3>
         <div class="about-box glass">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
-            <img src="spinel-logo.png" alt="SpinelOS Logo" style="width:42px;height:42px;object-fit:contain;" />
+            <img src="spinel-logo.png" alt="Spinel OS Logo" style="width:42px;height:42px;object-fit:contain;" />
             <div>
-              <div style="font-size:15px;font-weight:700;">SpinelOS Gaming Linux</div>
+              <div style="font-size:15px;font-weight:700;">Spinel OS</div>
               <div class="muted-hint">Wayland + labwc + GTK4 Native Shell + WebKitGTK6</div>
             </div>
           </div>
-          <div><strong>系统版本：</strong>SpinelOS Gaming Linux (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
+          <div><strong>系统版本：</strong>Spinel OS (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
           <div><strong>当前模式：</strong><span id="about-mode">--</span></div>
           <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
@@ -1091,7 +1091,7 @@
   <section id="app-installer" class="app-window hidden">
     <header class="win-toolbar">
       <div>
-        <h2>安装 SpinelOS 到本地硬盘</h2>
+        <h2>安装 Spinel OS 到本地硬盘</h2>
       </div>
       <span id="inst-env-badge" class="status-chip">检测环境...</span>
     </header>
@@ -1171,7 +1171,7 @@
           </label>
           <label class="checkbox-field">
             <input type="checkbox" id="inst-autologin" checked />
-            <span>开机自动登录并直接进入 SpinelOS 桌面</span>
+            <span>开机自动登录并直接进入 Spinel OS 桌面</span>
           </label>
         </div>
       </div>
@@ -1179,7 +1179,7 @@
       <div class="danger-box">
         <label class="checkbox-field">
           <input type="checkbox" id="inst-confirm-wipe" />
-          <span id="inst-confirm-label">我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 SpinelOS（测试建议优先使用空盘或副盘）。</span>
+          <span id="inst-confirm-label">我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 Spinel OS（测试建议优先使用空盘或副盘）。</span>
         </label>
       </div>
 
@@ -1304,8 +1304,8 @@
   <section id="app-welcome" class="app-window welcome-shell hidden">
     <header class="win-toolbar">
       <div style="display:flex;align-items:center;gap:10px;">
-        <img src="spinel-logo.png" alt="SpinelOS" style="width:24px;height:24px;object-fit:contain;" />
-        <h2>欢迎使用 SpinelOS Gaming Linux</h2>
+        <img src="spinel-logo.png" alt="Spinel OS" style="width:24px;height:24px;object-fit:contain;" />
+        <h2>欢迎使用 Spinel OS</h2>
       </div>
       <div class="welcome-dots" id="welcome-step-dots">
         <span class="welcome-dot active" data-wdot="1"></span>
@@ -1335,7 +1335,7 @@
       <div id="welcome-step-2" class="welcome-pane hidden">
         <div class="inst-section">
           <h3>第 2 步 / 共 4 步 · 网络、代理与中文输入法</h3>
-          <p class="muted-hint" style="margin-top:4px;">SpinelOS 内置 Fcitx5 Wayland 中文拼音与系统级 HTTP/SOCKS 代理同步（自动传递给 Steam 和浏览器）。</p>
+          <p class="muted-hint" style="margin-top:4px;">Spinel OS 内置 Fcitx5 Wayland 中文拼音与系统级 HTTP/SOCKS 代理同步（自动传递给 Steam 和浏览器）。</p>
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row">
               <div class="perf-row-info"><strong>当前网络状态</strong><span class="muted-hint" id="wlc-net-status">正在检测网络...</span></div>
@@ -1377,7 +1377,7 @@
       <div id="welcome-step-4" class="welcome-pane hidden">
         <div class="inst-section">
           <h3>第 4 步 / 共 4 步 · 常用桌面快捷键速览</h3>
-          <p class="muted-hint" style="margin-top:4px;">记住以下 4 组高频热键即可高效驾驭 SpinelOS，全部快捷键随时可在「系统设置 → 键盘与快捷键」自定义。</p>
+          <p class="muted-hint" style="margin-top:4px;">记住以下 4 组高频热键即可高效驾驭 Spinel OS，全部快捷键随时可在「系统设置 → 键盘与快捷键」自定义。</p>
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row"><div class="perf-row-info"><strong>全局搜索启动器 (Spotlight)</strong><span class="muted-hint">搜应用、Steam 游戏、系统设置直达页</span></div><span class="kbd-cap">Alt + Space</span></div>
             <div class="perf-row"><div class="perf-row-info"><strong>窗口半屏贴边 / 多工作区</strong><span class="muted-hint">左右分屏、最大化及 4 个工作区切换</span></div><div class="footer-actions"><span class="kbd-cap">Super + ←/→</span><span class="kbd-cap">Ctrl + Alt + ←/→</span></div></div>

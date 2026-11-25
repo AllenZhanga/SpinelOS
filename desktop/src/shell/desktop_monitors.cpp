@@ -377,7 +377,7 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
     push_sc("终端", "launch:terminal", "terminal", "");
     push_sc("系统设置", "settings:open:display", "settings", "");
     if (ns->telemetry.is_live) {
-        push_sc("安装 SpinelOS", "installer:open", "installer", "");
+        push_sc("安装 Spinel OS", "installer:open", "installer", "");
     }
 
     static const char *kFeaturedStoreIds[] = {

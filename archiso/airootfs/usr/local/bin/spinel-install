@@ -145,7 +145,7 @@ check_min_bytes() {
   local sz
   sz="$(lsblk -bdno SIZE "$dev" 2>/dev/null | head -n1 || echo 0)"
   if [[ "${sz:-0}" -lt "$min_bytes" ]]; then
-    echo "[ERROR] 目标存储空间不足 20 GiB（当前 $((sz / 1073741824)) GiB），无法完整安装 SpinelOS。" >&2
+    echo "[ERROR] 目标存储空间不足 20 GiB（当前 $((sz / 1073741824)) GiB），无法完整安装 Spinel OS。" >&2
     exit 1
   fi
 }
@@ -242,7 +242,7 @@ fi
 
 echo "==> User: $USERNAME | Hostname: $HOSTNAME | Timezone: $TIMEZONE | Autologin: $AUTOLOGIN"
 
-progress 22 "正在复制 SpinelOS 系统镜像到目标分区（可能需要几分钟）..."
+progress 22 "正在复制 Spinel OS 系统镜像到目标分区（可能需要几分钟）..."
 SFS_PATH="/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
 if [[ -f "$SFS_PATH" ]]; then
   echo "==> Extracting $SFS_PATH to /mnt..."
@@ -310,8 +310,8 @@ EOF
 
 rm -f /mnt/etc/os-release
 cat > /mnt/etc/os-release <<'EOF'
-NAME="SpinelOS"
-PRETTY_NAME="SpinelOS Gaming Linux"
+NAME="Spinel OS"
+PRETTY_NAME="Spinel OS"
 ID=spinelos
 ID_LIKE=arch
 BUILD_ID=rolling
@@ -321,7 +321,7 @@ LOGO=spinelos
 EOF
 
 cat > /mnt/etc/motd <<'EOF'
-SpinelOS Gaming Linux — Wayland + Steam/Proton Desktop
+Spinel OS — Wayland Desktop
 EOF
 
 sed -i 's/^#\s*en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /mnt/etc/locale.gen
@@ -401,7 +401,7 @@ if [[ -f /mnt/etc/mkinitcpio.conf ]] && [[ -x /mnt/usr/bin/plymouthd ]]; then
 fi
 arch-chroot /mnt mkinitcpio -P
 
-progress 92 "正在安装 GRUB 引导程序并写入 SpinelOS 引导项..."
+progress 92 "正在安装 GRUB 引导程序并写入 Spinel OS 引导项..."
 if [[ -d /usr/share/grub/themes/spinelos ]]; then
   mkdir -p /mnt/boot/grub/themes/spinelos
   cp -a /usr/share/grub/themes/spinelos/. /mnt/boot/grub/themes/spinelos/
@@ -444,4 +444,4 @@ arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 sync
 umount -R /mnt || true
 
-progress 100 "SpinelOS 已成功安装到 ${TARGET_LABEL}！请拔出安装介质并重启电脑。"
+progress 100 "Spinel OS 已成功安装到 ${TARGET_LABEL}！请拔出安装介质并重启电脑。"

@@ -1,5 +1,5 @@
-NAME="SpinelOS"
-PRETTY_NAME="SpinelOS Gaming Linux"
+NAME="Spinel OS"
+PRETTY_NAME="Spinel OS"
 ID=spinelos
 ID_LIKE=arch
 BUILD_ID=rolling

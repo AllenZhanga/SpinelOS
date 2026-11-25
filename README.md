@@ -1,8 +1,8 @@
 <div align="center">
 
-# SpinelOS
+# Spinel OS
 
-**一个不基于 KDE / GNOME / XFCE 的轻量级 Wayland 游戏桌面发行版**
+**一个不基于 KDE / GNOME / XFCE 的轻量级 Wayland 桌面操作系统**
 
 基于 **Arch Linux (`archiso`)** 构建 · **C++20 原生桌面外壳 (`Spinel Shell`)** · **Steam / Gamescope / MangoHud 开箱即用** · **原生中文输入法与系统代理**
 
@@ -24,13 +24,13 @@
 > <!-- ![SpinelOS Gamescope & Control Center](docs/assets/games-center.png) -->
 
 > [!NOTE]
-> **当前项目状态（Alpha 预览阶段）**：SpinelOS 目前面向桌面开发者、Linux 玩家与早期尝鲜用户提供源码与 Live ISO 构建链路。欢迎在 [Issues](https://github.com/AllenZhanga/SpinelOS/issues) 提交真机显卡适配（AMD / Intel / NVIDIA）与体验反馈。
+> **当前项目状态（Alpha 预览阶段）**：Spinel OS 目前面向桌面开发者、Linux 日用及游戏玩家与早期尝鲜用户提供源码与 Live ISO 构建链路。欢迎在 [Issues](https://github.com/AllenZhanga/SpinelOS/issues) 提交真机显卡适配（AMD / Intel / NVIDIA）与体验反馈。
 
 ---
 
-## SpinelOS 是什么？
+## Spinel OS 是什么？
 
-很多 Linux 游戏发行版只是在 KDE 或 GNOME 上预装驱动和 Steam。**SpinelOS 希望做得更轻、更统一**：
+很多 Arch 衍生发行版只是在 KDE 或 GNOME 上预装常用软件或驱动。**Spinel OS 希望做得更轻、更统一**：
 
 - **完全独立的桌面外壳与双进程低内存架构**：不依赖 KDE / GNOME / XFCE 整套桌面环境，由自研的 C++20 桌面核心 [`spinel-shell`](desktop/)（纯 `GTK4 + Cairo + gtk4-layer-shell`，常驻内存仅约 **75 MB PSS**）承担顶栏、Dock、桌面、Control Center、Spotlight 全局启动器与剪贴板守护；设置、应用商店、游戏中心与安装向导拆分为按需拉起的 `spinel-webui`（`WebKitGTK 6.0`），关闭即释放全部内存。底层仅由极轻量的 `labwc`（`wlroots`）负责 Wayland/DRM 合成与 `XWayland` 兼容。
 - **自研多标签终端与彩色开机体验**：自研基于 `GTK4 + VTE4` 的多标签终端 `spinel-terminal`（`Ctrl+T` 继承工作目录、内置搜索与主题同步）；配置彩色尖晶石晶体 Logo、静默无感 GRUB 与 Plymouth 开机动画。
@@ -66,7 +66,7 @@
 
 ## 为什么不用传统桌面？
 
-| 维度 | 传统游戏桌面（KDE / GNOME / XFCE） | **SpinelOS (`Spinel Shell + labwc`)** |
+| 维度 | 传统桌面环境（KDE / GNOME / XFCE） | **Spinel OS (`Spinel Shell + labwc`)** |
 | :--- | :--- | :--- |
 | **桌面外壳** | 完整桌面套件，服务与后台组件多 | 自研 C++20 `spinel-shell`（纯 GTK4 + Cairo）+ 按需 `spinel-webui` + `labwc` 合成器 |
 | **主题与交互一致性** | 常混用 GTK3/GTK4/Qt 多套风格，顶栏/设置体验割裂 | 全局统一 [UI_SPEC.md](docs/UI_SPEC.md) 设计规范，主题一键同步到壁纸、顶栏、Dock、窗口装饰与终端 |
@@ -86,7 +86,7 @@
 1. 从 [Releases](https://github.com/AllenZhanga/SpinelOS/releases) 下载最新镜像（或按下方步骤自行构建 `out/spinelos-*.iso`）。
 2. **真机体验**：使用 [Ventoy](https://www.ventoy.net/)、`balenaEtcher` 或 `dd` 写入 U 盘，以 **UEFI 模式** 引导进入 Live 桌面。
 3. **虚拟机体验**：在 QEMU / VMware / VirtualBox 中挂载 ISO（建议启用 UEFI 与 3D 加速）。
-4. **安装到硬盘**：在 Live 桌面点击 **「安装 SpinelOS」**，按向导选择目标磁盘并配置主机名、账户与密码即可完成安装。
+4. **安装到硬盘**：在 Live 桌面点击 **「安装 Spinel OS」**，按向导选择目标磁盘并配置主机名、账户与密码即可完成安装。
 
 > [!IMPORTANT]
 > **Live 环境说明**：Live ISO 默认自动登录演示账户 `gamer` 并允许免密 `sudo` 以便快速尝鲜与部署测试；安装到硬盘正式使用前，请务必为系统账户设置强密码。
@@ -157,7 +157,7 @@ chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 
 ## English Overview
 
-**SpinelOS** is an Arch-based gaming Linux distribution featuring a **custom standalone Wayland desktop shell (`spinel-shell`)** built from scratch in **C++20 (`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`)** on top of the lightweight **`labwc`** compositor — without KDE, GNOME, or XFCE.
+**Spinel OS** is an Arch-based Wayland Linux desktop OS featuring a **custom standalone Wayland desktop shell (`spinel-shell`)** built from scratch in **C++20 (`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`)** on top of the lightweight **`labwc`** compositor — without KDE, GNOME, or XFCE.
 
 - **Ready for Gaming**: Pre-configured `[multilib]`, AMD (`mesa`/`vulkan-radeon`), Intel (`mesa`/`vulkan-intel`), NVIDIA (`nvidia-open`), `gamescope`, `mangohud`, `gamemode`, `pipewire`, and 1-click Store install for Steam.
 - **Cohesive Custom UI**: Unified global top menu bar, Clipboard History (`wl-clip-persist`), Spotlight Launcher (`Alt+Space`), drag-to-reorder Dock, Bento Control Center, custom image wallpapers + multi-theme engine, Flatpak + `pacman` App Store, and `PSS`-accurate Process Monitor.

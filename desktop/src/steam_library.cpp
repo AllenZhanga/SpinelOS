@@ -928,7 +928,7 @@ void handle_game_override_command(AppState *state, const std::string &payload, b
     append_app_log("[Games] 已保存 AppID=" + ov.appid + " 独立性能配置（" + build_steam_launch_options(resolve_perf_for_appid(ov.appid, load_perf_config())) + "）");
     if (sr.steam_running && state) {
         show_steam_alert(state, "独立参数已保存",
-                         "SpinelOS 已保存该游戏的独立配置；当前 Steam 正在运行，重启 Steam 后启动器将自动同步到 Steam 客户端配置。");
+                         "Spinel OS 已保存该游戏的独立配置；当前 Steam 正在运行，重启 Steam 后启动器将自动同步到 Steam 客户端配置。");
     }
     push_steam_library(state);
 }

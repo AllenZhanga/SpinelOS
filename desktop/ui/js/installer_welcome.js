@@ -31,7 +31,7 @@
     const confirmLabel = document.getElementById("inst-confirm-label");
     if (confirmLabel) {
       confirmLabel.textContent = state.installMode === "disk"
-        ? "我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 SpinelOS（测试建议优先使用空盘或副盘）。"
+        ? "我已确认所选硬盘无重要数据，允许清空整块硬盘并安装 Spinel OS（测试建议优先使用空盘或副盘）。"
         : "我已确认所选根分区 (/) 无重要数据，允许将其格式化为 ext4（其余分区与原 EFI 文件将保留）。";
     }
     showFormError("");
@@ -50,11 +50,11 @@
     if (state.installMode === "disk") {
       if (!state.selectedDisk) { showFormError("请先选择一个目标硬盘。"); return; }
       const sz = installerSizes.get(state.selectedDisk) || 0;
-      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选硬盘容量不足 20 GiB（建议 ≥ 25 GB），无法安装 SpinelOS。"); return; }
+      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选硬盘容量不足 20 GiB（建议 ≥ 25 GB），无法安装 Spinel OS。"); return; }
     } else {
       if (!rootPart) { showFormError("请选择要格式化为根分区 (/) 的目标分区。"); return; }
       const sz = installerSizes.get(rootPart) || 0;
-      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选根分区容量不足 20 GiB（建议 ≥ 25 GB），无法安装 SpinelOS。"); return; }
+      if (sz > 0 && sz < MIN_BYTES) { showFormError("所选根分区容量不足 20 GiB（建议 ≥ 25 GB），无法安装 Spinel OS。"); return; }
       if (state.isUefiMode && !efiPart) { showFormError("UEFI 模式下请选择一个已有的 FAT32 EFI 分区。"); return; }
       if (state.isUefiMode && rootPart === efiPart) { showFormError("根分区和 EFI 分区不能选择同一个分区。"); return; }
     }
@@ -228,7 +228,7 @@
     const hint = document.getElementById("inst-status-hint");
     if (code === 0) {
       window.__spinelInstallerProgress(100, "安装完成！");
-      if (hint) hint.textContent = "SpinelOS 已成功写入硬盘。请拔出安装介质后点击“立即重启电脑”。";
+      if (hint) hint.textContent = "Spinel OS 已成功写入硬盘。请拔出安装介质后点击“立即重启电脑”。";
       document.getElementById("btn-inst-reboot")?.classList.remove("hidden");
     } else {
       const stepEl = document.getElementById("inst-step-text");
@@ -250,7 +250,7 @@
     if (prevBtn) prevBtn.disabled = state.welcomeStep <= 1;
     const nextBtn = document.getElementById("btn-wlc-next");
     if (nextBtn) {
-      nextBtn.textContent = state.welcomeStep >= 4 ? "开始使用 SpinelOS" : "下一步";
+      nextBtn.textContent = state.welcomeStep >= 4 ? "开始使用 Spinel OS" : "下一步";
       nextBtn.setAttribute("data-cmd", state.welcomeStep >= 4 ? "welcome:complete" : "welcome:next");
     }
   }

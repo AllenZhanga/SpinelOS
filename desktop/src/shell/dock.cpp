@@ -151,15 +151,15 @@ std::vector<std::string> split_pin_csv(const std::string &text) {
 std::vector<DockPinSpec> default_dock_pins(bool is_live) {
     std::vector<DockPinSpec> defs = {
         {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}},
-        {"应用商店", "store:open", "store", {}, {"spinelos 应用商店"}},
+        {"应用商店", "store:open", "store", {}, {"spinel os 应用商店", "spinelos 应用商店"}},
         {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
         {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
         {"文件管理", "launch:files", "files", {}, {"spinel-files", "org.spinelos.files", "thunar"}},
         {"终端", "launch:terminal", "terminal", {}, {"spinel-terminal", "org.spinelos.terminal", "spinel 终端", "ptyxis", "org.gnome.ptyxis", "foot"}},
-        {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}}
+        {"系统设置", "settings:open:display", "settings", {}, {"spinel os 系统设置", "spinelos 系统设置"}}
     };
     if (is_live) {
-        defs.push_back({"安装 SpinelOS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}});
+        defs.push_back({"安装 Spinel OS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}});
     }
     return defs;
 }
@@ -226,11 +226,11 @@ DockPinSpec resolve_pin_spec_from_item(const NativeShellState *ns, const DockIte
     if (hay.find("游戏与启动中心") != std::string::npos) {
         return {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}};
     }
-    if (hay.find("spinelos 应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
-        return {"应用商店", "store:open", "store", {}, {"spinelos 应用商店"}};
+    if (hay.find("spinel os 应用商店") != std::string::npos || hay.find("spinelos 应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
+        return {"应用商店", "store:open", "store", {}, {"spinel os 应用商店", "spinelos 应用商店"}};
     }
-    if (hay.find("spinelos 系统设置") != std::string::npos) {
-        return {"系统设置", "settings:open:display", "settings", {}, {"spinelos 系统设置"}};
+    if (hay.find("spinel os 系统设置") != std::string::npos || hay.find("spinelos 系统设置") != std::string::npos) {
+        return {"系统设置", "settings:open:display", "settings", {}, {"spinel os 系统设置", "spinelos 系统设置"}};
     }
     if (hay.find("系统监视器") != std::string::npos || hay.find("spinel monitor") != std::string::npos) {
         return {"系统监视器", "monitor:open:procs", "settings", {}, {"系统监视器"}};
@@ -239,7 +239,7 @@ DockPinSpec resolve_pin_spec_from_item(const NativeShellState *ns, const DockIte
         return {"Spinel Doctor", "doctor:open", "settings", {}, {"spinel doctor"}};
     }
     if (hay.find("安装 spinel") != std::string::npos) {
-        return {"安装 SpinelOS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}};
+        return {"安装 Spinel OS 到硬盘", "installer:open", "installer", {}, {"安装 spinel"}};
     }
     if (hay.find("gamescope") != std::string::npos) {
         return {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}};

@@ -1,6 +1,6 @@
-# SpinelOS 演进路线图与架构重构规划
+# Spinel OS 演进路线图与架构重构规划
 
-> **定位目标**：将 SpinelOS 从“轻量级 Wayland 游戏发行版（Alpha）”演进为可长期作为日常主力的 **Office（办公） + AI（Coding & AI Agent OS） + Game（游戏）三合一桌面操作系统**。
+> **定位目标**：将 Spinel OS 从“轻量级 Wayland 桌面发行版（Alpha）”演进为可长期作为日常主力的 **Office（办公） + AI（Coding & AI Agent OS） + Game（游戏）三合一桌面操作系统**。
 
 ---
 

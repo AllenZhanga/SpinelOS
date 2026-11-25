@@ -195,7 +195,7 @@ void ensure_app_window(AppState *state,
 
 void open_games_window(AppState *state) {
     ensure_app_window(state, &state->games_win, &state->games_view,
-                      "SpinelOS 游戏与启动中心", "?mode=games", 1040, 680);
+                      "Spinel OS 游戏与启动中心", "?mode=games", 1040, 680);
     push_theme_state(state);
     push_perf_config(state);
     push_steam_library(state);
@@ -206,7 +206,7 @@ void open_games_window(AppState *state) {
 void open_settings_window(AppState *state, const std::string &tab) {
     bool existed = (state->settings_win != nullptr);
     ensure_app_window(state, &state->settings_win, &state->settings_view,
-                      "SpinelOS 系统设置", "?mode=settings&tab=" + tab, 960, 660);
+                      "Spinel OS 系统设置", "?mode=settings&tab=" + tab, 960, 660);
     if (existed) {
         eval_js(state->settings_view, "window.__spinelOpenSettings && window.__spinelOpenSettings('" + tab + "');");
     }
@@ -217,7 +217,7 @@ void open_settings_window(AppState *state, const std::string &tab) {
 void open_installer_window(AppState *state) {
     bool existed = (state->installer_win != nullptr);
     ensure_app_window(state, &state->installer_win, &state->installer_view,
-                      "安装 SpinelOS 到硬盘", "?mode=installer", 860, 660);
+                      "安装 Spinel OS 到硬盘", "?mode=installer", 860, 660);
     if (existed) {
         push_theme_state(state);
         push_installer_env(state);
@@ -228,7 +228,7 @@ void open_store_window(AppState *state, const std::string &focus_id = "") {
     bool existed = (state->store_win != nullptr);
     std::string query = focus_id.empty() ? "?mode=store" : ("?mode=store&focus=" + focus_id);
     ensure_app_window(state, &state->store_win, &state->store_view,
-                      "SpinelOS 应用商店", query, 1020, 680);
+                      "Spinel OS 应用商店", query, 1020, 680);
     if (existed) {
         if (!focus_id.empty()) {
             eval_js(state->store_view, "window.__spinelFocusStoreApp && window.__spinelFocusStoreApp('" + focus_id + "');");
@@ -242,7 +242,7 @@ void open_store_window(AppState *state, const std::string &focus_id = "") {
 void open_welcome_window(AppState *state) {
     bool existed = (state->welcome_win != nullptr);
     ensure_app_window(state, &state->welcome_win, &state->welcome_view,
-                      "欢迎使用 SpinelOS", "?mode=welcome", 820, 620);
+                      "欢迎使用 Spinel OS", "?mode=welcome", 820, 620);
     if (existed) {
         push_theme_state(state);
         push_telemetry_to_view(state->welcome_view);
@@ -357,7 +357,7 @@ void on_power_confirm_reply(GObject *source, GAsyncResult *res, gpointer user_da
 void confirm_power_action(AppState *state, bool is_shutdown) {
     native_shell_set_cc_visible(state, false);
     GtkAlertDialog *dlg = gtk_alert_dialog_new(
-        "%s", is_shutdown ? "确定要关闭 SpinelOS 电源吗？" : "确定要立即重启系统吗？"
+        "%s", is_shutdown ? "确定要关闭 Spinel OS 电源吗？" : "确定要立即重启系统吗？"
     );
     gtk_alert_dialog_set_detail(
         dlg, is_shutdown ? "关机前请确认正在运行的游戏或文档已保存。" : "重启会关闭所有打开的窗口与应用。"

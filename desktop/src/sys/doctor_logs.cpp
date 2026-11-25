@@ -419,7 +419,7 @@ void open_native_log_window(AppState *state, const std::string &banner) {
 
     GtkWidget *win = gtk_window_new();
     ctx->win = GTK_WINDOW(win);
-    gtk_window_set_title(ctx->win, "SpinelOS 系统日志与诊断 (原生排障视图)");
+    gtk_window_set_title(ctx->win, "Spinel OS 系统日志与诊断 (原生排障视图)");
     gtk_window_set_default_size(ctx->win, 880, 580);
 
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -853,7 +853,7 @@ std::string build_redacted_diagnostic_report() {
 
     std::ostringstream report;
     report << "=====================================================\n"
-           << "SpinelOS Doctor Diagnostic Report (Redacted)\n"
+           << "Spinel OS Doctor Diagnostic Report (Redacted)\n"
            << "Generated: " << tbuf << "\n"
            << "Kernel:    " << tel.kernel << "\n"
            << "GPU:       " << tel.gpu << "\n"

@@ -1,4 +1,4 @@
-# SpinelOS Dark GRUB Theme (shown only on multi-boot or when Esc/Shift is pressed)
+# Spinel OS Dark GRUB Theme (shown only on multi-boot or when Esc/Shift is pressed)
 desktop-color: "#060b16"
 title-text: ""
 terminal-font: "Unknown Regular 16"
@@ -16,7 +16,7 @@ terminal-font: "Unknown Regular 16"
     top = 18%+116
     width = 100%
     align = "center"
-    text = "SpinelOS"
+    text = "Spinel OS"
     color = "#f1f5f9"
 }
 

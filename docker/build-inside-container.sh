@@ -54,13 +54,13 @@ EOF
 fi
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos"
 cat > "${PROFILE_DIR}/airootfs/usr/share/doc/spinelos/NOTICE-THIRD-PARTY.txt" <<'EOF'
-SpinelOS Gaming Linux — Third-Party Software & Open-Source License Notice
-========================================================================
-1. First-Party Components (Spinel Shell, Spinel WebUI, Spinel Terminal, themes & scripts):
+Spinel OS — Third-Party Software & Open-Source License Notice
+============================================================
+1. First-Party Components (Spinel Shell, Spinel WebUI, Spinel Terminal, Spinel Files, themes & scripts):
    Licensed under the MIT License (https://github.com/AllenZhanga/SpinelOS).
 
 2. Base OS & Upstream Packages:
-   SpinelOS bundles upstream Linux kernel, systemd, glibc, pacman, GRUB, Plymouth,
+   Spinel OS bundles upstream Linux kernel, systemd, glibc, pacman, GRUB, Plymouth,
    labwc, Mesa, PipeWire, Fcitx5, Noto Fonts, and hardware drivers under their
    respective upstream licenses (GPLv2/GPLv3, LGPL, MIT, BSD, OFL-1.1, and vendor
    firmware/driver licenses).
@@ -127,13 +127,13 @@ if [ -f "${PROFILE_DIR}/efiboot/loader/loader.conf" ]; then
 fi
 for cfg in "${PROFILE_DIR}"/efiboot/loader/entries/*.conf; do
   if [ -f "$cfg" ]; then
-    sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux/SpinelOS/g' "$cfg"
+    sed -i 's/Arch Linux install medium/Spinel OS/g; s/Arch Linux/Spinel OS/g' "$cfg"
     sed -i '/^options / s/$/ quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/' "$cfg"
   fi
 done
 if [ -f "${PROFILE_DIR}/efiboot/loader/entries/01-archiso-linux.conf" ]; then
   cat > "${PROFILE_DIR}/efiboot/loader/entries/02-archiso-safe-linux.conf" <<'EOF'
-title    SpinelOS Safe Graphics & Debug (%ARCH%, UEFI)
+title    Spinel OS Safe Graphics & Debug (%ARCH%, UEFI)
 sort-key 02
 linux    /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
 initrd   /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
@@ -143,8 +143,8 @@ fi
 
 for cfg in "${PROFILE_DIR}"/grub/*.cfg "${PROFILE_DIR}"/syslinux/*.cfg; do
   if [ -f "$cfg" ]; then
-    sed -i 's/Arch Linux install medium/SpinelOS Gaming Linux/g; s/Arch Linux live medium/SpinelOS Live/g; s/Arch Linux/SpinelOS/g' "$cfg"
-    sed -i 's/^MENU BACKGROUND splash.png/# SpinelOS dark menu/' "$cfg"
+    sed -i 's/Arch Linux install medium/Spinel OS/g; s/Arch Linux live medium/Spinel OS Live/g; s/Arch Linux/Spinel OS/g' "$cfg"
+    sed -i 's/^MENU BACKGROUND splash.png/# Spinel OS dark menu/' "$cfg"
     sed -i 's/^TIMEOUT 150/TIMEOUT 20/' "$cfg"
     sed -i 's/^timeout=15/timeout=2/' "$cfg"
     sed -i 's/archisosearchuuid=%ARCHISO_UUID%/archisosearchuuid=%ARCHISO_UUID% quiet splash vt.global_cursor_default=0 loglevel=3 nvidia_drm.modeset=1 nvidia_drm.fbdev=1/g' "$cfg"
@@ -163,7 +163,7 @@ if p.name == "loopback.cfg":
 else:
     boot_loc = 'archisosearchuuid=%ARCHISO_UUID%'
 safe_block = f"""
-menuentry "SpinelOS Safe Graphics & Debug (%ARCH%, UEFI/BIOS)" --class recovery --class gnu-linux --class os --id 'archlinux-safe' {{
+menuentry "Spinel OS Safe Graphics & Debug (%ARCH%, UEFI/BIOS)" --class recovery --class gnu-linux --class os --id 'archlinux-safe' {{
     set gfxpayload=keep
     linux /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux archisobasedir=%INSTALL_DIR% {boot_loc} nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
     initrd /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
@@ -185,9 +185,9 @@ if [ -f "${PROFILE_DIR}/syslinux/archiso_sys-linux.cfg" ]; then
 
 LABEL archsafe
 TEXT HELP
-Boot SpinelOS with safe basic graphics (nomodeset, verbose logs, no NVIDIA/Plymouth).
+Boot Spinel OS with safe basic graphics (nomodeset, verbose logs, no NVIDIA/Plymouth).
 ENDTEXT
-MENU LABEL SpinelOS Safe Graphics & Debug (%ARCH%, BIOS)
+MENU LABEL Spinel OS Safe Graphics & Debug (%ARCH%, BIOS)
 LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
 INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
 APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% nomodeset modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm loglevel=7 plymouth.enable=0 %KERNEL_PARAMS%
@@ -198,8 +198,8 @@ cat <<'EOF' >> "${PROFILE_DIR}/profiledef.sh"
 
 iso_name="spinelos"
 iso_label="SPINELOS_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
-iso_publisher="SpinelOS <https://github.com/AllenZhanga/SpinelOS>"
-iso_application="SpinelOS Gaming Linux Live ISO"
+iso_publisher="Spinel OS <https://github.com/AllenZhanga/SpinelOS>"
+iso_application="Spinel OS Live ISO"
 airootfs_image_type="squashfs"
 airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '10' '-b' '256K')
 file_permissions["/etc/sudoers.d/gamer"]="0:0:0440"

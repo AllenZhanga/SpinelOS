@@ -1,4 +1,4 @@
-// SpinelOS Plymouth Boot Splash Script
+// Spinel OS Plymouth Boot Splash Script
 Window.SetBackgroundTopColor(0.024, 0.043, 0.086);
 Window.SetBackgroundBottomColor(0.043, 0.078, 0.160);
 
@@ -11,12 +11,12 @@ logo_x = screen_w / 2 - logo.image.GetWidth() / 2;
 logo_y = screen_h * 0.42 - logo.image.GetHeight() / 2;
 logo.sprite.SetPosition(logo_x, logo_y, 10);
 
-title.image = Image.Text("SpinelOS", 0.96, 0.98, 1.0, 1.0, "Sans Bold 24");
+title.image = Image.Text("Spinel OS", 0.96, 0.98, 1.0, 1.0, "Sans Bold 24");
 title.sprite = Sprite(title.image);
 title.sprite.SetPosition(screen_w / 2 - title.image.GetWidth() / 2,
                          logo_y + logo.image.GetHeight() + 22, 10);
 
-sub.image = Image.Text("Gaming Linux", 0.58, 0.66, 0.80, 0.9, "Sans 12");
+sub.image = Image.Text("Wayland Desktop", 0.58, 0.66, 0.80, 0.9, "Sans 12");
 sub.sprite = Sprite(sub.image);
 sub.sprite.SetPosition(screen_w / 2 - sub.image.GetWidth() / 2,
                        logo_y + logo.image.GetHeight() + 58, 10);

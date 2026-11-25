@@ -337,13 +337,13 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     GtkWidget *brand_btn = gtk_menu_button_new();
     gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(brand_btn), FALSE);
     gtk_widget_add_css_class(brand_btn, "spinel-bar-brandbtn");
-    gtk_widget_set_tooltip_text(brand_btn, "SpinelOS 系统菜单");
+    gtk_widget_set_tooltip_text(brand_btn, "Spinel OS 系统菜单");
     GtkWidget *gem_da = gtk_drawing_area_new();
     gtk_widget_set_size_request(gem_da, 17, 17);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, ns, nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(brand_btn), gem_da);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
-        {"关于 SpinelOS", "settings:open:appearance"},
+        {"关于 Spinel OS", "settings:open:appearance"},
         {nullptr, ""},
         {"系统设置...", "settings:open:display"},
         {"应用商店", "store:open"},

@@ -186,7 +186,7 @@ void rebuild_launcher_index(NativeShellState *ns) {
 
     if (ns->telemetry.is_live) {
         ns->launcher_entries.push_back({
-            "安装 SpinelOS 到硬盘", "启动系统图形安装向导", "installer disk setup live", "installer:open", "", "installer"
+            "安装 Spinel OS 到硬盘", "启动系统图形安装向导", "installer disk setup live", "installer:open", "", "installer"
         });
     }
 
@@ -445,12 +445,12 @@ void draw_startup_splash_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointe
     double fg_r = ns->theme.is_light ? 0.06 : 0.96;
     double fg_g = ns->theme.is_light ? 0.09 : 0.98;
     double fg_b = ns->theme.is_light ? 0.16 : 1.00;
-    draw_pango_text(cr, "SpinelOS", 0, 0, 19.0, true, fg_r, fg_g, fg_b, 1.0, &tw, &th, true);
-    draw_pango_text(cr, "SpinelOS", (w - tw) * 0.5, pad + 128.0, 19.0, true, fg_r, fg_g, fg_b, 1.0);
+    draw_pango_text(cr, "Spinel OS", 0, 0, 19.0, true, fg_r, fg_g, fg_b, 1.0, &tw, &th, true);
+    draw_pango_text(cr, "Spinel OS", (w - tw) * 0.5, pad + 128.0, 19.0, true, fg_r, fg_g, fg_b, 1.0);
 
     int sw = 0, sh = 0;
-    draw_pango_text(cr, "Gaming Linux · Wayland", 0, 0, 11.5, false, fg_r, fg_g, fg_b, 0.65, &sw, &sh, true);
-    draw_pango_text(cr, "Gaming Linux · Wayland", (w - sw) * 0.5, pad + 156.0, 11.5, false, fg_r, fg_g, fg_b, 0.65);
+    draw_pango_text(cr, "Wayland Desktop", 0, 0, 11.5, false, fg_r, fg_g, fg_b, 0.65, &sw, &sh, true);
+    draw_pango_text(cr, "Wayland Desktop", (w - sw) * 0.5, pad + 156.0, 11.5, false, fg_r, fg_g, fg_b, 0.65);
 
     double bar_w = 176.0;
     double bar_h = 4.0;
@@ -681,7 +681,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(hub_top), hub_gem);
     gtk_box_append(GTK_BOX(hub_top), ns->cc_gpu_badge);
 
-    GtkWidget *hub_title = gtk_label_new("SpinelOS");
+    GtkWidget *hub_title = gtk_label_new("Spinel OS");
     gtk_widget_add_css_class(hub_title, "spinel-cc-title");
     gtk_widget_set_halign(hub_title, GTK_ALIGN_START);
     ns->cc_mem_val = gtk_label_new("内存 --");

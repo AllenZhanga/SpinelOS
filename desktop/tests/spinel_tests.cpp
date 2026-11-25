@@ -382,7 +382,7 @@ void test_system_control_configs() {
     }
     EXPECT(has_drv_check && has_upd_check);
     std::string doc_report = build_redacted_diagnostic_report();
-    EXPECT(doc_report.find("SpinelOS Doctor Diagnostic Report") != std::string::npos);
+    EXPECT(doc_report.find("Spinel OS Doctor Diagnostic Report") != std::string::npos);
     EXPECT(doc_report.find("[Health Checks]") != std::string::npos);
 }
 
