@@ -433,10 +433,15 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     start_clipboard_watcher();
 
     g_timeout_add_seconds(3, on_telemetry_tick, state);
-    if (!is_welcome_completed()) {
+    if (is_live_iso_env() || !is_welcome_completed()) {
         g_timeout_add(1800, +[](gpointer d) -> gboolean {
             auto *st = static_cast<AppState *>(d);
-            if (st && !st->shutting_down.load() && !is_welcome_completed()) {
+            if (!st || st->shutting_down.load()) {
+                return G_SOURCE_REMOVE;
+            }
+            if (is_live_iso_env()) {
+                launch_webui_cmd("installer:open");
+            } else if (!is_welcome_completed()) {
                 launch_webui_cmd("welcome:open");
             }
             return G_SOURCE_REMOVE;

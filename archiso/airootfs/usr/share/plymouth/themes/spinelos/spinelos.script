@@ -21,46 +21,42 @@ sub.sprite = Sprite(sub.image);
 sub.sprite.SetPosition(screen_w / 2 - sub.image.GetWidth() / 2,
                        logo_y + logo.image.GetHeight() + 58, 10);
 
-track.image = Image("bar_track.png");
-track.sprite = Sprite(track.image);
-bar_x = screen_w / 2 - track.image.GetWidth() / 2;
-bar_y = logo_y + logo.image.GetHeight() + 92;
-track.sprite.SetPosition(bar_x, bar_y, 10);
+spinner.base = Image("spinner_ring.png");
+spinner_cx = screen_w / 2;
+spinner_cy = logo_y + logo.image.GetHeight() + 114;
 
-fill.base = Image("bar_fill.png");
-fill.sprite = Sprite();
-fill.sprite.SetPosition(bar_x, bar_y, 11);
+spinner_frames = 48;
+for (i = 0; i < spinner_frames; i++) {
+    spinner_imgs[i] = spinner.base.Rotate(2 * 3.14159265 * i / spinner_frames);
+}
+spinner.sprite = Sprite(spinner_imgs[0]);
+spinner.sprite.SetPosition(spinner_cx - spinner_imgs[0].GetWidth() / 2,
+                           spinner_cy - spinner_imgs[0].GetHeight() / 2, 11);
 
+status_y = spinner_cy + 34;
 status.sprite = Sprite();
-status.sprite.SetPosition(screen_w / 2, bar_y + 22, 12);
+status.sprite.SetPosition(screen_w / 2, status_y, 12);
 
 tick = 0;
-current_progress = 0.08;
 
 fun refresh_callback() {
     tick++;
     // Smooth subtle breathing glow on logo during boot
     pulse = 0.90 + 0.10 * Math.Sin(tick * 0.08);
     logo.sprite.SetOpacity(pulse);
-    if (current_progress < 0.12) {
-        w = 32 + 20 * (0.5 + 0.5 * Math.Sin(tick * 0.09));
-        fill.sprite.SetImage(fill.base.Scale(w, track.image.GetHeight()));
-    }
+
+    // Smooth continuous ring rotation (re-centered as rotated bounds change)
+    idx = tick % spinner_frames;
+    frame = spinner_imgs[idx];
+    spinner.sprite.SetImage(frame);
+    spinner.sprite.SetPosition(spinner_cx - frame.GetWidth() / 2,
+                               spinner_cy - frame.GetHeight() / 2, 11);
 }
 Plymouth.SetRefreshFunction(refresh_callback);
-
-fun boot_progress_callback(duration, progress) {
-    if (progress > current_progress) current_progress = progress;
-    p = Math.Min(1.0, Math.Max(0.08, current_progress));
-    w = Math.Int(track.image.GetWidth() * p);
-    if (w < 4) w = 4;
-    fill.sprite.SetImage(fill.base.Scale(w, track.image.GetHeight()));
-}
-Plymouth.SetBootProgressFunction(boot_progress_callback);
 
 fun message_callback(text) {
     msg_img = Image.Text(text, 0.82, 0.88, 0.96, 1.0, "Sans 11");
     status.sprite.SetImage(msg_img);
-    status.sprite.SetPosition(screen_w / 2 - msg_img.GetWidth() / 2, bar_y + 22, 12);
+    status.sprite.SetPosition(screen_w / 2 - msg_img.GetWidth() / 2, status_y, 12);
 }
 Plymouth.SetMessageFunction(message_callback);
