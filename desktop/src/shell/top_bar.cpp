@@ -194,6 +194,7 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"进程与资源监控", "settings:open:procs"},
             {"外观主题与输入法", "settings:open:appearance"},
             {"应用权限与安全", "settings:open:perms"},
+            {"Spinel Doctor 健康体检", "doctor:open"},
             {"系统日志与排障", "settings:open:logs"}
         });
         add_topbar_menu(ns, "窗口", {

@@ -12,7 +12,8 @@
     store: "app-store",
     settings: "app-settings",
     installer: "app-installer",
-    welcome: "app-welcome"
+    welcome: "app-welcome",
+    doctor: "app-doctor"
   };
 
   Object.values(modeRoots).forEach((id) => {

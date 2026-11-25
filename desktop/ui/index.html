@@ -528,12 +528,12 @@
       <div class="inst-section">
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
-            <h3>核心硬件与内核驱动 (PCIe)</h3>
-            <p class="muted-hint">核对显卡、有线/无线网卡、声卡与 NVMe 控制器是否均已正常加载内核驱动。</p>
+            <h3>音频输出与输入设备（音响 / 耳机 / 麦克风）</h3>
+            <p class="muted-hint">可独立禁用不需要的 HDMI 显示器音频或闲置麦克风，或随时重新启用（即时生效并持久化）。</p>
           </div>
         </div>
-        <div id="dev-pci-list" class="disk-list">
-          <div class="disk-empty">正在读取 PCIe 硬件驱动状态...</div>
+        <div id="dev-audio-list" class="disk-list">
+          <div class="disk-empty">正在读取音频输入输出设备...</div>
         </div>
       </div>
     </div>
@@ -951,21 +951,6 @@
     </div>
 
     <div id="tab-logs" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div class="bt-head-left">
-            <h3>Spinel Doctor · 系统全链路健康体检</h3>
-            <span id="doc-summary-chip" class="status-chip">等待检查...</span>
-          </div>
-          <div class="footer-actions">
-            <button type="button" class="btn small" data-cmd="settings:doctor-scan">重新体检</button>
-            <button type="button" class="btn small primary" data-cmd="settings:doctor-export">导出脱敏诊断报告</button>
-          </div>
-        </div>
-        <div id="doc-check-grid" class="doctor-grid"></div>
-        <div id="doc-feedback" class="feedback-banner hidden" style="margin-top: 8px;"></div>
-      </div>
-
       <div class="section-head">
         <div class="pill-group" id="logs-source-tabs">
           <button class="pill-btn active" data-cmd="settings:logs:apps">应用与 Steam</button>
@@ -974,14 +959,35 @@
           <button class="pill-btn" data-cmd="settings:logs:system">系统与内核</button>
         </div>
         <div class="footer-actions">
+          <button type="button" class="btn small primary" data-cmd="doctor:open">Spinel Doctor 健康体检</button>
           <button class="btn small" id="btn-logs-refresh">刷新</button>
           <button class="btn small" id="btn-logs-copy">复制全部</button>
           <button class="btn small" id="btn-logs-clear">清空应用日志</button>
           <button class="btn small ghost" data-cmd="logs:native">独立原生弹窗</button>
         </div>
       </div>
-      <pre id="sys-logs-box" class="log-box selectable" style="height: 280px;">正在读取系统日志...</pre>
+      <pre id="sys-logs-box" class="log-box selectable" style="height: 440px;">正在读取系统日志...</pre>
     </div>
+    </div>
+  </section>
+
+  <!-- 5b. Standalone Spinel Doctor Health Check Window (?mode=doctor) -->
+  <section id="app-doctor" class="app-window hidden">
+    <header class="win-toolbar">
+      <div class="bt-head-left">
+        <h2>Spinel Doctor · 系统全链路健康体检</h2>
+        <span id="doc-summary-chip" class="status-chip">检查中...</span>
+      </div>
+      <div class="footer-actions">
+        <button type="button" class="btn small" data-cmd="settings:doctor-scan">重新体检</button>
+        <button type="button" class="btn small primary" data-cmd="settings:doctor-export">导出脱敏诊断报告</button>
+      </div>
+    </header>
+    <div class="win-body">
+      <div id="doc-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+      <div id="doc-check-grid" class="doctor-grid">
+        <div class="disk-empty">正在运行全链路系统体检...</div>
+      </div>
     </div>
   </section>
 

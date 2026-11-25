@@ -23,13 +23,11 @@ struct BlockDevEntry {
     std::string path;
     std::string parent_disk;
     std::string size_str;
-    std::string type;
     std::string tran;
     bool removable = false;
     std::string fstype;
     std::string label;
     std::string mountpoint;
-    std::string model;
     bool is_system = false;
 };
 
@@ -48,11 +46,26 @@ struct InputDevEntry {
     std::string handlers;
 };
 
-struct PciDevEntry {
-    std::string slot;
-    std::string desc;
-    std::string driver;
+struct AudioDevEntry {
+    std::string node;
+    std::string label;
+    std::string kind;  // "sink" | "source"
+    bool enabled = true;
+    bool is_default = false;
 };
+
+std::string to_lower_copy(std::string s) {
+    for (char &ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return s;
+}
+
+bool contains_any_ci(const std::string &haystack, const std::vector<const char *> &needles) {
+    std::string lower = to_lower_copy(haystack);
+    for (const char *needle : needles) {
+        if (lower.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
 
 std::string read_sys_attr(const fs::path &dir, const char *file) {
     return trim_copy(read_first_line((dir / file).string(), ""));
@@ -89,9 +102,7 @@ std::map<std::string, std::string> parse_lsblk_kv_line(const std::string &line) 
         if (i < n && line[i] == '"') {
             ++i;
             while (i < n && line[i] != '"') {
-                if (line[i] == '\\' && i + 1 < n) {
-                    ++i;
-                }
+                if (line[i] == '\\' && i + 1 < n) ++i;
                 val.push_back(line[i++]);
             }
             if (i < n && line[i] == '"') ++i;
@@ -109,7 +120,7 @@ bool is_protected_mount(const std::string &mp) {
     return mp == "/" || mp == "/boot" || mp == "/boot/efi" || mp == "/efi" || mp == "[SWAP]";
 }
 
-std::vector<BlockDevEntry> collect_block_devices() {
+std::vector<BlockDevEntry> collect_block_devices(bool include_system = false) {
     std::string out;
     int rc = 1;
     if (!run_argv_capture({
@@ -147,7 +158,7 @@ std::vector<BlockDevEntry> collect_block_devices() {
         const std::string &type = kv["TYPE"];
         const std::string &fstype = kv["FSTYPE"];
         if (type == "loop" || type == "zram" || type == "rom") continue;
-        if (type == "disk" && fstype.empty()) continue;  // Unformatted/partitioned disk container
+        if (type == "disk" && fstype.empty()) continue;
         if (fstype == "swap" || fstype == "crypto_LUKS") continue;
         if (type != "part" && type != "disk") continue;
 
@@ -164,7 +175,6 @@ std::vector<BlockDevEntry> collect_block_devices() {
         e.path = kv["PATH"];
         e.parent_disk = (dit != disk_meta.end() && !dit->second.path.empty()) ? dit->second.path : e.path;
         e.size_str = format_bytes_human(bytes);
-        e.type = type;
         e.tran = (dit != disk_meta.end() && !dit->second.tran.empty()) ? dit->second.tran : kv["TRAN"];
         e.removable = (kv["RM"] == "1" || kv["HOTPLUG"] == "1" || e.tran == "usb" ||
                        (dit != disk_meta.end() && dit->second.removable));
@@ -173,18 +183,25 @@ std::vector<BlockDevEntry> collect_block_devices() {
         if (e.label.empty() && dit != disk_meta.end()) e.label = dit->second.model;
         if (e.label.empty()) e.label = e.name;
         e.mountpoint = kv["MOUNTPOINT"];
-        e.model = (dit != disk_meta.end()) ? dit->second.model : "";
-        e.is_system = is_protected_mount(e.mountpoint) || (fstype == "vfat" && !e.removable && bytes <= 1073741824ULL);
+        e.is_system = is_protected_mount(e.mountpoint) ||
+                      (fstype == "vfat" && !e.removable && bytes <= 1073741824ULL);
+        if (!include_system && e.is_system) continue;
         res.push_back(std::move(e));
     }
 
-    // Sort removable USB drives first, then secondary partitions, then system mounts
     std::stable_sort(res.begin(), res.end(), [](const BlockDevEntry &a, const BlockDevEntry &b) {
         if (a.removable != b.removable) return a.removable > b.removable;
-        if (a.is_system != b.is_system) return a.is_system < b.is_system;
         return a.path < b.path;
     });
     return res;
+}
+
+bool is_internal_usb_noise(const std::string &dev_class, const std::string &name) {
+    if (dev_class == "09") return true;  // USB Hub / Root Hub
+    return contains_any_ci(name, {
+        "root hub", "host controller", "motherboard", "aura",
+        "rgb", "led controller", "fingerprint"
+    });
 }
 
 std::vector<UsbDevEntry> collect_usb_devices() {
@@ -206,7 +223,15 @@ std::vector<UsbDevEntry> collect_usb_devices() {
         std::string dev_class = read_sys_attr(entry.path(), "bDeviceClass");
         std::string speed = read_sys_attr(entry.path(), "speed");
 
-        // Skip internal root/external hub noise only if unnamed, keep labeled hubs too
+        std::string display_name;
+        if (!mfg.empty() && !prod.empty()) {
+            display_name = (prod.rfind(mfg, 0) == 0) ? prod : (mfg + " " + prod);
+        } else {
+            display_name = !prod.empty() ? prod : mfg;
+        }
+        if (display_name.empty()) display_name = "USB 外设";
+        if (is_internal_usb_noise(dev_class, display_name)) continue;
+
         std::set<std::string> drivers;
         for (const auto &sub : fs::directory_iterator(entry.path(), ec)) {
             if (sub.path().filename().string().find(':') == std::string::npos) continue;
@@ -219,15 +244,6 @@ std::vector<UsbDevEntry> collect_usb_devices() {
             }
         }
 
-        UsbDevEntry u;
-        u.bus_id = fname;
-        u.vid_pid = vid + ":" + pid;
-        if (!mfg.empty() && !prod.empty()) {
-            u.name = (prod.rfind(mfg, 0) == 0) ? prod : (mfg + " " + prod);
-        } else {
-            u.name = !prod.empty() ? prod : (!mfg.empty() ? mfg : (dev_class == "09" ? "USB Hub 集线器" : "USB 设备"));
-        }
-        u.speed_mbps = speed.empty() ? "" : (speed + " Mbps");
         std::ostringstream doss;
         bool first = true;
         for (const auto &d : drivers) {
@@ -235,8 +251,8 @@ std::vector<UsbDevEntry> collect_usb_devices() {
             first = false;
             doss << d;
         }
-        u.driver = doss.str();
-        res.push_back(std::move(u));
+        res.push_back({fname, vid + ":" + pid, display_name,
+                       speed.empty() ? "" : (speed + " Mbps"), doss.str()});
     }
     std::sort(res.begin(), res.end(), [](const UsbDevEntry &a, const UsbDevEntry &b) {
         return a.bus_id < b.bus_id;
@@ -249,21 +265,30 @@ std::vector<InputDevEntry> collect_input_devices() {
     std::ifstream ifs("/proc/bus/input/devices");
     if (!ifs.is_open()) return res;
 
+    std::set<std::string> seen;
     std::string line, name, bus_code, handlers;
     auto flush_dev = [&]() {
         if (name.empty()) return;
-        std::string bus = "其他";
+        if (contains_any_ci(name, {
+                "power button", "sleep button", "video bus", "pc speaker",
+                "wmi", "at translated", "consumer control", "system control",
+                "hda intel", "hda nvidia", "wireless radio"
+            })) {
+            return;
+        }
+        std::string bus = "内置/其他";
         if (bus_code == "0003") bus = "USB";
         else if (bus_code == "0005") bus = "蓝牙";
-        else if (bus_code == "0018") bus = "I2C";
-        else if (bus_code == "0011" || bus_code == "0019") bus = "主板/内置";
+        else if (bus_code == "0018") bus = "I2C 触控";
 
-        std::string kind = "输入设备";
+        std::string kind;
         if (handlers.find("js") != std::string::npos) kind = "游戏手柄";
-        else if (handlers.find("mouse") != std::string::npos) kind = "鼠标/触控";
+        else if (handlers.find("mouse") != std::string::npos) kind = "鼠标/触控板";
         else if (handlers.find("kbd") != std::string::npos) kind = "键盘";
-        else return;  // Filter out pure power-button / virtual video bus events
+        else return;
 
+        std::string key = name + "|" + kind;
+        if (!seen.insert(key).second) return;
         res.push_back({name, bus, kind, handlers});
     };
 
@@ -291,35 +316,137 @@ std::vector<InputDevEntry> collect_input_devices() {
     return res;
 }
 
-std::vector<PciDevEntry> collect_pci_devices() {
-    std::vector<PciDevEntry> res;
-    std::string out;
-    int rc = 1;
-    if (!run_argv_capture({"lspci", "-nnk"}, out, rc) || rc != 0) return res;
+fs::path disabled_audio_tsv_path() {
+    return sys_internal::config_dir() / "disabled_audio.tsv";
+}
 
-    PciDevEntry cur;
-    bool active = false;
-    for (const auto &line : split_lines(out)) {
-        if (!line.empty() && !std::isspace(static_cast<unsigned char>(line[0]))) {
-            if (active) res.push_back(std::move(cur));
-            cur = PciDevEntry{};
-            auto sp = line.find(' ');
-            if (sp != std::string::npos) {
-                cur.slot = line.substr(0, sp);
-                cur.desc = trim_copy(line.substr(sp + 1));
-            } else {
-                cur.desc = line;
-            }
-            active = true;
-        } else if (active) {
-            std::string t = trim_copy(line);
-            const std::string prefix = "Kernel driver in use:";
-            if (t.rfind(prefix, 0) == 0) {
-                cur.driver = trim_copy(t.substr(prefix.size()));
-            }
+fs::path wireplumber_rules_path() {
+    return fs::path(home_dir()) / ".config/wireplumber/wireplumber.conf.d/90-spinel-audio-disabled.conf";
+}
+
+std::vector<AudioDevEntry> load_disabled_audio_entries() {
+    std::vector<AudioDevEntry> res;
+    std::ifstream ifs(disabled_audio_tsv_path());
+    if (!ifs.is_open()) return res;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = trim_copy(line);
+        if (line.empty()) continue;
+        std::istringstream iss(line);
+        std::string node, kind, label;
+        if (!std::getline(iss, node, '\t')) continue;
+        std::getline(iss, kind, '\t');
+        std::getline(iss, label);
+        if (!is_valid_audio_node_name(node)) continue;
+        AudioDevEntry e;
+        e.node = node;
+        e.kind = (kind == "source") ? "source" : "sink";
+        e.label = label.empty() ? node : label;
+        e.enabled = false;
+        res.push_back(std::move(e));
+    }
+    return res;
+}
+
+bool save_disabled_audio_and_apply(const std::vector<AudioDevEntry> &entries) {
+    std::error_code ec;
+    fs::create_directories(sys_internal::config_dir(), ec);
+    {
+        std::ofstream ofs(disabled_audio_tsv_path());
+        if (!ofs.is_open()) return false;
+        for (const auto &e : entries) {
+            ofs << e.node << "\t" << e.kind << "\t" << e.label << "\n";
         }
     }
-    if (active) res.push_back(std::move(cur));
+
+    fs::path wp_file = wireplumber_rules_path();
+    fs::create_directories(wp_file.parent_path(), ec);
+    if (entries.empty()) {
+        fs::remove(wp_file, ec);
+    } else {
+        std::vector<std::string> alsa_nodes, bluez_nodes;
+        for (const auto &e : entries) {
+            if (e.node.rfind("bluez_", 0) == 0) bluez_nodes.push_back(e.node);
+            else alsa_nodes.push_back(e.node);
+        }
+        std::ofstream wfs(wp_file);
+        if (!wfs.is_open()) return false;
+        wfs << "# Managed by SpinelOS Device Manager\n";
+        auto write_section = [&](const char *section, const std::vector<std::string> &nodes) {
+            if (nodes.empty()) return;
+            wfs << section << " = [\n  {\n    matches = [\n";
+            for (const auto &n : nodes) {
+                wfs << "      { node.name = \"" << n << "\" }\n";
+            }
+            wfs << "    ]\n    actions = {\n      update-props = {\n        node.disabled = true\n      }\n    }\n  }\n]\n";
+        };
+        write_section("monitor.alsa.rules", alsa_nodes);
+        write_section("monitor.bluez.rules", bluez_nodes);
+    }
+
+    std::string out;
+    int rc = 1;
+    return run_argv_capture({"systemctl", "--user", "restart", "wireplumber"}, out, rc) && rc == 0;
+}
+
+std::vector<AudioDevEntry> collect_audio_devices() {
+    std::vector<AudioDevEntry> res;
+    std::set<std::string> active_nodes;
+
+    std::string def_sink = trim_copy(run_cmd_capture("pactl get-default-sink 2>/dev/null"));
+    std::string def_source = trim_copy(run_cmd_capture("pactl get-default-source 2>/dev/null"));
+
+    auto collect_pactl_type = [&](const char *ptype, const char *kind, const std::string &def_name) {
+        std::string out;
+        int rc = 1;
+        if (!run_argv_capture({"pactl", "list", ptype}, out, rc) || rc != 0) return;
+
+        std::string cur_name, cur_desc;
+        auto flush_audio = [&]() {
+            if (cur_name.empty()) return;
+            // Skip virtual loopback monitor sources
+            if (cur_name.size() > 8 && cur_name.compare(cur_name.size() - 8, 8, ".monitor") == 0) return;
+            if (!is_valid_audio_node_name(cur_name)) return;
+            active_nodes.insert(cur_name);
+            AudioDevEntry e;
+            e.node = cur_name;
+            e.label = cur_desc.empty() ? cur_name : cur_desc;
+            e.kind = kind;
+            e.enabled = true;
+            e.is_default = (cur_name == def_name);
+            res.push_back(std::move(e));
+        };
+
+        for (const auto &raw : split_lines(out)) {
+            std::string t = trim_copy(raw);
+            if (t.rfind("Sink #", 0) == 0 || t.rfind("Source #", 0) == 0) {
+                flush_audio();
+                cur_name.clear();
+                cur_desc.clear();
+            } else if (t.rfind("Name:", 0) == 0) {
+                cur_name = trim_copy(t.substr(5));
+            } else if (t.rfind("Description:", 0) == 0) {
+                cur_desc = trim_copy(t.substr(12));
+            }
+        }
+        flush_audio();
+    };
+
+    if (has_executable("pactl")) {
+        collect_pactl_type("sinks", "sink", def_sink);
+        collect_pactl_type("sources", "source", def_source);
+    }
+
+    for (auto &d : load_disabled_audio_entries()) {
+        if (active_nodes.count(d.node)) continue;
+        res.push_back(std::move(d));
+    }
+
+    std::stable_sort(res.begin(), res.end(), [](const AudioDevEntry &a, const AudioDevEntry &b) {
+        if (a.kind != b.kind) return a.kind < b.kind;  // sinks first, then sources
+        if (a.enabled != b.enabled) return a.enabled > b.enabled;
+        return a.label < b.label;
+    });
     return res;
 }
 
@@ -343,13 +470,22 @@ bool is_valid_block_dev_path(const std::string &path) {
     return true;
 }
 
+bool is_valid_audio_node_name(const std::string &node) {
+    if (node.empty() || node.size() > 160) return false;
+    for (char ch : node) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && c != '.' && c != '_' && c != '-' && c != ':') return false;
+    }
+    return true;
+}
+
 void push_devices_state(AppState *state) {
     if (!state || state->shutting_down.load()) return;
     std::thread([state]() {
-        auto disks = collect_block_devices();
+        auto disks = collect_block_devices(false);
         auto usb = collect_usb_devices();
         auto inputs = collect_input_devices();
-        auto pci = collect_pci_devices();
+        auto audio = collect_audio_devices();
 
         std::ostringstream js;
         js << "window.__spinelDevicesData && window.__spinelDevicesData({\"disks\":[";
@@ -365,9 +501,7 @@ void push_devices_state(AppState *state) {
                << "\"removable\":" << (d.removable ? "true" : "false") << ","
                << "\"fstype\":\"" << json_escape(d.fstype) << "\","
                << "\"label\":\"" << json_escape(d.label) << "\","
-               << "\"mountpoint\":\"" << json_escape(d.mountpoint) << "\","
-               << "\"model\":\"" << json_escape(d.model) << "\","
-               << "\"is_system\":" << (d.is_system ? "true" : "false")
+               << "\"mountpoint\":\"" << json_escape(d.mountpoint) << "\""
                << "}";
         }
         js << "],\"usb\":[";
@@ -382,6 +516,18 @@ void push_devices_state(AppState *state) {
                << "\"driver\":\"" << json_escape(u.driver) << "\""
                << "}";
         }
+        js << "],\"audio_devs\":[";
+        for (size_t i = 0; i < audio.size(); ++i) {
+            if (i) js << ",";
+            const auto &a = audio[i];
+            js << "{"
+               << "\"node\":\"" << json_escape(a.node) << "\","
+               << "\"label\":\"" << json_escape(a.label) << "\","
+               << "\"kind\":\"" << json_escape(a.kind) << "\","
+               << "\"enabled\":" << (a.enabled ? "true" : "false") << ","
+               << "\"is_default\":" << (a.is_default ? "true" : "false")
+               << "}";
+        }
         js << "],\"inputs\":[";
         for (size_t i = 0; i < inputs.size(); ++i) {
             if (i) js << ",";
@@ -391,16 +537,6 @@ void push_devices_state(AppState *state) {
                << "\"bus\":\"" << json_escape(in.bus) << "\","
                << "\"kind\":\"" << json_escape(in.kind) << "\","
                << "\"handlers\":\"" << json_escape(in.handlers) << "\""
-               << "}";
-        }
-        js << "],\"pci\":[";
-        for (size_t i = 0; i < pci.size(); ++i) {
-            if (i) js << ",";
-            const auto &p = pci[i];
-            js << "{"
-               << "\"slot\":\"" << json_escape(p.slot) << "\","
-               << "\"desc\":\"" << json_escape(p.desc) << "\","
-               << "\"driver\":\"" << json_escape(p.driver) << "\""
                << "}";
         }
         js << "]});";
@@ -419,11 +555,7 @@ void mount_block_device(AppState *state, const std::string &dev_path) {
         int rc = 1;
         bool ok = run_argv_capture({"udisksctl", "mount", "--no-user-interaction", "-b", dev_path}, out, rc) && rc == 0;
         std::string msg = trim_copy(out);
-        if (ok) {
-            emit_devices_feedback(state, true, msg.empty() ? ("已挂载 " + dev_path) : msg);
-        } else {
-            emit_devices_feedback(state, false, "挂载失败: " + (msg.empty() ? dev_path : msg));
-        }
+        emit_devices_feedback(state, ok, ok ? (msg.empty() ? ("已挂载 " + dev_path) : msg) : ("挂载失败: " + (msg.empty() ? dev_path : msg)));
         push_devices_state(state);
     }).detach();
 }
@@ -451,7 +583,7 @@ void eject_block_device(AppState *state, const std::string &disk_path) {
         return;
     }
     std::thread([state, disk_path]() {
-        auto devs = collect_block_devices();
+        auto devs = collect_block_devices(true);
         std::string out;
         int rc = 1;
         for (const auto &d : devs) {
@@ -482,4 +614,66 @@ void open_mount_folder(AppState *state, const std::string &mount_path) {
         return;
     }
     spawn_argv_detached({"thunar", mount_path});
+}
+
+void disable_audio_device(AppState *state, const std::string &payload) {
+    if (!state) return;
+    std::string node, kind = "sink", label;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "node") node = trim_copy(v);
+        else if (k == "kind") kind = trim_copy(v);
+        else if (k == "label") label = trim_copy(v);
+    }
+    if (!is_valid_audio_node_name(node)) {
+        emit_devices_feedback(state, false, "无效的音频节点名");
+        return;
+    }
+    for (char &ch : label) {
+        if (ch == '\t' || ch == '\r' || ch == '\n') ch = ' ';
+    }
+
+    std::thread([state, node, kind, label]() {
+        auto entries = load_disabled_audio_entries();
+        bool exists = false;
+        for (auto &e : entries) {
+            if (e.node == node) {
+                exists = true;
+                if (!label.empty()) e.label = label;
+            }
+        }
+        if (!exists) {
+            entries.push_back({node, kind == "source" ? "source" : "sink", label.empty() ? node : label, false});
+        }
+        bool ok = save_disabled_audio_and_apply(entries);
+        emit_devices_feedback(state, ok, ok ? ("已禁用音频设备: " + (label.empty() ? node : label)) : "重启 WirePlumber 应用禁用规则失败");
+        push_devices_state(state);
+    }).detach();
+}
+
+void enable_audio_device(AppState *state, const std::string &node_name) {
+    if (!state) return;
+    std::string node = trim_copy(node_name);
+    if (!is_valid_audio_node_name(node)) {
+        emit_devices_feedback(state, false, "无效的音频节点名: " + node);
+        return;
+    }
+    std::thread([state, node]() {
+        auto entries = load_disabled_audio_entries();
+        std::string label = node;
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const AudioDevEntry &e) {
+            if (e.node == node) {
+                if (!e.label.empty()) label = e.label;
+                return true;
+            }
+            return false;
+        }), entries.end());
+
+        bool ok = save_disabled_audio_and_apply(entries);
+        emit_devices_feedback(state, ok, ok ? ("已重新启用音频设备: " + label) : "重启 WirePlumber 恢复设备失败");
+        push_devices_state(state);
+    }).detach();
 }

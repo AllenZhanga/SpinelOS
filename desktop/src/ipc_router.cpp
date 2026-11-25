@@ -618,6 +618,13 @@ bool dispatch_ipc_command(AppState *state,
         {"settings:devices-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_devices_state(s);
         }},
+        {"doctor:open", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
+            native_shell_set_cc_visible(s, false);
+            if (a.open_doctor) a.open_doctor(s);
+        }},
+        {"devices:audio-disable", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            disable_audio_device(s, r.legacy_raw);
+        }},
         {"clip:clear", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             clear_clipboard_history();
         }},
@@ -669,6 +676,9 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"devices:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             open_mount_folder(s, arg_or_param(r, "devices:open:", {"path"}));
+        }},
+        {"devices:audio-enable:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            enable_audio_device(s, arg_or_param(r, "devices:audio-enable:", {"node", "name"}));
         }},
         {"system:audio-set:", +[](AppState *, const IpcRequest &r, const IpcHostActions &) {
             std::string v = arg_or_param(r, "system:audio-set:", {"value", "pct"});

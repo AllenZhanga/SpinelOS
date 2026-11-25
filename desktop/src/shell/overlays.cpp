@@ -174,6 +174,7 @@ void rebuild_launcher_index(NativeShellState *ns) {
         {"系统设置 · 蓝牙与设备", "手柄、耳机与蓝牙外设配对", "settings bluetooth bt gamepad", "settings:open:bt", "", "settings"},
         {"系统设置 · 显示与缩放", "屏幕分辨率、刷新率与 HiDPI 缩放", "settings display resolution scale monitor", "settings:open:display", "", "settings"},
         {"系统设置 · 设备管理器", "U 盘挂载安全弹出、USB 外设、手柄与硬件驱动", "settings devices usb disk mount unmount eject pci hardware", "settings:open:devices", "", "settings"},
+        {"Spinel Doctor · 系统健康体检", "全链路检测显卡、网络、代理、输入法、声音与游戏运行库", "doctor health check diagnostic scan", "doctor:open", "", "settings"},
         {"系统设置 · 声音与电源", "输出设备、麦克风与功耗模式", "settings audio sound power battery", "settings:open:audio", "", "settings"},
         {"系统设置 · 键盘与快捷键", "自定义截图、锁屏、终端等全局热键", "settings shortcuts keyboard hotkeys", "settings:open:shortcuts", "", "settings"},
         {"系统设置 · 游戏性能预设", "MangoHud / GameMode / 帧率上限 / FSR", "settings perf mangohud gamemode fsr", "settings:open:perf", "", "settings"},

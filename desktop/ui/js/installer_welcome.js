@@ -668,6 +668,7 @@
 
   syncAllCustomSelects();
   if (mode === "settings") hooks.switchSettingsTab?.(initialTab);
+  if (mode === "doctor") sendCommand("settings:doctor-scan");
   if (mode === "store") sendCommand("store:refresh");
   if (mode === "installer") sendCommand("installer:scan-disks");
   if (mode === "games") sendCommand("steam:scan-caches");

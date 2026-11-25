@@ -248,6 +248,16 @@ void open_welcome_window(AppState *state) {
     }
 }
 
+void open_doctor_window(AppState *state) {
+    bool existed = (state->doctor_win != nullptr);
+    ensure_app_window(state, &state->doctor_win, &state->doctor_view,
+                      "Spinel Doctor · 系统全链路健康体检", "?mode=doctor", 880, 640);
+    if (existed) {
+        push_theme_state(state);
+        push_doctor_report(state);
+    }
+}
+
 void on_script_message(WebKitUserContentManager *, JSCValue *value, gpointer user_data) {
     auto *state = static_cast<AppState *>(user_data);
     if (!jsc_value_is_string(value)) return;
@@ -286,6 +296,7 @@ void open_settings_window(AppState *, const std::string &tab) {
     launch_webui_cmd("settings:open:" + tab);
 }
 void open_welcome_window(AppState *) { launch_webui_cmd("welcome:open"); }
+void open_doctor_window(AppState *) { launch_webui_cmd("doctor:open"); }
 
 #endif  // SPINEL_HAS_WEBKIT
 
@@ -303,6 +314,9 @@ void push_all_telemetry(AppState *state) {
     if (state->welcome_win && gtk_widget_get_visible(GTK_WIDGET(state->welcome_win))) {
         push_telemetry_to_view(state->welcome_view);
         push_welcome_status(state);
+    }
+    if (state->doctor_win && gtk_widget_get_visible(GTK_WIDGET(state->doctor_win))) {
+        push_telemetry_to_view(state->doctor_view);
     }
 #else
     native_shell_sync_telemetry(state);
@@ -477,6 +491,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     actions.open_installer = open_installer_window;
     actions.open_settings = open_settings_window;
     actions.open_welcome = open_welcome_window;
+    actions.open_doctor = open_doctor_window;
     actions.push_all_telemetry = push_all_telemetry;
     actions.confirm_power = confirm_power_action;
 

@@ -451,6 +451,12 @@ void test_ipc_router() {
     EXPECT(!is_valid_block_dev_path("/dev/sda1;rm -rf /"));
     EXPECT(!is_valid_block_dev_path("/tmp/sda1"));
     EXPECT(dispatch_ipc_command(&dummy, "settings:devices-get", mock_actions, &reply));
+    EXPECT(is_valid_audio_node_name("alsa_output.pci-0000_01_00.1.hdmi-stereo"));
+    EXPECT(!is_valid_audio_node_name("alsa_output bad\nnode"));
+    static bool doctor_opened = false;
+    mock_actions.open_doctor = +[](AppState *) { doctor_opened = true; };
+    EXPECT(dispatch_ipc_command(&dummy, "doctor:open", mock_actions, &reply));
+    EXPECT(doctor_opened);
 }
 
 }  // namespace

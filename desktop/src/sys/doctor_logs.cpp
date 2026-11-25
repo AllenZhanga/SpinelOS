@@ -781,7 +781,7 @@ std::string build_redacted_diagnostic_report() {
 }
 
 void push_doctor_report(AppState *state) {
-    if (!state || !state->settings_view) return;
+    if (!state || (!state->doctor_view && !state->settings_view)) return;
     auto checks = run_system_health_checks();
     int ok_c = 0, warn_c = 0, fail_c = 0;
     std::ostringstream js;
@@ -803,7 +803,8 @@ void push_doctor_report(AppState *state) {
     js << "],\"ok_count\":" << ok_c
        << ",\"warn_count\":" << warn_c
        << ",\"fail_count\":" << fail_c << "});";
-    eval_js(state->settings_view, js.str());
+    if (state->doctor_view) eval_js(state->doctor_view, js.str());
+    if (state->settings_view) eval_js(state->settings_view, js.str());
 }
 
 void export_diagnostic_report(AppState *state) {
@@ -816,10 +817,11 @@ void export_diagnostic_report(AppState *state) {
     fs::path out_path = fs::path(home_dir()) / "Desktop" / fname;
     bool ok = write_text_file(out_path.string(), build_redacted_diagnostic_report());
     append_app_log(ok ? ("[Doctor] 已导出脱敏诊断报告: " + out_path.string()) : "[Doctor] 导出诊断报告失败");
-    if (state && state->settings_view) {
-        eval_js(state->settings_view,
-                "window.__spinelDoctorExported && window.__spinelDoctorExported(" +
-                    std::string(ok ? "true" : "false") + ",\"" + json_escape(out_path.string()) + "\");");
+    if (state) {
+        std::string script = "window.__spinelDoctorExported && window.__spinelDoctorExported(" +
+            std::string(ok ? "true" : "false") + ",\"" + json_escape(out_path.string()) + "\");";
+        if (state->doctor_view) eval_js(state->doctor_view, script);
+        if (state->settings_view) eval_js(state->settings_view, script);
     }
 }
 

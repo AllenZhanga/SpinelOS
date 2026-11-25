@@ -49,6 +49,9 @@ struct AppState {
     GtkWindow *welcome_win = nullptr;
     WebKitWebView *welcome_view = nullptr;
 
+    GtkWindow *doctor_win = nullptr;
+    WebKitWebView *doctor_view = nullptr;
+
     std::atomic<bool> install_running{false};
     std::atomic<bool> store_busy{false};
     std::atomic<bool> store_cancel_requested{false};
