@@ -51,6 +51,7 @@ void push_proxy_config(AppState *state);
 void update_proxy_config(AppState *state, const std::string &payload);
 
 PerfConfig load_perf_config();
+void sync_mangohud_config(const PerfConfig &cfg);
 void push_perf_config(AppState *state);
 void update_perf_config(AppState *state, const std::string &payload);
 
@@ -84,6 +85,17 @@ struct DoctorCheckItem {
     std::string detail;
     std::string fix_hint;
 };
+
+struct GpuDriverUpdateInfo {
+    std::string driver_summary;
+    std::string kernel_running;
+    std::string kernel_installed;
+    bool reboot_required = false;
+    int updates_total = 0;
+    std::vector<std::string> gpu_updates;
+};
+
+GpuDriverUpdateInfo collect_gpu_driver_update_info();
 std::vector<DoctorCheckItem> run_system_health_checks();
 std::string redact_sensitive_text(const std::string &raw);
 std::string build_redacted_diagnostic_report();

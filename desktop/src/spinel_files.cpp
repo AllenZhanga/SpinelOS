@@ -123,7 +123,7 @@ struct FilesWin {
     GtkWidget *status_label = nullptr;
 
     GListStore *store = nullptr;
-    GtkSingleSelection *selection = nullptr;
+    GtkMultiSelection *selection = nullptr;
 
     fs::path current_dir;
     std::vector<fs::path> history;
@@ -131,6 +131,8 @@ struct FilesWin {
     std::vector<DirItem> items;
     size_t visible_count = 0;
     fs::path selected_path;
+    std::vector<fs::path> selected_paths;
+    std::uintmax_t selected_bytes = 0;
     fs::path pending_select;
     bool show_hidden = false;
     bool grid_mode = false;
@@ -413,6 +415,53 @@ void clear_box_children(GtkWidget *box) {
 void navigate_to(FilesWin *fw, const fs::path &dir, bool record_history = true);
 void refresh_current_dir(FilesWin *fw);
 
+std::vector<fs::path> get_selected_paths(FilesWin *fw) {
+    std::vector<fs::path> res;
+    if (!fw || !fw->selection) return res;
+    GtkBitset *bs = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(fw->selection));
+    if (!bs) return res;
+    GtkBitsetIter iter{};
+    guint pos = 0;
+    if (gtk_bitset_iter_init_first(&iter, bs, &pos)) {
+        do {
+            auto *fobj = reinterpret_cast<_SpinelFileObj *>(g_list_model_get_item(G_LIST_MODEL(fw->selection), pos));
+            if (fobj) {
+                if (fobj->item) res.push_back(fobj->item->path);
+                g_object_unref(fobj);
+            }
+        } while (gtk_bitset_iter_next(&iter, &pos));
+    }
+    gtk_bitset_unref(bs);
+    return res;
+}
+
+void sync_selection_cache(FilesWin *fw) {
+    if (!fw) return;
+    fw->selected_paths.clear();
+    fw->selected_bytes = 0;
+    if (fw->selection) {
+        GtkBitset *bs = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(fw->selection));
+        if (bs) {
+            GtkBitsetIter iter{};
+            guint pos = 0;
+            if (gtk_bitset_iter_init_first(&iter, bs, &pos)) {
+                do {
+                    auto *fobj = reinterpret_cast<_SpinelFileObj *>(g_list_model_get_item(G_LIST_MODEL(fw->selection), pos));
+                    if (fobj) {
+                        if (fobj->item) {
+                            fw->selected_paths.push_back(fobj->item->path);
+                            if (!fobj->item->is_dir) fw->selected_bytes += fobj->item->size;
+                        }
+                        g_object_unref(fobj);
+                    }
+                } while (gtk_bitset_iter_next(&iter, &pos));
+            }
+            gtk_bitset_unref(bs);
+        }
+    }
+    fw->selected_path = fw->selected_paths.empty() ? fs::path{} : fw->selected_paths.front();
+}
+
 void show_error_alert(FilesWin *fw, const std::string &title, const std::string &detail) {
     GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", title.c_str());
     gtk_alert_dialog_set_detail(dlg, detail.c_str());
@@ -613,56 +662,66 @@ bool trash_has_items() {
     return false;
 }
 
-void do_restore_from_trash(FilesWin *fw, const fs::path &trashed_item) {
-    if (!fw || trashed_item.empty()) return;
-    std::error_code ec;
-    fs::path info_file = trash_info_dir() / (trashed_item.filename().string() + ".trashinfo");
-    fs::path target;
-    if (fs::is_regular_file(info_file, ec)) {
-        std::ifstream ifs(info_file);
-        std::string line;
-        while (std::getline(ifs, line)) {
-            line = trim_copy(line);
-            if (line.rfind("Path=", 0) == 0) {
-                std::string raw = line.substr(5);
-                g_autofree char *unescaped = g_uri_unescape_string(raw.c_str(), nullptr);
-                std::string decoded = (unescaped && *unescaped) ? std::string(unescaped) : raw;
-                fs::path parsed(decoded);
-                target = parsed.is_absolute() ? parsed : (trash_root_dir() / parsed);
-                break;
+void do_restore_from_trash(FilesWin *fw, const std::vector<fs::path> &trashed_items) {
+    if (!fw || trashed_items.empty()) return;
+    fs::path last_target;
+    for (const auto &trashed_item : trashed_items) {
+        if (trashed_item.empty()) continue;
+        std::error_code ec;
+        fs::path info_file = trash_info_dir() / (trashed_item.filename().string() + ".trashinfo");
+        fs::path target;
+        if (fs::is_regular_file(info_file, ec)) {
+            std::ifstream ifs(info_file);
+            std::string line;
+            while (std::getline(ifs, line)) {
+                line = trim_copy(line);
+                if (line.rfind("Path=", 0) == 0) {
+                    std::string raw = line.substr(5);
+                    g_autofree char *unescaped = g_uri_unescape_string(raw.c_str(), nullptr);
+                    std::string decoded = (unescaped && *unescaped) ? std::string(unescaped) : raw;
+                    fs::path parsed(decoded);
+                    target = parsed.is_absolute() ? parsed : (trash_root_dir() / parsed);
+                    break;
+                }
             }
         }
-    }
-    if (target.empty()) {
-        target = fs::path(home_dir()) / "Desktop" / trashed_item.filename();
-    }
-    fs::create_directories(target.parent_path(), ec);
-    if (fs::exists(target, ec)) {
-        std::string stem = target.stem().string();
-        std::string ext = target.extension().string();
-        for (int i = 2; i < 100 && fs::exists(target, ec); ++i) {
-            target = target.parent_path() / (stem + " (恢复 " + std::to_string(i) + ")" + ext);
+        if (target.empty()) {
+            target = fs::path(home_dir()) / "Desktop" / trashed_item.filename();
         }
-    }
+        fs::create_directories(target.parent_path(), ec);
+        if (fs::exists(target, ec)) {
+            std::string stem = target.stem().string();
+            std::string ext = target.extension().string();
+            for (int i = 2; i < 100 && fs::exists(target, ec); ++i) {
+                target = target.parent_path() / (stem + " (恢复 " + std::to_string(i) + ")" + ext);
+            }
+        }
 
-    fs::rename(trashed_item, target, ec);
-    if (ec) {
-        std::string out;
-        int rc = 1;
-        if (run_argv_capture({"mv", "-f", trashed_item.string(), target.string()}, out, rc) && rc == 0) {
-            ec.clear();
+        fs::rename(trashed_item, target, ec);
+        if (ec) {
+            std::string out;
+            int rc = 1;
+            if (run_argv_capture({"mv", "-f", trashed_item.string(), target.string()}, out, rc) && rc == 0) {
+                ec.clear();
+            }
         }
+        if (ec) {
+            show_error_alert(fw, "还原失败", ec.message());
+            refresh_current_dir(fw);
+            return;
+        }
+        std::error_code rm_ec;
+        fs::remove(info_file, rm_ec);
+        last_target = target;
     }
-    if (ec) {
-        show_error_alert(fw, "还原失败", ec.message());
-        return;
-    }
-    std::error_code rm_ec;
-    fs::remove(info_file, rm_ec);
     fw->selected_path.clear();
+    fw->selected_paths.clear();
     refresh_current_dir(fw);
-    if (fw->status_label) {
-        gtk_label_set_text(GTK_LABEL(fw->status_label), ("已还原到: " + target.string()).c_str());
+    if (fw->status_label && !last_target.empty()) {
+        std::string msg = (trashed_items.size() > 1)
+            ? ("已批量还原 " + std::to_string(trashed_items.size()) + " 项")
+            : ("已还原到: " + last_target.string());
+        gtk_label_set_text(GTK_LABEL(fw->status_label), msg.c_str());
     }
 }
 
@@ -703,20 +762,30 @@ void do_empty_trash(FilesWin *fw) {
 }
 
 void do_delete_selected(FilesWin *fw, bool permanent) {
-    if (fw->selected_path.empty()) return;
-    fs::path target = fw->selected_path;
+    std::vector<fs::path> targets = get_selected_paths(fw);
+    if (targets.empty() && !fw->selected_path.empty()) {
+        targets.push_back(fw->selected_path);
+    }
+    if (targets.empty()) return;
+
     permanent = permanent || is_in_trash_dir(fw->current_dir);
     if (!permanent && has_executable("gio")) {
+        std::vector<std::string> argv = {"gio", "trash"};
+        for (const auto &t : targets) argv.push_back(t.string());
         std::string out;
         int rc = 1;
-        if (run_argv_capture({"gio", "trash", target.string()}, out, rc) && rc == 0) {
+        if (run_argv_capture(argv, out, rc) && rc == 0) {
             fw->selected_path.clear();
+            fw->selected_paths.clear();
             refresh_current_dir(fw);
             return;
         }
     }
 
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("确认永久删除 \"%s\" 吗？", target.filename().string().c_str());
+    std::string prompt = (targets.size() > 1)
+        ? ("确认永久删除选中的 " + std::to_string(targets.size()) + " 个项目吗？")
+        : ("确认永久删除 \"" + targets.front().filename().string() + "\" 吗？");
+    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", prompt.c_str());
     gtk_alert_dialog_set_detail(dlg, "永久删除后无法从回收站恢复。");
     const char *btns[] = {"取消", "永久删除", nullptr};
     gtk_alert_dialog_set_buttons(dlg, btns);
@@ -725,26 +794,30 @@ void do_delete_selected(FilesWin *fw, bool permanent) {
 
     struct DelCtx {
         FilesWin *fw;
-        fs::path target;
+        std::vector<fs::path> targets;
     };
     gtk_alert_dialog_choose(dlg, fw->win, nullptr, +[](GObject *src, GAsyncResult *res, gpointer d) {
         std::unique_ptr<DelCtx> ctx(static_cast<DelCtx *>(d));
         int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, nullptr);
         if (choice == 1) {
-            std::error_code ec;
-            fs::remove_all(ctx->target, ec);
-            if (!ec && ctx->target.parent_path() == trash_files_dir()) {
-                std::error_code iec;
-                fs::remove(trash_info_dir() / (ctx->target.filename().string() + ".trashinfo"), iec);
+            std::string first_err;
+            for (const auto &target : ctx->targets) {
+                std::error_code ec;
+                fs::remove_all(target, ec);
+                if (!ec && target.parent_path() == trash_files_dir()) {
+                    std::error_code iec;
+                    fs::remove(trash_info_dir() / (target.filename().string() + ".trashinfo"), iec);
+                }
+                if (ec && first_err.empty()) first_err = ec.message();
             }
-            if (ec) {
-                show_error_alert(ctx->fw, "删除失败", ec.message());
-            } else {
-                ctx->fw->selected_path.clear();
-                refresh_current_dir(ctx->fw);
+            if (!first_err.empty()) {
+                show_error_alert(ctx->fw, "部分或全部删除失败", first_err);
             }
+            ctx->fw->selected_path.clear();
+            ctx->fw->selected_paths.clear();
+            refresh_current_dir(ctx->fw);
         }
-    }, new DelCtx{fw, target});
+    }, new DelCtx{fw, std::move(targets)});
     g_object_unref(dlg);
 }
 
@@ -839,7 +912,6 @@ void toggle_exec_permission(FilesWin *fw, const fs::path &p, bool enable_exec) {
         return;
     }
     fw->pending_select = p;
-    void refresh_current_dir(FilesWin *fw);
     refresh_current_dir(fw);
 }
 
@@ -1240,28 +1312,34 @@ void do_extract_archive(FilesWin *fw, const fs::path &archive, bool into_subdir)
     );
 }
 
-void do_compress_zip(FilesWin *fw, const fs::path &target) {
+void do_compress_zip(FilesWin *fw, const std::vector<fs::path> &targets) {
+    if (targets.empty()) return;
     if (!has_executable("bsdtar")) {
         show_error_alert(fw, "无法压缩", "未找到 bsdtar 命令。");
         return;
     }
     std::error_code ec;
-    fs::path parent = target.parent_path();
-    std::string base = fs::is_directory(target, ec)
-        ? target.filename().string()
-        : target.stem().string();
+    fs::path parent = targets.front().parent_path();
+    std::string base;
+    if (targets.size() == 1) {
+        base = fs::is_directory(targets.front(), ec)
+            ? targets.front().filename().string()
+            : targets.front().stem().string();
+    } else {
+        std::string p_name = parent.filename().string();
+        base = (!p_name.empty() ? p_name : "archive") + " (" + std::to_string(targets.size()) + "项)";
+    }
     if (base.empty()) base = "archive";
     fs::path out_zip = parent / (base + ".zip");
     int idx = 2;
     while (fs::exists(out_zip, ec) && idx < 100) {
         out_zip = parent / (base + " (" + std::to_string(idx++) + ").zip");
     }
-    run_archive_task(
-        fw,
-        "正在压缩: " + out_zip.filename().string() + " ...",
-        {"bsdtar", "-a", "-cf", out_zip.string(), "-C", parent.string(), target.filename().string()},
-        out_zip
-    );
+    std::vector<std::string> argv = {"bsdtar", "-a", "-cf", out_zip.string(), "-C", parent.string()};
+    for (const auto &t : targets) {
+        argv.push_back(t.filename().string());
+    }
+    run_archive_task(fw, "正在压缩: " + out_zip.filename().string() + " ...", argv, out_zip);
 }
 
 void show_properties(FilesWin *fw, const fs::path &p) {
@@ -1312,16 +1390,37 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         gtk_box_append(GTK_BOX(box), b);
     };
 
+    std::vector<fs::path> sel = get_selected_paths(fw);
+    if (!item_path.empty() && std::find(sel.begin(), sel.end(), item_path) == sel.end()) {
+        sel = {item_path};
+    }
+
     if (is_in_trash_dir(fw->current_dir)) {
-        if (!item_path.empty()) {
+        if (sel.size() > 1) {
+            std::string n_str = std::to_string(sel.size());
+            add_btn(("还原选中的 " + n_str + " 项到原位置").c_str(), false, [fw, sel]() { do_restore_from_trash(fw, sel); });
+            add_btn(("永久删除 " + n_str + " 项 (Delete)").c_str(), true, [fw]() { do_delete_selected(fw, true); });
+        } else if (!item_path.empty()) {
             fw->selected_path = item_path;
-            add_btn("还原到原位置", false, [fw, item_path]() { do_restore_from_trash(fw, item_path); });
+            add_btn("还原到原位置", false, [fw, item_path]() { do_restore_from_trash(fw, {item_path}); });
             add_btn("属性", false, [fw, item_path]() { show_properties(fw, item_path); });
             add_btn("永久删除 (Delete)", true, [fw]() { do_delete_selected(fw, true); });
         } else {
             add_btn("清空回收站", true, [fw]() { do_empty_trash(fw); });
             add_btn("刷新", false, [fw]() { refresh_current_dir(fw); });
         }
+    } else if (sel.size() > 1) {
+        std::string n_str = std::to_string(sel.size());
+        add_btn(("压缩这 " + n_str + " 项为 .zip").c_str(), false, [fw, sel]() { do_compress_zip(fw, sel); });
+        add_btn(("复制选中的 " + n_str + " 项 (Ctrl+C)").c_str(), false, [fw, sel]() {
+            fw->clip_op = ClipOp::Copy;
+            fw->clip_paths = sel;
+        });
+        add_btn(("剪切选中的 " + n_str + " 项 (Ctrl+X)").c_str(), false, [fw, sel]() {
+            fw->clip_op = ClipOp::Cut;
+            fw->clip_paths = sel;
+        });
+        add_btn(("移至回收站 " + n_str + " 项 (Delete)").c_str(), true, [fw]() { do_delete_selected(fw, false); });
     } else if (!item_path.empty()) {
         fw->selected_path = item_path;
         std::error_code ec;
@@ -1359,7 +1458,7 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         if (is_exec_file) {
             add_btn("取消执行权限 (-x)", false, [fw, item_path]() { toggle_exec_permission(fw, item_path, false); });
         }
-        add_btn("压缩为 .zip", false, [fw, item_path]() { do_compress_zip(fw, item_path); });
+        add_btn("压缩为 .zip", false, [fw, item_path]() { do_compress_zip(fw, {item_path}); });
         add_btn("复制 (Ctrl+C)", false, [fw, item_path]() {
             fw->clip_op = ClipOp::Copy;
             fw->clip_paths = {item_path};
@@ -1537,10 +1636,12 @@ void update_status_bar(FilesWin *fw) {
         status << "正在读取目录...";
     } else {
         status << "共 " << fw->visible_count << " 项";
-        if (!fw->selected_path.empty()) {
+        if (fw->selected_paths.size() > 1) {
+            status << " · 已选中 " << fw->selected_paths.size() << " 项 (" << format_size(fw->selected_bytes) << ")";
+        } else if (!fw->selected_path.empty()) {
             status << " · 已选: " << fw->selected_path.filename().string();
         }
-        status << " · Ctrl+H 隐藏文件 · Ctrl+L 输路径 · F2 重命名 · Ctrl+C/X/V · Delete 回收站";
+        status << " · Ctrl+A 全选 · Ctrl/Shift 多选 · Ctrl+C/X/V · Delete 回收站";
     }
     gtk_label_set_text(GTK_LABEL(fw->status_label), status.str().c_str());
 }
@@ -1569,8 +1670,8 @@ void apply_visible_filter(FilesWin *fw) {
             if (fobj && fobj->item &&
                 (fobj->item->path == fw->pending_select ||
                  (!target_name.empty() && fobj->item->name == target_name))) {
-                gtk_single_selection_set_selected(fw->selection, i);
-                fw->selected_path = fobj->item->path;
+                gtk_selection_model_select_item(GTK_SELECTION_MODEL(fw->selection), i, TRUE);
+                sync_selection_cache(fw);
 #if GTK_CHECK_VERSION(4, 12, 0)
                 if (fw->grid_mode) {
                     gtk_grid_view_scroll_to(GTK_GRID_VIEW(fw->grid_view), i, GTK_LIST_SCROLL_SELECT, nullptr);
@@ -1723,7 +1824,11 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
                 auto *item = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(w), "sf-li"));
                 auto *fobj = item ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(item)) : nullptr;
                 if (fobj && fobj->item) {
-                    gtk_single_selection_set_selected(fwin->selection, gtk_list_item_get_position(item));
+                    guint pos = gtk_list_item_get_position(item);
+                    if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(fwin->selection), pos)) {
+                        gtk_selection_model_select_item(GTK_SELECTION_MODEL(fwin->selection), pos, TRUE);
+                        sync_selection_cache(fwin);
+                    }
                     show_context_menu(fwin, w, x, y, fobj->item->path);
                 }
             }), win);
@@ -1780,7 +1885,11 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
                 auto *item = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(w), "sf-li"));
                 auto *fobj = item ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(item)) : nullptr;
                 if (fobj && fobj->item) {
-                    gtk_single_selection_set_selected(fwin->selection, gtk_list_item_get_position(item));
+                    guint pos = gtk_list_item_get_position(item);
+                    if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(fwin->selection), pos)) {
+                        gtk_selection_model_select_item(GTK_SELECTION_MODEL(fwin->selection), pos, TRUE);
+                        sync_selection_cache(fwin);
+                    }
                     show_context_menu(fwin, w, x, y, fobj->item->path);
                 }
             }), win);
@@ -1837,17 +1946,29 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
         do_rename_selected(fw);
         return TRUE;
     }
+    if (ctrl && (keyval == GDK_KEY_a || keyval == GDK_KEY_A) && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
+        if (fw->selection) gtk_selection_model_select_all(GTK_SELECTION_MODEL(fw->selection));
+        return TRUE;
+    }
     if (ctrl && (keyval == GDK_KEY_c || keyval == GDK_KEY_C) && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
-        if (!fw->selected_path.empty()) {
+        auto sel = get_selected_paths(fw);
+        if (!sel.empty()) {
             fw->clip_op = ClipOp::Copy;
-            fw->clip_paths = {fw->selected_path};
+            fw->clip_paths = std::move(sel);
+            if (fw->status_label) {
+                gtk_label_set_text(GTK_LABEL(fw->status_label), ("已复制 " + std::to_string(fw->clip_paths.size()) + " 项到剪贴板").c_str());
+            }
         }
         return TRUE;
     }
     if (ctrl && (keyval == GDK_KEY_x || keyval == GDK_KEY_X) && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
-        if (!fw->selected_path.empty()) {
+        auto sel = get_selected_paths(fw);
+        if (!sel.empty()) {
             fw->clip_op = ClipOp::Cut;
-            fw->clip_paths = {fw->selected_path};
+            fw->clip_paths = std::move(sel);
+            if (fw->status_label) {
+                gtk_label_set_text(GTK_LABEL(fw->status_label), ("已剪切 " + std::to_string(fw->clip_paths.size()) + " 项").c_str());
+            }
         }
         return TRUE;
     }
@@ -1859,9 +1980,15 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
         do_delete_selected(fw, shift);
         return TRUE;
     }
-    if (keyval == GDK_KEY_Escape && fw->path_edit_mode) {
-        set_path_edit_mode(fw, false);
-        return TRUE;
+    if (keyval == GDK_KEY_Escape) {
+        if (fw->path_edit_mode) {
+            set_path_edit_mode(fw, false);
+            return TRUE;
+        }
+        if (!fw->selected_paths.empty() && fw->selection) {
+            gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(fw->selection));
+            return TRUE;
+        }
     }
     return FALSE;
 }
@@ -2017,14 +2144,11 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(side_scroll), sidebar);
 
     fw->store = g_list_store_new(spinel_file_obj_get_type());
-    fw->selection = gtk_single_selection_new(G_LIST_MODEL(fw->store));  // takes ref to store
-    gtk_single_selection_set_autoselect(fw->selection, FALSE);
-    gtk_single_selection_set_can_unselect(fw->selection, TRUE);
+    fw->selection = gtk_multi_selection_new(G_LIST_MODEL(fw->store));  // takes ref to store
 
-    g_signal_connect(fw->selection, "selection-changed", G_CALLBACK(+[](GtkSelectionModel *sm, guint, guint, gpointer d) {
+    g_signal_connect(fw->selection, "selection-changed", G_CALLBACK(+[](GtkSelectionModel *, guint, guint, gpointer d) {
         auto *w = static_cast<FilesWin *>(d);
-        auto *fobj = reinterpret_cast<_SpinelFileObj *>(gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(sm)));
-        w->selected_path = (fobj && fobj->item) ? fobj->item->path : fs::path{};
+        sync_selection_cache(w);
         update_status_bar(w);
     }), fw);
 
@@ -2032,6 +2156,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     fw->list_view = gtk_list_view_new(GTK_SELECTION_MODEL(g_object_ref(fw->selection)), list_fac);
     gtk_widget_add_css_class(fw->list_view, "sf-listview");
     gtk_list_view_set_single_click_activate(GTK_LIST_VIEW(fw->list_view), FALSE);
+    gtk_list_view_set_enable_rubberband(GTK_LIST_VIEW(fw->list_view), TRUE);
     g_signal_connect(fw->list_view, "activate", G_CALLBACK(+[](GtkListView *, guint pos, gpointer d) {
         auto *w = static_cast<FilesWin *>(d);
         auto *fobj = reinterpret_cast<_SpinelFileObj *>(g_list_model_get_item(G_LIST_MODEL(w->selection), pos));
@@ -2045,6 +2170,7 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     fw->grid_view = gtk_grid_view_new(GTK_SELECTION_MODEL(fw->selection), grid_fac);  // takes final ref to selection
     gtk_widget_add_css_class(fw->grid_view, "sf-gridview");
     gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(fw->grid_view), FALSE);
+    gtk_grid_view_set_enable_rubberband(GTK_GRID_VIEW(fw->grid_view), TRUE);
     gtk_grid_view_set_max_columns(GTK_GRID_VIEW(fw->grid_view), 10);
     g_signal_connect(fw->grid_view, "activate", G_CALLBACK(+[](GtkGridView *, guint pos, gpointer d) {
         auto *w = static_cast<FilesWin *>(d);

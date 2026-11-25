@@ -381,12 +381,23 @@ void push_store_catalog(AppState *state) {
     if (!state || !state->store_view) return;
     bool flatpak_ok = has_flatpak_cli();
     bool sudo_nopass = check_sudo_nopasswd();
+    GpuDriverUpdateInfo gi = collect_gpu_driver_update_info();
 
     std::ostringstream js;
     js << "window.__spinelStoreData && window.__spinelStoreData({"
        << "\"flatpak_ready\":" << (flatpak_ok ? "true" : "false") << ","
        << "\"sudo_nopass\":" << (sudo_nopass ? "true" : "false") << ","
        << "\"busy\":" << (state->store_busy.load() ? "true" : "false") << ","
+       << "\"driver_summary\":\"" << json_escape(gi.driver_summary) << "\","
+       << "\"kernel_summary\":\"" << json_escape(gi.kernel_running) << "\","
+       << "\"reboot_required\":" << (gi.reboot_required ? "true" : "false") << ","
+       << "\"updates_total\":" << gi.updates_total << ","
+       << "\"gpu_updates\":[";
+    for (size_t i = 0; i < gi.gpu_updates.size(); ++i) {
+        if (i > 0) js << ",";
+        js << "\"" << json_escape(gi.gpu_updates[i]) << "\"";
+    }
+    js << "],"
        << "\"apps\":[";
 
     bool first = true;

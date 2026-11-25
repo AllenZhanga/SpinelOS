@@ -38,36 +38,6 @@ gboolean run_js_idle(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-void sync_mangohud_config(const PerfConfig &cfg) {
-    if (cfg.mangohud == "off") return;
-    std::error_code ec;
-    fs::path mh_dir = fs::path(home_dir()) / ".config/MangoHud";
-    fs::create_directories(mh_dir, ec);
-    std::ofstream ofs(mh_dir / "MangoHud.conf");
-    if (!ofs.is_open()) return;
-
-    ofs << "# Managed by SpinelOS Performance Control\n";
-    ofs << "position=top-left\n";
-    ofs << "background_alpha=0.45\n";
-    ofs << "font_size=20\n";
-    ofs << "fps\n";
-    ofs << "gpu_stats\n";
-    ofs << "gpu_temp\n";
-    ofs << "cpu_stats\n";
-    ofs << "cpu_temp\n";
-    if (cfg.mangohud == "full") {
-        ofs << "frametime=1\n";
-        ofs << "frame_timing=1\n";
-        ofs << "ram\n";
-        ofs << "vram\n";
-        ofs << "gamemode\n";
-    } else {
-        ofs << "frametime=0\n";
-        ofs << "legacy_layout=0\n";
-        ofs << "horizontal\n";
-    }
-}
-
 std::vector<std::string> split_nmcli_escaped(const std::string &line) {
     std::vector<std::string> out;
     std::string cur;
@@ -176,6 +146,41 @@ bool detect_low_fx_mode() {
 }
 
 }  // namespace
+
+void sync_mangohud_config(const PerfConfig &cfg) {
+    std::error_code ec;
+    fs::path mh_dir = fs::path(home_dir()) / ".config/MangoHud";
+    fs::create_directories(mh_dir, ec);
+    std::ofstream ofs(mh_dir / "MangoHud.conf");
+    if (!ofs.is_open()) return;
+
+    ofs << "# Managed by SpinelOS Performance Control\n";
+    if (cfg.mangohud == "off") {
+        ofs << "no_display\n";
+        ofs << "toggle_hud=Shift_R+F12\n";
+        return;
+    }
+    ofs << "position=top-left\n";
+    ofs << "background_alpha=0.45\n";
+    ofs << "font_size=20\n";
+    ofs << "toggle_hud=Shift_R+F12\n";
+    ofs << "fps\n";
+    ofs << "gpu_stats\n";
+    ofs << "gpu_temp\n";
+    ofs << "cpu_stats\n";
+    ofs << "cpu_temp\n";
+    if (cfg.mangohud == "full") {
+        ofs << "frametime=1\n";
+        ofs << "frame_timing=1\n";
+        ofs << "ram\n";
+        ofs << "vram\n";
+        ofs << "gamemode\n";
+    } else {
+        ofs << "frametime=0\n";
+        ofs << "legacy_layout=0\n";
+        ofs << "horizontal\n";
+    }
+}
 
 namespace sys_internal {
 

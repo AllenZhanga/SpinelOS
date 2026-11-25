@@ -342,6 +342,27 @@ void launch_desktop_app_id(const std::string &desktop_id) {
                 launch_browser_command(std::move(args), "App:" + app.id);
                 return;
             }
+            std::string cat_l = app.category + " " + app.id + " " + bin_l;
+            for (char &ch : cat_l) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            bool is_game_or_bench =
+                (cat_l.find("game") != std::string::npos ||
+                 cat_l.find("benchmark") != std::string::npos ||
+                 cat_l.find("gravitymark") != std::string::npos ||
+                 cat_l.find("glmark2") != std::string::npos ||
+                 cat_l.find("vkcube") != std::string::npos ||
+                 cat_l.find("heroic") != std::string::npos ||
+                 cat_l.find("lutris") != std::string::npos) &&
+                cat_l.find("steam") == std::string::npos;
+            if (is_game_or_bench) {
+                PerfConfig perf = load_perf_config();
+                sync_mangohud_config(perf);
+                if (perf.mangohud != "off" && has_executable("mangohud") && bin_l.find("mangohud") == std::string::npos) {
+                    args.insert(args.begin(), "mangohud");
+                }
+                if (perf.gamemode && has_executable("gamemoderun") && bin_l.find("gamemoderun") == std::string::npos) {
+                    args.insert(args.begin(), "gamemoderun");
+                }
+            }
             spawn_argv_logged(args, "App:" + app.id);
             return;
         }

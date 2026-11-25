@@ -567,6 +567,68 @@ std::string redact_sensitive_text(const std::string &raw) {
     return out;
 }
 
+GpuDriverUpdateInfo collect_gpu_driver_update_info() {
+    GpuDriverUpdateInfo info;
+    std::error_code ec;
+    info.kernel_running = trim_copy(read_first_line("/proc/sys/kernel/osrelease", "Linux"));
+    if (!info.kernel_running.empty() && !fs::exists("/usr/lib/modules/" + info.kernel_running, ec)) {
+        info.reboot_required = true;
+    }
+
+    std::map<std::string, std::string> pkg_vers;
+    if (has_executable("pacman")) {
+        std::string q_out;
+        int q_rc = 1;
+        run_argv_capture({"pacman", "-Q", "linux", "nvidia-open", "nvidia", "nvidia-utils", "mesa", "vulkan-radeon", "vulkan-intel"}, q_out, q_rc);
+        for (const auto &line : split_lines(q_out)) {
+            std::istringstream iss(line);
+            std::string pkg, ver;
+            if (iss >> pkg >> ver) pkg_vers[pkg] = ver;
+        }
+        if (auto it = pkg_vers.find("linux"); it != pkg_vers.end()) {
+            info.kernel_installed = it->second;
+        }
+
+        std::string qu_out;
+        int qu_rc = 1;
+        if (run_argv_capture({"pacman", "-Qu"}, qu_out, qu_rc) && qu_rc == 0) {
+            for (const auto &line : split_lines(qu_out)) {
+                std::string t = trim_copy(line);
+                if (t.empty()) continue;
+                ++info.updates_total;
+                std::istringstream iss(t);
+                std::string pname;
+                iss >> pname;
+                if (pname == "linux" || pname.rfind("linux-firmware", 0) == 0 ||
+                    pname.rfind("nvidia", 0) == 0 || pname.rfind("lib32-nvidia", 0) == 0 ||
+                    pname == "mesa" || pname == "lib32-mesa" ||
+                    pname.rfind("vulkan-", 0) == 0 || pname.rfind("lib32-vulkan-", 0) == 0) {
+                    info.gpu_updates.push_back(t);
+                }
+            }
+        }
+    }
+
+    std::vector<std::string> parts;
+    std::string nv_mod = trim_copy(read_first_line("/sys/module/nvidia/version", ""));
+    if (auto it = pkg_vers.find("nvidia-open"); it != pkg_vers.end()) {
+        parts.push_back("NVIDIA Open " + (!nv_mod.empty() ? nv_mod : it->second));
+    } else if (auto it2 = pkg_vers.find("nvidia"); it2 != pkg_vers.end()) {
+        parts.push_back("NVIDIA " + (!nv_mod.empty() ? nv_mod : it2->second));
+    } else if (auto it3 = pkg_vers.find("nvidia-utils"); it3 != pkg_vers.end()) {
+        parts.push_back("NVIDIA " + it3->second);
+    }
+    if (auto it = pkg_vers.find("mesa"); it != pkg_vers.end()) {
+        parts.push_back("Mesa " + it->second);
+    }
+    if (parts.empty()) parts.push_back("DRM / Mesa");
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i > 0) info.driver_summary += " · ";
+        info.driver_summary += parts[i];
+    }
+    return info;
+}
+
 std::vector<DoctorCheckItem> run_system_health_checks() {
     std::vector<DoctorCheckItem> checks;
     std::error_code ec;
@@ -638,6 +700,39 @@ std::vector<DoctorCheckItem> run_system_health_checks() {
             it.detail = "已就绪（" + std::to_string(icds.size()) + " 个 ICD，含 32 位兼容库）";
         }
         checks.push_back(std::move(it));
+    }
+
+    // 2.5 GPU Driver Versions, Pending Reboot & Package Updates
+    {
+        GpuDriverUpdateInfo gi = collect_gpu_driver_update_info();
+        DoctorCheckItem drv;
+        drv.id = "gpu_driver_ver";
+        drv.name = "显卡驱动与内核版本";
+        drv.detail = gi.driver_summary + " · 内核 " + gi.kernel_running +
+                     (!gi.kernel_installed.empty() ? (" (包 " + gi.kernel_installed + ")") : "");
+        if (gi.reboot_required) {
+            drv.status = "warn";
+            drv.fix_hint = "检测到硬盘已升级新版内核/驱动，请重启系统以加载新内核模块";
+        } else {
+            drv.status = "ok";
+        }
+        checks.push_back(std::move(drv));
+
+        DoctorCheckItem upd;
+        upd.id = "sys_updates";
+        upd.name = "系统与显卡驱动更新";
+        if (gi.updates_total > 0) {
+            upd.status = "warn";
+            upd.detail = "发现 " + std::to_string(gi.updates_total) + " 项可升级软件包";
+            if (!gi.gpu_updates.empty()) {
+                upd.detail += "（含显卡驱动/内核 " + std::to_string(gi.gpu_updates.size()) + " 项）";
+            }
+            upd.fix_hint = "前往「应用商店 → 一键更新系统」同步升级至最新版驱动与内核";
+        } else {
+            upd.status = "ok";
+            upd.detail = "已对照本地软件源索引，内核与显卡驱动均为最新";
+        }
+        checks.push_back(std::move(upd));
     }
 
     // 3. PipeWire Audio Stack

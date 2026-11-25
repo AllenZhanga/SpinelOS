@@ -180,10 +180,18 @@ void test_steam_library() {
     compact.render_res = "native";
     std::string opts_compact = build_steam_launch_options(compact);
     EXPECT(opts_compact.find("gamemoderun") != std::string::npos);
-    EXPECT(opts_compact.find("MANGOHUD=1") != std::string::npos);
     EXPECT(opts_compact.find("-r 60") != std::string::npos);
     EXPECT(opts_compact.find("--mangoapp") != std::string::npos);
     EXPECT(opts_compact.find("%command%") != std::string::npos);
+
+    PerfConfig compact_direct;
+    compact_direct.gamemode = true;
+    compact_direct.mangohud = "compact";
+    compact_direct.fps_limit = 0;
+    compact_direct.fsr = false;
+    compact_direct.render_res = "native";
+    std::string opts_direct = build_steam_launch_options(compact_direct);
+    EXPECT(opts_direct == "gamemoderun mangohud %command%");
 
     PerfConfig fsr_cfg;
     fsr_cfg.gamemode = false;
@@ -192,6 +200,7 @@ void test_steam_library() {
     fsr_cfg.render_res = "720p";
     std::string opts_fsr = build_steam_launch_options(fsr_cfg);
     EXPECT(opts_fsr.find("MANGOHUD=1") == std::string::npos);
+    EXPECT(opts_fsr.find("mangohud") == std::string::npos);
     EXPECT(opts_fsr.find("gamescope") != std::string::npos);
     EXPECT(opts_fsr.find("-w 1280 -h 720") != std::string::npos);
     EXPECT(opts_fsr.find("-F fsr") != std::string::npos);
@@ -365,7 +374,13 @@ void test_system_control_configs() {
     EXPECT(redacted.find("12:34:56:**:**:**") != std::string::npos);
 
     auto doc_checks = run_system_health_checks();
-    EXPECT(doc_checks.size() == 7);
+    EXPECT(doc_checks.size() == 9);
+    bool has_drv_check = false, has_upd_check = false;
+    for (const auto &c : doc_checks) {
+        if (c.id == "gpu_driver_ver") has_drv_check = true;
+        if (c.id == "sys_updates") has_upd_check = true;
+    }
+    EXPECT(has_drv_check && has_upd_check);
     std::string doc_report = build_redacted_diagnostic_report();
     EXPECT(doc_report.find("SpinelOS Doctor Diagnostic Report") != std::string::npos);
     EXPECT(doc_report.find("[Health Checks]") != std::string::npos);
@@ -439,6 +454,28 @@ void test_ipc_router() {
     EXPECT(saved_perf.fsr == true);
     EXPECT(saved_perf.gamemode == false);
     EXPECT(saved_perf.render_res == "900p");
+
+    // MangoHud config sync ('off' -> no_display; 'full' -> frametime=1) & GPU/driver info query
+    auto slurp_file = [](const fs::path &p) -> std::string {
+        std::ifstream ifs(p);
+        std::ostringstream oss;
+        oss << ifs.rdbuf();
+        return oss.str();
+    };
+    sync_mangohud_config(saved_perf);
+    std::string mh_off = slurp_file(fs::path(home_dir()) / ".config/MangoHud/MangoHud.conf");
+    EXPECT(mh_off.find("no_display") != std::string::npos);
+    EXPECT(mh_off.find("toggle_hud=Shift_R+F12") != std::string::npos);
+    PerfConfig full_perf;
+    full_perf.mangohud = "full";
+    sync_mangohud_config(full_perf);
+    std::string mh_full = slurp_file(fs::path(home_dir()) / ".config/MangoHud/MangoHud.conf");
+    EXPECT(mh_full.find("frametime=1") != std::string::npos);
+    EXPECT(mh_full.find("no_display") == std::string::npos);
+
+    GpuDriverUpdateInfo gpu_info = collect_gpu_driver_update_info();
+    EXPECT(!gpu_info.driver_summary.empty());
+    EXPECT(!gpu_info.kernel_running.empty());
 
     reply.clear();
     EXPECT(dispatch_ipc_command(&dummy, "store:cancel", mock_actions, &reply));

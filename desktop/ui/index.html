@@ -1243,8 +1243,12 @@
         </div>
       </div>
 
-      <div class="store-top-bar glass" style="justify-content: space-between;">
-        <span class="muted-hint">系统更新与软件源维护（支持国内镜像测速、系统全面升级与密钥环修复）</span>
+      <div class="store-top-bar glass" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span class="status-chip" id="store-driver-chip">驱动检测中...</span>
+          <span class="status-chip" id="store-update-chip">索引检查中</span>
+          <button type="button" class="btn small danger hidden" id="btn-store-reboot" data-cmd="power:reboot">更新完成，立即重启生效</button>
+        </div>
         <div class="footer-actions">
           <button type="button" class="btn small primary" id="btn-sys-update" data-store-sys="sys-update">一键更新系统</button>
           <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>

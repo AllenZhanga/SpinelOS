@@ -286,6 +286,31 @@
       }
     }
     document.querySelectorAll("[data-store-sys]").forEach((b) => { b.disabled = ss.busy; });
+    const drvChip = document.getElementById("store-driver-chip");
+    if (drvChip && ss.driver_summary) {
+      drvChip.textContent = `显卡: ${ss.driver_summary}${ss.kernel_summary ? ` · 内核 ${ss.kernel_summary}` : ""}`;
+    }
+    const updChip = document.getElementById("store-update-chip");
+    const sysUpdBtn = document.getElementById("btn-sys-update");
+    if (updChip) {
+      const totalUpd = Number(ss.updates_total || 0);
+      const gpuUpds = Array.isArray(ss.gpu_updates) ? ss.gpu_updates : [];
+      if (totalUpd > 0) {
+        updChip.textContent = gpuUpds.length > 0
+          ? `可更新 ${totalUpd} 项（含显卡/内核 ${gpuUpds.length} 项）`
+          : `可更新 ${totalUpd} 项`;
+        updChip.style.background = "rgba(245, 158, 11, 0.18)";
+        updChip.style.color = "#f59e0b";
+        if (sysUpdBtn) sysUpdBtn.textContent = `一键更新 (${totalUpd})`;
+      } else {
+        updChip.textContent = "系统与驱动已是最新";
+        updChip.style.background = "";
+        updChip.style.color = "";
+        if (sysUpdBtn) sysUpdBtn.textContent = "一键更新系统";
+      }
+    }
+    const rebootBtn = document.getElementById("btn-store-reboot");
+    if (rebootBtn) rebootBtn.classList.toggle("hidden", !ss.reboot_required);
 
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
     const list = (ss.apps || []).filter((app) => {

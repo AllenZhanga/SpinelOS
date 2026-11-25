@@ -464,6 +464,9 @@ void launch_steam_client(AppState *state) {
         show_steam_alert(state, "正在首次初始化 Steam",
                          "首次启动 Steam 需要在后台联网下载官方运行时与客户端更新，完成后会自动弹出登录界面。可在「系统设置 → 系统日志」查看实时进度。");
     }
+    PerfConfig perf = load_perf_config();
+    sync_mangohud_config(perf);
+    apply_perf_to_steam_configs(perf);
     std::fprintf(stderr, "[spinel-shell] Launching Steam desktop client\n");
     spawn_argv_logged({"steam"}, "Steam", build_proxy_envs());
 }
@@ -472,6 +475,8 @@ void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     if (!is_digits(appid)) return;
 
     PerfConfig eff = resolve_perf_for_appid(appid, perf);
+    sync_mangohud_config(eff);
+    apply_perf_to_steam_configs(eff);
     std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
     if (eff.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
@@ -501,6 +506,9 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
                          "当前进度: " + prog + "\n\n请等待客户端更新完成后再进入主机大屏（不要同时开启多个更新进程）。");
         return;
     }
+
+    sync_mangohud_config(perf);
+    apply_perf_to_steam_configs(perf);
 
     std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
     if (perf.mangohud != "off") {
@@ -688,11 +696,10 @@ bool patch_single_appid_in_apps(std::string &txt,
 
 std::string build_steam_launch_options(const PerfConfig &perf) {
     std::vector<std::string> parts;
-    if (perf.mangohud != "off") parts.push_back("MANGOHUD=1");
-    if (perf.gamemode) parts.push_back("gamemoderun");
-
     bool need_gs = (perf.render_res != "native" || perf.fps_limit > 0 || perf.fsr);
+
     if (need_gs) {
+        if (perf.gamemode) parts.push_back("gamemoderun");
         parts.push_back("gamescope");
         parts.push_back("-f");
         if (perf.render_res == "720p") { parts.push_back("-w"); parts.push_back("1280"); parts.push_back("-h"); parts.push_back("720"); }
@@ -702,6 +709,9 @@ std::string build_steam_launch_options(const PerfConfig &perf) {
         if (perf.fsr) { parts.push_back("-F"); parts.push_back("fsr"); }
         if (perf.mangohud != "off") parts.push_back("--mangoapp");
         parts.push_back("--");
+    } else {
+        if (perf.gamemode) parts.push_back("gamemoderun");
+        if (perf.mangohud != "off") parts.push_back("mangohud");
     }
     if (parts.empty()) return "";
     parts.push_back("%command%");
