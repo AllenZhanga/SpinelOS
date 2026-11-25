@@ -11,7 +11,8 @@
     games: "app-games",
     store: "app-store",
     settings: "app-settings",
-    installer: "app-installer"
+    installer: "app-installer",
+    welcome: "app-welcome"
   };
 
   Object.values(modeRoots).forEach((id) => {
@@ -886,6 +887,12 @@
       const title = document.createElement("div");
       title.className = "game-title";
       title.textContent = g.name;
+      if (g.has_override) {
+        const badge = document.createElement("span");
+        badge.className = "game-ov-tag";
+        badge.textContent = "独立配置";
+        title.appendChild(badge);
+      }
       const sub = document.createElement("div");
       sub.className = "game-sub";
       sub.textContent = `AppID ${g.appid} · ${formatBytes(g.size_bytes)}`;
@@ -894,11 +901,136 @@
       btn.textContent = "立即启动";
       btn.setAttribute("data-cmd", `steam:launch:${g.appid}`);
 
-      meta.append(title, sub, btn);
+      const rowActions = document.createElement("div");
+      rowActions.className = "game-card-actions";
+      const ovBtn = document.createElement("button");
+      ovBtn.type = "button";
+      ovBtn.className = "btn small";
+      ovBtn.textContent = g.has_override ? "调优*" : "参数";
+      ovBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openGameOverrideModal(g);
+      });
+      const dirBtn = document.createElement("button");
+      dirBtn.type = "button";
+      dirBtn.className = "btn small";
+      dirBtn.textContent = g.compatdata ? "存档" : "目录";
+      dirBtn.setAttribute("data-cmd", `steam:compat:${g.appid}`);
+      rowActions.append(ovBtn, dirBtn);
+
+      meta.append(title, sub, btn, rowActions);
       card.append(poster, meta);
       grid.appendChild(card);
     });
   }
+
+  let ovEditState = null;
+
+  function renderGameOverrideModal() {
+    if (!ovEditState) return;
+    document.querySelectorAll("#game-ov-modal [data-ov-key]").forEach((btn) => {
+      const k = btn.getAttribute("data-ov-key");
+      const v = btn.getAttribute("data-ov-val");
+      btn.classList.toggle("active", String(ovEditState[k]) === String(v));
+    });
+    const fsrBtn = document.getElementById("ov-btn-fsr");
+    if (fsrBtn) fsrBtn.classList.toggle("is-on", Boolean(ovEditState.fsr));
+    const gmBtn = document.getElementById("ov-btn-gamemode");
+    if (gmBtn) gmBtn.classList.toggle("is-on", Boolean(ovEditState.gamemode));
+  }
+
+  function openGameOverrideModal(game) {
+    const modal = document.getElementById("game-ov-modal");
+    if (!modal || !game) return;
+    const base = game.has_override && game.override ? game.override : perfState;
+    ovEditState = {
+      appid: String(game.appid),
+      mangohud: base.mangohud || "compact",
+      fps_limit: Number(base.fps_limit || 0),
+      render_res: base.render_res || "native",
+      fsr: Boolean(base.fsr),
+      gamemode: base.gamemode !== undefined ? Boolean(base.gamemode) : true
+    };
+    const titleEl = document.getElementById("ov-game-title");
+    if (titleEl) titleEl.textContent = `${game.name} · 独立性能配置`;
+    const subEl = document.getElementById("ov-game-sub");
+    if (subEl) subEl.textContent = game.has_override
+      ? `AppID ${game.appid} 当前已启用独立参数覆盖`
+      : `AppID ${game.appid} 当前继承全局预设，保存后将独立覆盖`;
+    renderGameOverrideModal();
+    modal.classList.remove("hidden");
+  }
+
+  document.querySelectorAll("#game-ov-modal [data-ov-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!ovEditState) return;
+      const k = btn.getAttribute("data-ov-key");
+      const v = btn.getAttribute("data-ov-val");
+      ovEditState[k] = k === "fps_limit" ? Number(v) : v;
+      renderGameOverrideModal();
+    });
+  });
+
+  window.__spinelStorageCaches = (data) => {
+    if (!data) return;
+    const fmt = (b) => {
+      const n = Number(b || 0);
+      if (n <= 0) return "0 MB";
+      if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+      if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+      return `${Math.round(n / 1024)} KB`;
+    };
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set("cache-shader-sz", fmt(data.shadercache_bytes));
+    set("cache-dl-sz", fmt(data.downloading_bytes));
+    set("cache-logs-sz", fmt(data.logs_bytes));
+    set("cache-pacman-sz", fmt(data.pacman_bytes));
+    const cleanable = Number(data.shadercache_bytes || 0) + Number(data.downloading_bytes || 0) + Number(data.logs_bytes || 0);
+    set("storage-total-badge", `可清理 ${fmt(cleanable)}`);
+  };
+
+  window.__spinelStorageFeedback = (ok, msg) => showFeedback("storage-feedback", msg || "", !ok);
+
+  let welcomeStep = 1;
+  function setWelcomeStep(step) {
+    welcomeStep = Math.max(1, Math.min(4, Number(step) || 1));
+    [1, 2, 3, 4].forEach((i) => {
+      document.getElementById(`welcome-step-${i}`)?.classList.toggle("hidden", i !== welcomeStep);
+    });
+    document.querySelectorAll("#welcome-step-dots [data-wdot]").forEach((dot) => {
+      dot.classList.toggle("active", Number(dot.getAttribute("data-wdot")) === welcomeStep);
+    });
+    const prevBtn = document.getElementById("btn-wlc-prev");
+    if (prevBtn) prevBtn.disabled = welcomeStep <= 1;
+    const nextBtn = document.getElementById("btn-wlc-next");
+    if (nextBtn) {
+      nextBtn.textContent = welcomeStep >= 4 ? "开始使用 SpinelOS" : "下一步";
+      nextBtn.setAttribute("data-cmd", welcomeStep >= 4 ? "welcome:complete" : "welcome:next");
+    }
+  }
+
+  window.__spinelWelcomeStatus = (data) => {
+    if (!data) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set("wlc-net-status", data.net || "已就绪");
+    set("wlc-proxy-status", data.proxy_enabled ? "已开启系统代理并自动同步" : "未配置系统代理（如不需要可跳过）");
+    set("wlc-gpu-status", data.gpu || "已检测图形适配");
+    set("wlc-env-chip", data.is_live ? "Live 体验模式" : "本地系统盘模式");
+    const steamBtn = document.getElementById("wlc-steam-btn");
+    if (data.steam_installed) {
+      set("wlc-steam-status", "Steam 客户端已安装，可随时启动或进入主机大屏");
+      if (steamBtn) {
+        steamBtn.textContent = "启动 Steam";
+        steamBtn.setAttribute("data-cmd", "launch:steam");
+      }
+    } else {
+      set("wlc-steam-status", "尚未安装专有 Steam 客户端（可点击右侧去应用商店一键安装）");
+      if (steamBtn) {
+        steamBtn.textContent = "一键安装 Steam";
+        steamBtn.setAttribute("data-cmd", "store:open:steam");
+      }
+    }
+  };
 
   function renderLaunchpadApps() {
     const grid = document.getElementById("launchpad-app-grid");
@@ -2283,6 +2415,32 @@
       }
     } else if (cmd === "store:log-hide") {
       document.getElementById("store-log-wrap")?.classList.add("hidden");
+    } else if (cmd === "ov:close") {
+      document.getElementById("game-ov-modal")?.classList.add("hidden");
+    } else if (cmd === "ov:toggle-fsr" && ovEditState) {
+      ovEditState.fsr = !ovEditState.fsr;
+      renderGameOverrideModal();
+    } else if (cmd === "ov:toggle-gamemode" && ovEditState) {
+      ovEditState.gamemode = !ovEditState.gamemode;
+      renderGameOverrideModal();
+    } else if (cmd === "ov:save" && ovEditState) {
+      sendCommand([
+        "steam:override-set",
+        `appid=${ovEditState.appid}`,
+        `mangohud=${ovEditState.mangohud}`,
+        `fps_limit=${ovEditState.fps_limit}`,
+        `fsr=${ovEditState.fsr ? "true" : "false"}`,
+        `gamemode=${ovEditState.gamemode ? "true" : "false"}`,
+        `render_res=${ovEditState.render_res}`
+      ].join("\n"));
+      document.getElementById("game-ov-modal")?.classList.add("hidden");
+    } else if (cmd === "ov:clear" && ovEditState) {
+      sendCommand(`steam:override-clear:${ovEditState.appid}`);
+      document.getElementById("game-ov-modal")?.classList.add("hidden");
+    } else if (cmd === "welcome:prev") {
+      setWelcomeStep(welcomeStep - 1);
+    } else if (cmd === "welcome:next") {
+      setWelcomeStep(welcomeStep + 1);
     } else if (cmd.startsWith("theme:set:")) {
       sendCommand(cmd);
     } else {
@@ -2507,6 +2665,8 @@
   if (mode === "settings") switchSettingsTab(initialTab);
   if (mode === "store") sendCommand("store:refresh");
   if (mode === "installer") sendCommand("installer:scan-disks");
+  if (mode === "games") sendCommand("steam:scan-caches");
+  if (mode === "welcome") setWelcomeStep(1);
   if (mode === "desktop") renderDesktopShortcuts();
   if (mode === "dock") renderDock();
 

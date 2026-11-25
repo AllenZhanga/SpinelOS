@@ -287,17 +287,42 @@ void push_steam_library(AppState *state) {
     if (!state) return;
 
     auto games = list_steam_games();
+    auto roots = discover_steam_roots();
+    auto libs = discover_library_folders(roots);
+    auto overrides = load_game_overrides();
+
+    auto has_compat = [&](const std::string &appid) -> bool {
+        std::error_code ec;
+        for (const auto &lib : libs) {
+            if (fs::is_directory(lib / "steamapps/compatdata" / appid, ec)) return true;
+        }
+        return false;
+    };
 
     std::ostringstream js;
     js << "window.__spinelSteamGames && window.__spinelSteamGames([";
     for (size_t i = 0; i < games.size(); ++i) {
         if (i > 0) js << ",";
+        auto ov_it = overrides.find(games[i].appid);
+        bool has_ov = (ov_it != overrides.end() && ov_it->second.enabled);
         js << "{"
            << "\"appid\":\"" << json_escape(games[i].appid) << "\","
            << "\"name\":\"" << json_escape(games[i].name) << "\","
            << "\"size_bytes\":" << games[i].size_bytes << ","
-           << "\"cover_uri\":\"" << json_escape(games[i].cover_uri) << "\""
-           << "}";
+           << "\"cover_uri\":\"" << json_escape(games[i].cover_uri) << "\","
+           << "\"compatdata\":" << (has_compat(games[i].appid) ? "true" : "false") << ","
+           << "\"has_override\":" << (has_ov ? "true" : "false");
+        if (has_ov) {
+            const auto &ov = ov_it->second;
+            js << ",\"override\":{"
+               << "\"mangohud\":\"" << json_escape(ov.mangohud) << "\","
+               << "\"fps_limit\":" << ov.fps_limit << ","
+               << "\"fsr\":" << (ov.fsr ? "true" : "false") << ","
+               << "\"gamemode\":" << (ov.gamemode ? "true" : "false") << ","
+               << "\"render_res\":\"" << json_escape(ov.render_res) << "\""
+               << "}";
+        }
+        js << "}";
     }
     js << "]);";
     std::string script = js.str();
@@ -457,11 +482,12 @@ void launch_steam_client(AppState *state) {
 void launch_steam_game(const std::string &appid, const PerfConfig &perf) {
     if (!is_digits(appid)) return;
 
+    PerfConfig eff = resolve_perf_for_appid(appid, perf);
     std::vector<std::pair<std::string, std::string>> envs = build_proxy_envs();
-    if (perf.mangohud != "off") {
+    if (eff.mangohud != "off") {
         envs.emplace_back("MANGOHUD", "1");
     }
-    if (perf.gamemode) {
+    if (eff.gamemode) {
         envs.emplace_back("GAMEMODERUN", "1");
     }
 
@@ -739,10 +765,12 @@ SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf) {
             fs::copy_file(vdf, vdf.string() + ".bak", fs::copy_options::overwrite_existing, ec);
             int file_updates = 0;
             for (const auto &appid : appids) {
-                if (patch_single_appid_in_apps(txt, apps_open, apps_close, appid, escaped)) {
+                std::string per_game_escaped = vdf_escape(build_steam_launch_options(resolve_perf_for_appid(appid, perf)));
+                if (patch_single_appid_in_apps(txt, apps_open, apps_close, appid, per_game_escaped)) {
                     ++file_updates;
                 }
             }
+            (void)escaped;
             if (file_updates > 0) {
                 fs::path tmp = vdf.string() + ".tmp";
                 std::ofstream ofs(tmp, std::ios::trunc);
@@ -757,4 +785,236 @@ SteamPerfApplyResult apply_perf_to_steam_configs(const PerfConfig &perf) {
         }
     }
     return res;
+}
+
+namespace {
+
+fs::path game_overrides_path() {
+    return fs::path(home_dir()) / ".config/spinelos/game_overrides.conf";
+}
+
+bool write_game_overrides(const std::map<std::string, GamePerfOverride> &map) {
+    std::ostringstream oss;
+    for (const auto &kv : map) {
+        const auto &ov = kv.second;
+        if (!is_digits(ov.appid) || !ov.enabled) continue;
+        oss << ov.appid << "|"
+            << ov.mangohud << "|"
+            << ov.fps_limit << "|"
+            << (ov.fsr ? "1" : "0") << "|"
+            << (ov.gamemode ? "1" : "0") << "|"
+            << ov.render_res << "\n";
+    }
+    return write_text_file(game_overrides_path().string(), oss.str());
+}
+
+long long dir_size_bytes(const fs::path &dir) {
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return 0;
+    long long total = 0;
+    for (const auto &entry : fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied, ec)) {
+        if (entry.is_regular_file(ec)) {
+            total += static_cast<long long>(entry.file_size(ec));
+        }
+    }
+    return total;
+}
+
+long long clear_dir_contents(const fs::path &dir) {
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return 0;
+    long long before = dir_size_bytes(dir);
+    for (const auto &entry : fs::directory_iterator(dir, ec)) {
+        fs::remove_all(entry.path(), ec);
+    }
+    return std::max(0LL, before - dir_size_bytes(dir));
+}
+
+std::string format_bytes_human(long long bytes) {
+    char buf[48];
+    if (bytes >= 1073741824LL) {
+        std::snprintf(buf, sizeof(buf), "%.2f GB", static_cast<double>(bytes) / 1073741824.0);
+    } else if (bytes >= 1048576LL) {
+        std::snprintf(buf, sizeof(buf), "%.1f MB", static_cast<double>(bytes) / 1048576.0);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%lld KB", bytes / 1024LL);
+    }
+    return buf;
+}
+
+}  // namespace
+
+std::map<std::string, GamePerfOverride> load_game_overrides() {
+    std::map<std::string, GamePerfOverride> out;
+    std::ifstream ifs(game_overrides_path());
+    if (!ifs.is_open()) return out;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = trim_copy(line);
+        if (line.empty() || line[0] == '#') continue;
+        std::vector<std::string> cols;
+        std::stringstream ss(line);
+        std::string item;
+        while (std::getline(ss, item, '|')) cols.push_back(trim_copy(item));
+        if (cols.size() < 6 || !is_digits(cols[0])) continue;
+        GamePerfOverride ov;
+        ov.appid = cols[0];
+        ov.enabled = true;
+        ov.mangohud = (cols[1] == "off" || cols[1] == "compact" || cols[1] == "full") ? cols[1] : "compact";
+        ov.fps_limit = std::clamp(std::atoi(cols[2].c_str()), 0, 240);
+        ov.fsr = (cols[3] == "1" || cols[3] == "true");
+        ov.gamemode = (cols[4] == "1" || cols[4] == "true");
+        ov.render_res = (cols[5] == "720p" || cols[5] == "900p" || cols[5] == "1080p" || cols[5] == "native") ? cols[5] : "native";
+        out[ov.appid] = ov;
+    }
+    return out;
+}
+
+bool save_game_override(const GamePerfOverride &ov) {
+    if (!is_digits(ov.appid)) return false;
+    auto map = load_game_overrides();
+    if (ov.enabled) {
+        map[ov.appid] = ov;
+    } else {
+        map.erase(ov.appid);
+    }
+    return write_game_overrides(map);
+}
+
+bool clear_game_override(const std::string &appid) {
+    auto map = load_game_overrides();
+    map.erase(appid);
+    return write_game_overrides(map);
+}
+
+PerfConfig resolve_perf_for_appid(const std::string &appid, const PerfConfig &global_perf) {
+    auto map = load_game_overrides();
+    auto it = map.find(appid);
+    if (it == map.end() || !it->second.enabled) return global_perf;
+    PerfConfig eff = global_perf;
+    eff.mangohud = it->second.mangohud;
+    eff.fps_limit = it->second.fps_limit;
+    eff.fsr = it->second.fsr;
+    eff.gamemode = it->second.gamemode;
+    eff.render_res = it->second.render_res;
+    return eff;
+}
+
+void handle_game_override_command(AppState *state, const std::string &payload, bool is_clear) {
+    if (is_clear) {
+        std::string appid = trim_copy(payload);
+        if (!is_digits(appid)) return;
+        clear_game_override(appid);
+        apply_perf_to_steam_configs(load_perf_config());
+        push_steam_library(state);
+        return;
+    }
+
+    GamePerfOverride ov;
+    ov.enabled = true;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "appid") ov.appid = v;
+        else if (k == "mangohud" && (v == "off" || v == "compact" || v == "full")) ov.mangohud = v;
+        else if (k == "fps_limit") ov.fps_limit = std::clamp(std::atoi(v.c_str()), 0, 240);
+        else if (k == "fsr") ov.fsr = (v == "true" || v == "1");
+        else if (k == "gamemode") ov.gamemode = (v == "true" || v == "1");
+        else if (k == "render_res" && (v == "native" || v == "720p" || v == "900p" || v == "1080p")) ov.render_res = v;
+    }
+    if (!save_game_override(ov)) return;
+    auto sr = apply_perf_to_steam_configs(load_perf_config());
+    append_app_log("[Games] 已保存 AppID=" + ov.appid + " 独立性能配置（" + build_steam_launch_options(resolve_perf_for_appid(ov.appid, load_perf_config())) + "）");
+    if (sr.steam_running && state) {
+        show_steam_alert(state, "独立参数已保存",
+                         "SpinelOS 已保存该游戏的独立配置；当前 Steam 正在运行，重启 Steam 后启动器将自动同步到 Steam 客户端配置。");
+    }
+    push_steam_library(state);
+}
+
+void open_steam_compatdata(AppState *state, const std::string &appid) {
+    if (!is_digits(appid)) return;
+    auto libs = discover_library_folders(discover_steam_roots());
+    std::error_code ec;
+    for (const auto &lib : libs) {
+        fs::path compat = lib / "steamapps/compatdata" / appid;
+        if (fs::is_directory(compat, ec)) {
+            fs::path pfx = compat / "pfx/drive_c/users/steamuser";
+            fs::path target = fs::is_directory(pfx, ec) ? pfx : compat;
+            spawn_argv_detached({"thunar", target.string()});
+            return;
+        }
+    }
+    show_steam_alert(state, "暂未生成 Proton 兼容目录",
+                     "未找到 AppID " + appid + " 的 compatdata 目录（可能是 Linux 原生游戏，或尚未通过 Proton 启动过）。");
+}
+
+CacheStorageStats scan_storage_caches() {
+    CacheStorageStats stats;
+    auto libs = discover_library_folders(discover_steam_roots());
+    for (const auto &lib : libs) {
+        stats.shadercache_bytes += dir_size_bytes(lib / "steamapps/shadercache");
+        stats.downloading_bytes += dir_size_bytes(lib / "steamapps/downloading");
+    }
+    std::error_code ec;
+    fs::path state_dir = fs::path(spinel_state_dir());
+    if (fs::is_directory(state_dir, ec)) {
+        for (const auto &entry : fs::directory_iterator(state_dir, ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".log") {
+                stats.logs_bytes += static_cast<long long>(entry.file_size(ec));
+            }
+        }
+    }
+    stats.pacman_bytes = dir_size_bytes("/var/cache/pacman/pkg");
+    return stats;
+}
+
+void push_storage_caches(AppState *state) {
+    if (!state || !state->games_view) return;
+    CacheStorageStats stats = scan_storage_caches();
+    std::ostringstream js;
+    js << "window.__spinelStorageCaches && window.__spinelStorageCaches({"
+       << "\"shadercache_bytes\":" << stats.shadercache_bytes << ","
+       << "\"downloading_bytes\":" << stats.downloading_bytes << ","
+       << "\"logs_bytes\":" << stats.logs_bytes << ","
+       << "\"pacman_bytes\":" << stats.pacman_bytes
+       << "});";
+    eval_js(state->games_view, js.str());
+}
+
+void clean_storage_caches(AppState *state, const std::string &payload) {
+    long long freed = 0;
+    bool clean_shader = (payload.find("shadercache") != std::string::npos);
+    bool clean_dl = (payload.find("downloading") != std::string::npos);
+    bool clean_logs = (payload.find("logs") != std::string::npos);
+
+    auto libs = discover_library_folders(discover_steam_roots());
+    for (const auto &lib : libs) {
+        if (clean_shader) freed += clear_dir_contents(lib / "steamapps/shadercache");
+        if (clean_dl) freed += clear_dir_contents(lib / "steamapps/downloading");
+    }
+    if (clean_logs) {
+        std::error_code ec;
+        fs::path state_dir = fs::path(spinel_state_dir());
+        if (fs::is_directory(state_dir, ec)) {
+            for (const auto &entry : fs::directory_iterator(state_dir, ec)) {
+                if (entry.is_regular_file(ec) && entry.path().extension() == ".log") {
+                    freed += static_cast<long long>(entry.file_size(ec));
+                    write_text_file(entry.path().string(), "");
+                }
+            }
+        }
+    }
+
+    if (!clean_logs) {
+        append_app_log("[Storage] 已清理缓存，释放空间 " + format_bytes_human(freed));
+    }
+    push_storage_caches(state);
+    if (state && state->games_view) {
+        eval_js(state->games_view,
+                "window.__spinelStorageFeedback && window.__spinelStorageFeedback(true, \"已安全清理缓存并释放 " +
+                    json_escape(format_bytes_human(freed)) + "\");");
+    }
 }

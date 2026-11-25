@@ -105,6 +105,19 @@ void kill_process_by_pid(AppState *state, int pid, bool force);
 void sync_notification_theme(bool is_light);
 bool get_dnd_enabled();
 void toggle_dnd_mode(AppState *state);
+
+struct NotificationHistoryItem {
+    uint32_t id = 0;
+    std::string app_name;
+    std::string summary;
+    std::string body;
+};
+std::vector<NotificationHistoryItem> fetch_notification_history();
+void dismiss_all_notifications();
+
+bool is_welcome_completed();
+void mark_welcome_completed();
+void push_welcome_status(AppState *state);
 void push_audio_power_state(AppState *state);
 void set_audio_default_node(AppState *state, int id, bool is_sink);
 void set_mic_volume(AppState *state, int pct);

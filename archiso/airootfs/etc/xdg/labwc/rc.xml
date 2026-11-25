@@ -15,6 +15,16 @@
     </titlebar>
   </theme>
 
+  <desktops number="4">
+    <popupTime>450</popupTime>
+    <prefix>工作区</prefix>
+  </desktops>
+
+  <snapping>
+    <range inner="10" outer="10" />
+    <topMaximize>yes</topMaximize>
+  </snapping>
+
   <keyboard>
     <default />
     <keybind key="W-Return">
@@ -55,6 +65,24 @@
     </keybind>
     <keybind key="A-F4">
       <action name="Close" />
+    </keybind>
+    <keybind key="W-Left">
+      <action name="SnapToEdge" direction="left" />
+    </keybind>
+    <keybind key="W-Right">
+      <action name="SnapToEdge" direction="right" />
+    </keybind>
+    <keybind key="W-Up">
+      <action name="ToggleMaximize" />
+    </keybind>
+    <keybind key="W-Down">
+      <action name="Iconify" />
+    </keybind>
+    <keybind key="C-A-Left">
+      <action name="GoToDesktop" to="left" wrap="yes" />
+    </keybind>
+    <keybind key="C-A-Right">
+      <action name="GoToDesktop" to="right" wrap="yes" />
     </keybind>
   </keyboard>
 

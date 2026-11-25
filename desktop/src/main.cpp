@@ -196,6 +196,7 @@ void open_games_window(AppState *state) {
     push_perf_config(state);
     push_steam_library(state);
     push_desktop_apps(state);
+    push_storage_caches(state);
 }
 
 void open_settings_window(AppState *state, const std::string &tab) {
@@ -231,6 +232,18 @@ void open_store_window(AppState *state, const std::string &focus_id = "") {
         push_theme_state(state);
         push_desktop_apps(state);
         push_store_catalog(state);
+    }
+}
+
+void open_welcome_window(AppState *state) {
+    bool existed = (state->welcome_win != nullptr);
+    ensure_app_window(state, &state->welcome_win, &state->welcome_view,
+                      "欢迎使用 SpinelOS", "?mode=welcome", 820, 620);
+    if (existed) {
+        push_theme_state(state);
+        push_telemetry_to_view(state->welcome_view);
+        push_desktop_apps(state);
+        push_welcome_status(state);
     }
 }
 
@@ -271,6 +284,7 @@ void open_installer_window(AppState *) { launch_webui_cmd("installer:open"); }
 void open_settings_window(AppState *, const std::string &tab) {
     launch_webui_cmd("settings:open:" + tab);
 }
+void open_welcome_window(AppState *) { launch_webui_cmd("welcome:open"); }
 
 #endif  // SPINEL_HAS_WEBKIT
 
@@ -284,6 +298,10 @@ void push_all_telemetry(AppState *state) {
     }
     if (state->settings_win && gtk_widget_get_visible(GTK_WIDGET(state->settings_win))) {
         push_telemetry_to_view(state->settings_view);
+    }
+    if (state->welcome_win && gtk_widget_get_visible(GTK_WIDGET(state->welcome_win))) {
+        push_telemetry_to_view(state->welcome_view);
+        push_welcome_status(state);
     }
 #else
     native_shell_sync_telemetry(state);
@@ -414,6 +432,15 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     start_clipboard_watcher();
 
     g_timeout_add_seconds(3, on_telemetry_tick, state);
+    if (!is_welcome_completed()) {
+        g_timeout_add(1800, +[](gpointer d) -> gboolean {
+            auto *st = static_cast<AppState *>(d);
+            if (st && !st->shutting_down.load() && !is_welcome_completed()) {
+                launch_webui_cmd("welcome:open");
+            }
+            return G_SOURCE_REMOVE;
+        }, state);
+    }
 }
 
 #endif  // SPINEL_HAS_WEBKIT
@@ -452,6 +479,27 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         launch_steam_game(cmd.substr(13), load_perf_config());
     } else if (cmd == "steam:scan") {
         push_steam_library(state);
+        push_storage_caches(state);
+    } else if (cmd.rfind("steam:compat:", 0) == 0) {
+        open_steam_compatdata(state, cmd.substr(13));
+    } else if (cmd.rfind("steam:override-set\n", 0) == 0) {
+        handle_game_override_command(state, cmd, false);
+    } else if (cmd.rfind("steam:override-clear:", 0) == 0) {
+        handle_game_override_command(state, cmd.substr(21), true);
+    } else if (cmd == "steam:scan-caches") {
+        push_storage_caches(state);
+    } else if (cmd.rfind("steam:clean-caches\n", 0) == 0) {
+        clean_storage_caches(state, cmd);
+    } else if (cmd == "welcome:open") {
+        native_shell_set_cc_visible(state, false);
+        open_welcome_window(state);
+    } else if (cmd == "welcome:complete") {
+        mark_welcome_completed();
+#if SPINEL_HAS_WEBKIT
+        if (state->welcome_win) {
+            gtk_window_close(state->welcome_win);
+        }
+#endif
     } else if (cmd == "launch:terminal") {
         native_shell_set_cc_visible(state, false);
         std::string term_bin = has_executable("spinel-terminal")
@@ -674,6 +722,8 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         push_steam_library(state);
         push_desktop_apps(state);
         push_wallpaper_pref(state);
+        push_storage_caches(state);
+        push_welcome_status(state);
 #if !SPINEL_HAS_WEBKIT
         push_windows_to_ui(state);
 #endif

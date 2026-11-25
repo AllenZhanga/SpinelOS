@@ -367,6 +367,7 @@ void push_theme_state(AppState *state) {
     sync_view(state->store_view);
     sync_view(state->settings_view);
     sync_view(state->installer_view);
+    sync_view(state->welcome_view);
 #else
     (void)script;
 #endif

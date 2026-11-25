@@ -1908,6 +1908,97 @@ void toggle_dnd_mode(AppState *state) {
     native_shell_sync_perf(state);
 }
 
+std::vector<NotificationHistoryItem> fetch_notification_history() {
+    std::vector<NotificationHistoryItem> items;
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if (!bus) return items;
+
+    auto collect_from = [&](const char *method) {
+        GVariant *outer = g_dbus_connection_call_sync(
+            bus, "fr.emersion.Mako", "/fr/emersion/Mako", "fr.emersion.Mako",
+            method, nullptr, G_VARIANT_TYPE("(aa{sv})"),
+            G_DBUS_CALL_FLAGS_NO_AUTO_START, 250, nullptr, nullptr);
+        if (!outer) return;
+        GVariant *arr = g_variant_get_child_value(outer, 0);
+        gsize n = g_variant_n_children(arr);
+        for (gsize i = 0; i < n && items.size() < 20; ++i) {
+            GVariant *dict = g_variant_get_child_value(arr, i);
+            auto get_str = [&](const char *k) -> std::string {
+                GVariant *v = g_variant_lookup_value(dict, k, G_VARIANT_TYPE_STRING);
+                if (!v) return "";
+                const char *s = g_variant_get_string(v, nullptr);
+                std::string out = s ? s : "";
+                g_variant_unref(v);
+                return out;
+            };
+            NotificationHistoryItem it;
+            if (GVariant *vid = g_variant_lookup_value(dict, "id", nullptr)) {
+                if (g_variant_is_of_type(vid, G_VARIANT_TYPE_UINT32)) it.id = g_variant_get_uint32(vid);
+                else if (g_variant_is_of_type(vid, G_VARIANT_TYPE_INT32)) it.id = static_cast<uint32_t>(std::max(0, g_variant_get_int32(vid)));
+                g_variant_unref(vid);
+            }
+            it.app_name = get_str("app-name");
+            it.summary = get_str("summary");
+            it.body = get_str("body");
+            if (!it.summary.empty() || !it.body.empty()) {
+                bool dup = false;
+                for (const auto &ex : items) {
+                    if (ex.id != 0 && ex.id == it.id) { dup = true; break; }
+                }
+                if (!dup) items.push_back(std::move(it));
+            }
+            g_variant_unref(dict);
+        }
+        g_variant_unref(arr);
+        g_variant_unref(outer);
+    };
+
+    collect_from("ListNotifications");
+    collect_from("ListHistory");
+    g_object_unref(bus);
+    return items;
+}
+
+void dismiss_all_notifications() {
+    if (GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr)) {
+        GVariant *res = g_dbus_connection_call_sync(
+            bus, "fr.emersion.Mako", "/fr/emersion/Mako", "fr.emersion.Mako",
+            "DismissAllNotifications", nullptr, nullptr,
+            G_DBUS_CALL_FLAGS_NO_AUTO_START, 250, nullptr, nullptr);
+        if (res) g_variant_unref(res);
+        g_object_unref(bus);
+    }
+}
+
+bool is_welcome_completed() {
+    std::error_code ec;
+    return fs::exists(fs::path(home_dir()) / ".config/spinelos/welcome_done", ec);
+}
+
+void mark_welcome_completed() {
+    fs::path p = fs::path(home_dir()) / ".config/spinelos/welcome_done";
+    write_text_file(p.string(), "completed=1\n");
+    append_app_log("[OOBE] 首次开机引导已完成");
+}
+
+void push_welcome_status(AppState *state) {
+    if (!state || !state->welcome_view) return;
+    TelemetrySnapshot tel = collect_telemetry();
+    ProxyConfig p = load_proxy_config();
+    bool steam_installed = has_executable("steam");
+    bool completed = is_welcome_completed();
+    std::ostringstream js;
+    js << "window.__spinelWelcomeStatus && window.__spinelWelcomeStatus({"
+       << "\"steam_installed\":" << (steam_installed ? "true" : "false") << ","
+       << "\"proxy_enabled\":" << (p.enabled ? "true" : "false") << ","
+       << "\"completed\":" << (completed ? "true" : "false") << ","
+       << "\"is_live\":" << (tel.is_live ? "true" : "false") << ","
+       << "\"gpu\":\"" << json_escape(tel.gpu) << "\","
+       << "\"net\":\"" << json_escape(tel.net) << "\""
+       << "});";
+    eval_js(state->welcome_view, js.str());
+}
+
 namespace {
 
 struct AudioDeviceItem {
@@ -2527,6 +2618,14 @@ bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
         << "      <layout>close,iconify,max:</layout>\n"
         << "    </titlebar>\n"
         << "  </theme>\n\n"
+        << "  <desktops number=\"4\">\n"
+        << "    <popupTime>450</popupTime>\n"
+        << "    <prefix>工作区</prefix>\n"
+        << "  </desktops>\n\n"
+        << "  <snapping>\n"
+        << "    <range inner=\"10\" outer=\"10\" />\n"
+        << "    <topMaximize>yes</topMaximize>\n"
+        << "  </snapping>\n\n"
         << "  <keyboard>\n"
         << "    <default />\n"
         << "    <keybind key=\"" << sc.open_terminal << "\">\n"
@@ -2569,6 +2668,24 @@ bool write_labwc_rc(bool is_light, const ShortcutConfig &sc) {
         << "    </keybind>\n"
         << "    <keybind key=\"A-F4\">\n"
         << "      <action name=\"Close\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"W-Left\">\n"
+        << "      <action name=\"SnapToEdge\" direction=\"left\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"W-Right\">\n"
+        << "      <action name=\"SnapToEdge\" direction=\"right\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"W-Up\">\n"
+        << "      <action name=\"ToggleMaximize\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"W-Down\">\n"
+        << "      <action name=\"Iconify\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"C-A-Left\">\n"
+        << "      <action name=\"GoToDesktop\" to=\"left\" wrap=\"yes\" />\n"
+        << "    </keybind>\n"
+        << "    <keybind key=\"C-A-Right\">\n"
+        << "      <action name=\"GoToDesktop\" to=\"right\" wrap=\"yes\" />\n"
         << "    </keybind>\n"
         << "  </keyboard>\n\n"
         << "  <mouse>\n"

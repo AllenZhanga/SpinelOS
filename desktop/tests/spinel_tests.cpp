@@ -228,6 +228,48 @@ void test_steam_library() {
     auto applied = apply_perf_to_steam_configs(compact);
     EXPECT(applied.games_updated == 1);
     EXPECT(applied.configs_updated == 1);
+
+    // Per-game performance override & resolution check
+    GamePerfOverride ov;
+    ov.appid = "730";
+    ov.enabled = true;
+    ov.mangohud = "off";
+    ov.fps_limit = 90;
+    ov.fsr = true;
+    ov.gamemode = false;
+    ov.render_res = "720p";
+    EXPECT(save_game_override(ov));
+    PerfConfig eff = resolve_perf_for_appid("730", compact);
+    EXPECT(eff.mangohud == "off");
+    EXPECT(eff.fps_limit == 90);
+    EXPECT(eff.fsr == true);
+    EXPECT(eff.gamemode == false);
+    EXPECT(eff.render_res == "720p");
+    EXPECT(resolve_perf_for_appid("999999", compact).fps_limit == 60);
+
+    auto ov_applied = apply_perf_to_steam_configs(compact);
+    EXPECT(ov_applied.games_updated == 1);
+    std::ifstream lcfg_ifs(localcfg);
+    std::ostringstream lcfg_buf;
+    lcfg_buf << lcfg_ifs.rdbuf();
+    EXPECT(lcfg_buf.str().find("-r 90 -F fsr") != std::string::npos);
+
+    EXPECT(clear_game_override("730"));
+    EXPECT(resolve_perf_for_appid("730", compact).fps_limit == 60);
+
+    // Storage & cache scanning / cleanup
+    EXPECT(write_text_file((root1 / "steamapps/shadercache/730/shader.bin").string(), "0123456789"));
+    EXPECT(write_text_file((root1 / "steamapps/downloading/730/chunk.part").string(), "abcdef"));
+    EXPECT(write_text_file((fs::path(spinel_state_dir()) / "apps.log").string(), "log-line\n"));
+    CacheStorageStats before = scan_storage_caches();
+    EXPECT(before.shadercache_bytes == 10);
+    EXPECT(before.downloading_bytes == 6);
+    EXPECT(before.logs_bytes == 9);
+    clean_storage_caches(nullptr, "steam:clean-caches\ntargets=shadercache,downloading,logs");
+    CacheStorageStats after = scan_storage_caches();
+    EXPECT(after.shadercache_bytes == 0);
+    EXPECT(after.downloading_bytes == 0);
+    EXPECT(after.logs_bytes == 0);
 }
 
 void test_system_control_configs() {
@@ -274,6 +316,22 @@ void test_system_control_configs() {
     }
     clear_clipboard_history();
     EXPECT(load_clipboard_history().empty());
+
+    // labwc config generation (workspaces + snapping + media OSD keys)
+    EXPECT(write_labwc_rc(true, sc));
+    std::ifstream rc_ifs(fs::path(home_dir()) / ".config/labwc/rc.xml");
+    std::ostringstream rc_buf;
+    rc_buf << rc_ifs.rdbuf();
+    std::string rc_xml = rc_buf.str();
+    EXPECT(rc_xml.find("<desktops number=\"4\">") != std::string::npos);
+    EXPECT(rc_xml.find("SnapToEdge") != std::string::npos);
+    EXPECT(rc_xml.find("GoToDesktop") != std::string::npos);
+    EXPECT(rc_xml.find("XF86AudioRaiseVolume") != std::string::npos);
+
+    // OOBE welcome state persistence
+    EXPECT(is_welcome_completed() == false);
+    mark_welcome_completed();
+    EXPECT(is_welcome_completed() == true);
 }
 
 }  // namespace

@@ -69,6 +69,9 @@ struct NativeShellState {
     GtkWidget *bar_bat_lbl = nullptr;
     GtkWidget *clip_popover = nullptr;
     GtkWidget *clip_list_box = nullptr;
+    GtkWidget *notif_popover = nullptr;
+    GtkWidget *notif_list_box = nullptr;
+    uint32_t notif_cleared_max_id = 0;
     GtkWidget *bar_net_btn = nullptr;
     GtkWidget *bar_cc_btn = nullptr;
     GtkWidget *bar_clock_lbl = nullptr;
@@ -765,7 +768,7 @@ void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_d
     draw_spinel_logo_at(ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz);
 }
 
-enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard, Volume, Mute, Brightness, Dnd };
+enum class BarGlyph { Wifi, Search, ControlCenter, Reboot, Power, Bluetooth, Gamepad, Hud, Appearance, Settings, Lock, Screenshot, Clipboard, Volume, Mute, Brightness, Dnd, Bell };
 
 void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
     double s = std::min(w, h) / 16.0;
@@ -945,6 +948,17 @@ void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRG
             cairo_arc_negative(cr, 10.6, 5.4, 3.8, 1.35 * M_PI, 0.25 * M_PI);
             cairo_close_path(cr);
             cairo_stroke(cr);
+            break;
+        case BarGlyph::Bell:
+            cairo_move_to(cr, 3.4, 11.4);
+            cairo_line_to(cr, 12.6, 11.4);
+            cairo_move_to(cr, 4.4, 11.4);
+            cairo_line_to(cr, 4.4, 7.2);
+            cairo_arc(cr, 8.0, 7.2, 3.6, M_PI, 2.0 * M_PI);
+            cairo_line_to(cr, 11.6, 11.4);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 12.9, 1.1, 0, 2.0 * M_PI);
+            cairo_fill(cr);
             break;
     }
     cairo_restore(cr);
@@ -1398,6 +1412,111 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     }), ns);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(clip_btn), cpop);
 
+    auto rebuild_notif_popover = +[](NativeShellState *n) {
+        if (!n || !n->notif_list_box) return;
+        while (GtkWidget *c = gtk_widget_get_first_child(n->notif_list_box)) {
+            gtk_box_remove(GTK_BOX(n->notif_list_box), c);
+        }
+
+        bool dnd = get_dnd_enabled();
+        GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        std::string title_txt = dnd ? "通知历史（勿扰已开启）" : "系统通知历史";
+        GtkWidget *title = gtk_label_new(title_txt.c_str());
+        gtk_widget_add_css_class(title, "spinel-clip-head");
+        gtk_widget_set_hexpand(title, TRUE);
+        gtk_widget_set_halign(title, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(head), title);
+
+        GtkWidget *dnd_btn = gtk_button_new_with_label(dnd ? "关闭勿扰" : "勿扰");
+        gtk_widget_add_css_class(dnd_btn, "spinel-clip-clr");
+        g_signal_connect(dnd_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *st_ns = static_cast<NativeShellState *>(d);
+            trigger_cmd(st_ns->app_state, "dnd:toggle");
+            if (st_ns->notif_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->notif_popover));
+        }), n);
+        gtk_box_append(GTK_BOX(head), dnd_btn);
+
+        GtkWidget *clr = gtk_button_new_with_label("清空");
+        gtk_widget_add_css_class(clr, "spinel-clip-clr");
+        g_signal_connect(clr, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *st_ns = static_cast<NativeShellState *>(d);
+            auto all = fetch_notification_history();
+            for (const auto &it : all) {
+                if (it.id > st_ns->notif_cleared_max_id) st_ns->notif_cleared_max_id = it.id;
+            }
+            dismiss_all_notifications();
+            if (st_ns->notif_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->notif_popover));
+        }), n);
+        gtk_box_append(GTK_BOX(head), clr);
+        gtk_box_append(GTK_BOX(n->notif_list_box), head);
+        gtk_box_append(GTK_BOX(n->notif_list_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+
+        auto raw_items = fetch_notification_history();
+        std::vector<NotificationHistoryItem> items;
+        for (auto &it : raw_items) {
+            if (it.id == 0 || it.id > n->notif_cleared_max_id) {
+                items.push_back(std::move(it));
+            }
+        }
+        if (items.empty()) {
+            GtkWidget *empty = gtk_label_new("暂无历史通知\n（系统通知与截图/安装提示会保留在此）");
+            gtk_widget_add_css_class(empty, "spinel-clip-empty");
+            gtk_label_set_justify(GTK_LABEL(empty), GTK_JUSTIFY_CENTER);
+            gtk_box_append(GTK_BOX(n->notif_list_box), empty);
+            return;
+        }
+
+        for (const auto &it : items) {
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+            gtk_widget_add_css_class(row, "spinel-clip-row");
+            std::string top_s = (it.app_name.empty() ? "系统" : it.app_name) + " · " +
+                                (it.summary.empty() ? "通知" : it.summary);
+            GtkWidget *t_lbl = gtk_label_new(top_s.c_str());
+            gtk_widget_add_css_class(t_lbl, "spinel-clip-txt");
+            gtk_widget_set_halign(t_lbl, GTK_ALIGN_START);
+            gtk_label_set_ellipsize(GTK_LABEL(t_lbl), PANGO_ELLIPSIZE_END);
+            gtk_label_set_max_width_chars(GTK_LABEL(t_lbl), 38);
+            gtk_box_append(GTK_BOX(row), t_lbl);
+
+            if (!it.body.empty()) {
+                GtkWidget *b_lbl = gtk_label_new(it.body.c_str());
+                gtk_widget_add_css_class(b_lbl, "spinel-clip-meta");
+                gtk_widget_set_halign(b_lbl, GTK_ALIGN_START);
+                gtk_label_set_ellipsize(GTK_LABEL(b_lbl), PANGO_ELLIPSIZE_END);
+                gtk_label_set_max_width_chars(GTK_LABEL(b_lbl), 42);
+                gtk_box_append(GTK_BOX(row), b_lbl);
+            }
+            gtk_box_append(GTK_BOX(n->notif_list_box), row);
+        }
+    };
+
+    GtkWidget *notif_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(notif_btn), FALSE);
+    gtk_widget_add_css_class(notif_btn, "spinel-bar-menubtn");
+    gtk_widget_set_tooltip_text(notif_btn, "通知历史与勿扰开关");
+    GtkWidget *notif_da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(notif_da, 15, 15);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(notif_da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Bell)), nullptr);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(notif_btn), notif_da);
+
+    GtkWidget *npop = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(npop), FALSE);
+    gtk_widget_add_css_class(npop, "spinel-ctx-popover");
+    GtkWidget *nbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+    gtk_widget_set_size_request(nbox, 320, -1);
+    gtk_popover_set_child(GTK_POPOVER(npop), nbox);
+    ns->notif_popover = npop;
+    ns->notif_list_box = nbox;
+    g_object_set_data(G_OBJECT(npop), "rebuild_fn", reinterpret_cast<gpointer>(rebuild_notif_popover));
+    g_signal_connect(npop, "notify::visible", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        if (gtk_widget_get_visible(GTK_WIDGET(obj))) {
+            auto fn = reinterpret_cast<void (*)(NativeShellState *)>(g_object_get_data(obj, "rebuild_fn"));
+            if (fn) fn(static_cast<NativeShellState *>(d));
+        }
+    }), ns);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(notif_btn), npop);
+
     ns->bar_net_btn = make_glyph_icon_btn(state, BarGlyph::Wifi, "网络: 检测中", "settings:open:wifi");
     GtkWidget *search_btn = make_glyph_icon_btn(state, BarGlyph::Search, "全局搜索 / 启动器 (Alt+Space)", "launcher:toggle");
     ns->bar_cc_btn = make_glyph_icon_btn(state, BarGlyph::ControlCenter, "控制中心", "cc:toggle");
@@ -1429,6 +1548,7 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(ns->bar_clock_lbl, "spinel-bar-clock");
 
     gtk_box_append(GTK_BOX(right), mem_btn);
+    gtk_box_append(GTK_BOX(right), notif_btn);
     gtk_box_append(GTK_BOX(right), clip_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), search_btn);
@@ -3236,6 +3356,7 @@ void rebuild_launcher_index(NativeShellState *ns) {
         {"区域截图", "框选屏幕区域并复制到剪贴板", "screenshot area capture snip", "system:screenshot:area", "", "settings"},
         {"全屏截图", "保存全屏截图到 ~/Pictures", "screenshot full screen capture", "system:screenshot:full", "", "settings"},
         {"锁定屏幕", "锁定当前 Wayland 桌面会话 (Super+L)", "lock screen swaylock", "system:lock", "", "settings"},
+        {"首次开机向导 (OOBE)", "主题外观、网络代理、Steam 安装与快捷键引导", "welcome tour oobe guide setup", "welcome:open", "", "settings"},
         {"系统设置 · Wi-Fi 与代理", "无线网络与 HTTP/SOCKS 系统代理", "settings wifi network proxy", "settings:open:wifi", "", "settings"},
         {"系统设置 · 蓝牙与设备", "手柄、耳机与蓝牙外设配对", "settings bluetooth bt gamepad", "settings:open:bt", "", "settings"},
         {"系统设置 · 显示与缩放", "屏幕分辨率、刷新率与 HiDPI 缩放", "settings display resolution scale monitor", "settings:open:display", "", "settings"},

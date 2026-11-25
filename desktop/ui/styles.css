@@ -2256,3 +2256,60 @@ body.low-fx #top-bar {
   background: linear-gradient(180deg, rgba(22, 32, 54, 0.72) 0%, rgba(15, 22, 40, 0.78) 100%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
+
+/* Per-game actions, Storage cleaner & OOBE Welcome Tour */
+.game-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.game-ov-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(56, 189, 248, 0.2);
+  color: var(--accent);
+  vertical-align: middle;
+}
+
+.storage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.welcome-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+
+.welcome-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.welcome-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.36);
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.welcome-dot.active {
+  width: 22px;
+  background: var(--accent);
+}
+
+.welcome-theme-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
