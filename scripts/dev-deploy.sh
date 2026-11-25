@@ -98,13 +98,15 @@ if [ "$MODE" = "full" ]; then
   fi
   sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
 
-  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
+  sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/grub/themes/spinelos /boot/grub/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/
   sudo cp -a /tmp/spinel-dev/portals/. /etc/xdg/xdg-desktop-portal/
   sudo cp -a /tmp/spinel-dev/SpinelDark/. /usr/share/themes/SpinelDark/
   sudo cp -a /tmp/spinel-dev/SpinelLight/. /usr/share/themes/SpinelLight/
   sudo cp -a /tmp/spinel-dev/fcitx5-themes/. /usr/share/fcitx5/themes/
   sudo cp -a /tmp/spinel-dev/plymouth-theme/. /usr/share/plymouth/themes/spinelos/
+  sudo cp -a /tmp/spinel-dev/grub-theme/. /usr/share/grub/themes/spinelos/
+  sudo cp -a /tmp/spinel-dev/grub-theme/. /boot/grub/themes/spinelos/
   sudo install -Dm644 /tmp/spinel-dev/plymouthd.conf /etc/plymouth/plymouthd.conf
   sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/pixmaps/spinelos.png
   sudo install -Dm644 /tmp/spinel-dev/spinelos.png /usr/share/icons/hicolor/256x256/apps/spinelos.png
@@ -117,9 +119,23 @@ if [ "$MODE" = "full" ]; then
   else
     sudo mkinitcpio -P
   fi
-  if [ -f /etc/default/grub ] && ! grep -q '\bsplash\b' /etc/default/grub; then
-    echo "==> Enabling kernel splash parameter in GRUB..."
-    sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash"/' /etc/default/grub
+  if [ -f /etc/default/grub ]; then
+    echo "==> Configuring hidden SpinelOS GRUB boot & Plymouth kernel args..."
+    set_vm_grub() {
+      sudo sed -i "/^#*\s*${1}=/d" /etc/default/grub
+      echo "${1}=${2}" | sudo tee -a /etc/default/grub >/dev/null
+    }
+    set_vm_grub GRUB_DISTRIBUTOR '"SpinelOS"'
+    set_vm_grub GRUB_TIMEOUT_STYLE 'hidden'
+    set_vm_grub GRUB_TIMEOUT '1'
+    set_vm_grub GRUB_GFXMODE 'auto'
+    set_vm_grub GRUB_GFXPAYLOAD_LINUX 'keep'
+    set_vm_grub GRUB_THEME '"/boot/grub/themes/spinelos/theme.txt"'
+    if ! grep -q '\bsplash\b' /etc/default/grub; then
+      sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash vt.global_cursor_default=0"/' /etc/default/grub
+    elif ! grep -q 'vt\.global_cursor_default=0' /etc/default/grub; then
+      sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 vt.global_cursor_default=0"/' /etc/default/grub
+    fi
     sudo grub-mkconfig -o /boot/grub/grub.cfg
   fi
   sudo install -Dm644 /tmp/spinel-dev/zram-generator.conf /etc/systemd/zram-generator.conf
@@ -255,6 +271,8 @@ if [[ "${MODE}" == "full" ]]; then
     "${ROOT_DIR}/archiso/airootfs/usr/share/fcitx5/themes/" "${DEV_HOST}:/tmp/spinel-dev/fcitx5-themes/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/plymouth/themes/spinelos/" "${DEV_HOST}:/tmp/spinel-dev/plymouth-theme/"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/grub/themes/spinelos/" "${DEV_HOST}:/tmp/spinel-dev/grub-theme/"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/etc/plymouth/plymouthd.conf" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/pixmaps/spinelos.png" \

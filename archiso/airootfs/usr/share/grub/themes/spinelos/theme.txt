@@ -1,0 +1,44 @@
+# SpinelOS Dark GRUB Theme (shown only on multi-boot or when Esc/Shift is pressed)
+desktop-color: "#060b16"
+title-text: ""
+terminal-font: "Unknown Regular 16"
+
++ image {
+    left = 50%-80
+    top = 22%
+    width = 160
+    height = 160
+    file = "logo.png"
+}
+
++ label {
+    left = 0
+    top = 22%+178
+    width = 100%
+    align = "center"
+    text = "SpinelOS"
+    color = "#f1f5f9"
+}
+
++ boot_menu {
+    left = 28%
+    top = 54%
+    width = 44%
+    height = 28%
+    item_color = "#94a3b8"
+    selected_item_color = "#ffffff"
+    item_height = 34
+    item_padding = 8
+    item_spacing = 6
+    icon_width = 0
+    item_icon_space = 0
+}
+
++ label {
+    left = 0
+    top = 88%
+    width = 100%
+    align = "center"
+    text = "@KEYMAP_SHORT@"
+    color = "#64748b"
+}

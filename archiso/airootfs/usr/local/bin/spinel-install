@@ -380,23 +380,28 @@ fi
 arch-chroot /mnt mkinitcpio -P
 
 progress 92 "正在安装 GRUB 引导程序并写入 SpinelOS 引导项..."
+if [[ -d /usr/share/grub/themes/spinelos ]]; then
+  mkdir -p /mnt/boot/grub/themes/spinelos
+  cp -a /usr/share/grub/themes/spinelos/. /mnt/boot/grub/themes/spinelos/
+fi
 if [[ -f /mnt/etc/default/grub ]]; then
-  if grep -q '^GRUB_DISTRIBUTOR=' /mnt/etc/default/grub; then
-    sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SpinelOS"/' /mnt/etc/default/grub
-  else
-    echo 'GRUB_DISTRIBUTOR="SpinelOS"' >> /mnt/etc/default/grub
-  fi
-
-  if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /mnt/etc/default/grub; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 quiet splash nvidia_drm.modeset=1 nvidia_drm.fbdev=1"/' /mnt/etc/default/grub
-  else
-    echo 'GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash nvidia_drm.modeset=1 nvidia_drm.fbdev=1"' >> /mnt/etc/default/grub
-  fi
-  sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /mnt/etc/default/grub
-
+  set_grub_kv() {
+    local k="$1" v="$2"
+    sed -i "/^#*\s*${k}=/d" /mnt/etc/default/grub
+    echo "${k}=${v}" >> /mnt/etc/default/grub
+  }
+  set_grub_kv GRUB_DISTRIBUTOR '"SpinelOS"'
+  set_grub_kv GRUB_CMDLINE_LINUX_DEFAULT '"loglevel=3 quiet splash vt.global_cursor_default=0 nvidia_drm.modeset=1 nvidia_drm.fbdev=1"'
+  set_grub_kv GRUB_GFXMODE 'auto'
+  set_grub_kv GRUB_GFXPAYLOAD_LINUX 'keep'
+  set_grub_kv GRUB_THEME '"/boot/grub/themes/spinelos/theme.txt"'
   if [[ "$OS_PROBER" == "true" ]]; then
-    sed -i '/^#*\s*GRUB_DISABLE_OS_PROBER=/d' /mnt/etc/default/grub
-    echo 'GRUB_DISABLE_OS_PROBER=false' >> /mnt/etc/default/grub
+    set_grub_kv GRUB_TIMEOUT_STYLE 'menu'
+    set_grub_kv GRUB_TIMEOUT '3'
+    set_grub_kv GRUB_DISABLE_OS_PROBER 'false'
+  else
+    set_grub_kv GRUB_TIMEOUT_STYLE 'hidden'
+    set_grub_kv GRUB_TIMEOUT '1'
   fi
 fi
 
