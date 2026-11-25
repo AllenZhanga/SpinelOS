@@ -75,6 +75,25 @@ if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
   sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
+  if [ -f /tmp/spinel-dev/org.spinelos.files.desktop ]; then
+    sudo install -Dm644 /tmp/spinel-dev/org.spinelos.files.desktop /usr/share/applications/org.spinelos.files.desktop
+  fi
+  if [ -f /tmp/spinel-dev/org.spinelos.FileManager1.service ]; then
+    sudo install -Dm644 /tmp/spinel-dev/org.spinelos.FileManager1.service /usr/share/dbus-1/services/org.spinelos.FileManager1.service
+  fi
+  if [ -f /tmp/spinel-dev/mimeapps.list ]; then
+    sudo install -Dm644 /tmp/spinel-dev/mimeapps.list /etc/xdg/mimeapps.list
+  fi
+  for old_fm in thunar-archive-plugin thunar; do
+    if pacman -Qq "$old_fm" >/dev/null 2>&1; then
+      echo "==> Removing third-party file manager $old_fm (replaced by Spinel Files)..."
+      sudo pacman -Rns --noconfirm "$old_fm" 2>/dev/null || sudo pacman -Rdd --noconfirm "$old_fm" 2>/dev/null || true
+    fi
+  done
+  sudo update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+  if command -v xdg-mime >/dev/null 2>&1; then
+    xdg-mime default org.spinelos.files.desktop inode/directory >/dev/null 2>&1 || true
+  fi
 fi
 sudo mkdir -p /usr/share/spinel-shell/ui
 sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
@@ -84,7 +103,7 @@ if [ "$MODE" = "full" ]; then
   sudo pacman -Syu --noconfirm --needed \
     flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs snapper reflector \
-    spice-vdagent thunar thunar-archive-plugin file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
+    spice-vdagent file-roller gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-rime fcitx5-gtk
   fc-cache -f >/dev/null 2>&1 || true
@@ -265,6 +284,11 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-webui" "${DEV_HOST}:/tmp/spinel-dev/spinel-webui"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
+  rsync -avz -e "${SSH_CMD}" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" \
+    "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" \
+    "${DEV_HOST}:/tmp/spinel-dev/"
 fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
 rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.sh"

@@ -932,7 +932,7 @@ void open_steam_compatdata(AppState *state, const std::string &appid) {
         if (fs::is_directory(compat, ec)) {
             fs::path pfx = compat / "pfx/drive_c/users/steamuser";
             fs::path target = fs::is_directory(pfx, ec) ? pfx : compat;
-            spawn_argv_detached({has_executable("spinel-files") ? "spinel-files" : "thunar", target.string()});
+            spawn_argv_detached({"spinel-files", target.string()});
             return;
         }
     }

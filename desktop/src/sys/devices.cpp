@@ -613,7 +613,7 @@ void open_mount_folder(AppState *state, const std::string &mount_path) {
         emit_devices_feedback(state, false, "挂载目录不可访问: " + mount_path);
         return;
     }
-    spawn_argv_detached({has_executable("spinel-files") ? "spinel-files" : "thunar", mount_path});
+    spawn_argv_detached({"spinel-files", mount_path});
 }
 
 void disable_audio_device(AppState *state, const std::string &payload) {

@@ -128,6 +128,7 @@ struct FilesWin {
     std::vector<DirItem> items;
     size_t visible_count = 0;
     fs::path selected_path;
+    fs::path pending_select;
     bool show_hidden = false;
     bool grid_mode = false;
     bool path_edit_mode = false;
@@ -640,6 +641,119 @@ void open_terminal_at(const fs::path &dir) {
     spawn_argv_detached({term, "--working-directory", dir.string()});
 }
 
+bool is_archive_file(const fs::path &p) {
+    std::string name = to_lower_copy(p.filename().string());
+    static const char *exts[] = {
+        ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst",
+        ".tgz", ".txz", ".tbz2", ".tzst", ".tar",
+        ".zip", ".7z", ".rar", ".iso"
+    };
+    for (const char *ext : exts) {
+        std::string e(ext);
+        if (name.size() > e.size() && name.compare(name.size() - e.size(), e.size(), e) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string strip_archive_ext(const std::string &fname) {
+    std::string lower = to_lower_copy(fname);
+    for (const char *multi : {".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst"}) {
+        std::string e(multi);
+        if (lower.size() > e.size() && lower.compare(lower.size() - e.size(), e.size(), e) == 0) {
+            return fname.substr(0, fname.size() - e.size());
+        }
+    }
+    auto dot = fname.rfind('.');
+    if (dot != std::string::npos && dot > 0) return fname.substr(0, dot);
+    return fname + "_extracted";
+}
+
+void refresh_current_dir(FilesWin *fw);
+
+void run_archive_task(FilesWin *fw,
+                      const std::string &status_msg,
+                      const std::vector<std::string> &argv,
+                      const fs::path &select_after) {
+    if (fw->status_label) gtk_label_set_text(GTK_LABEL(fw->status_label), status_msg.c_str());
+    auto alive = fw->alive;
+    struct ArchiveDoneIdle {
+        FilesWin *fw;
+        std::shared_ptr<std::atomic<bool>> alive;
+        int rc;
+        std::string out;
+        fs::path select_after;
+    };
+    std::thread([fw, alive, argv, select_after]() {
+        std::string out;
+        int rc = 1;
+        run_argv_capture(argv, out, rc);
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<ArchiveDoneIdle> msg(static_cast<ArchiveDoneIdle *>(d));
+            if (!msg->alive->load()) return G_SOURCE_REMOVE;
+            if (msg->rc == 0) {
+                msg->fw->pending_select = msg->select_after;
+                refresh_current_dir(msg->fw);
+            } else {
+                if (msg->fw->status_label) gtk_label_set_text(GTK_LABEL(msg->fw->status_label), "归档操作失败");
+                show_error_alert(msg->fw, "压缩 / 解压失败",
+                                 msg->out.empty() ? "请检查文件权限或格式是否完整。" : msg->out);
+            }
+            return G_SOURCE_REMOVE;
+        }, new ArchiveDoneIdle{fw, alive, rc, std::move(out), select_after});
+    }).detach();
+}
+
+void do_extract_archive(FilesWin *fw, const fs::path &archive, bool into_subdir) {
+    if (!has_executable("bsdtar")) {
+        show_error_alert(fw, "无法解压", "未找到 bsdtar 命令。");
+        return;
+    }
+    fs::path dest = archive.parent_path();
+    fs::path select_target = archive;
+    if (into_subdir) {
+        dest = archive.parent_path() / strip_archive_ext(archive.filename().string());
+        std::error_code ec;
+        fs::create_directories(dest, ec);
+        if (ec) {
+            show_error_alert(fw, "创建解压目录失败", ec.message());
+            return;
+        }
+        select_target = dest;
+    }
+    run_archive_task(
+        fw,
+        "正在解压: " + archive.filename().string() + " ...",
+        {"bsdtar", "-xf", archive.string(), "-C", dest.string()},
+        select_target
+    );
+}
+
+void do_compress_zip(FilesWin *fw, const fs::path &target) {
+    if (!has_executable("bsdtar")) {
+        show_error_alert(fw, "无法压缩", "未找到 bsdtar 命令。");
+        return;
+    }
+    std::error_code ec;
+    fs::path parent = target.parent_path();
+    std::string base = fs::is_directory(target, ec)
+        ? target.filename().string()
+        : target.stem().string();
+    if (base.empty()) base = "archive";
+    fs::path out_zip = parent / (base + ".zip");
+    int idx = 2;
+    while (fs::exists(out_zip, ec) && idx < 100) {
+        out_zip = parent / (base + " (" + std::to_string(idx++) + ").zip");
+    }
+    run_archive_task(
+        fw,
+        "正在压缩: " + out_zip.filename().string() + " ...",
+        {"bsdtar", "-a", "-cf", out_zip.string(), "-C", parent.string(), target.filename().string()},
+        out_zip
+    );
+}
+
 void show_properties(FilesWin *fw, const fs::path &p) {
     std::error_code ec;
     auto st = fs::symlink_status(p, ec);
@@ -690,10 +804,21 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
 
     if (!item_path.empty()) {
         fw->selected_path = item_path;
+        std::error_code ec;
+        bool is_dir = fs::is_directory(item_path, ec);
         add_btn("打开", false, [fw, item_path]() { open_item_action(fw, item_path); });
-        if (fs::is_directory(item_path)) {
+        if (is_dir) {
             add_btn("在此目录打开终端", false, [item_path]() { open_terminal_at(item_path); });
+        } else if (is_archive_file(item_path)) {
+            add_btn("解压到当前目录", false, [fw, item_path]() { do_extract_archive(fw, item_path, false); });
+            add_btn("解压到同名文件夹", false, [fw, item_path]() { do_extract_archive(fw, item_path, true); });
+            if (has_executable("file-roller")) {
+                add_btn("用归档管理器查看", false, [item_path]() {
+                    spawn_argv_detached({"file-roller", item_path.string()});
+                });
+            }
         }
+        add_btn("压缩为 .zip", false, [fw, item_path]() { do_compress_zip(fw, item_path); });
         add_btn("复制 (Ctrl+C)", false, [fw, item_path]() {
             fw->clip_op = ClipOp::Copy;
             fw->clip_paths = {item_path};
@@ -887,6 +1012,29 @@ void apply_visible_filter(FilesWin *fw) {
 
     fw->visible_count = objs.size();
     gtk_stack_set_visible_child_name(GTK_STACK(fw->view_stack), fw->grid_mode ? "grid" : "list");
+
+    if (!fw->pending_select.empty()) {
+        std::string target_name = fw->pending_select.filename().string();
+        for (guint i = 0; i < static_cast<guint>(objs.size()); ++i) {
+            auto *fobj = reinterpret_cast<_SpinelFileObj *>(objs[i]);
+            if (fobj && fobj->item &&
+                (fobj->item->path == fw->pending_select ||
+                 (!target_name.empty() && fobj->item->name == target_name))) {
+                gtk_single_selection_set_selected(fw->selection, i);
+                fw->selected_path = fobj->item->path;
+#if GTK_CHECK_VERSION(4, 12, 0)
+                if (fw->grid_mode) {
+                    gtk_grid_view_scroll_to(GTK_GRID_VIEW(fw->grid_view), i, GTK_LIST_SCROLL_SELECT, nullptr);
+                } else {
+                    gtk_list_view_scroll_to(GTK_LIST_VIEW(fw->list_view), i, GTK_LIST_SCROLL_SELECT, nullptr);
+                }
+#endif
+                break;
+            }
+        }
+        fw->pending_select.clear();
+    }
+
     update_status_bar(fw);
 }
 
@@ -1162,7 +1310,7 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
     return FALSE;
 }
 
-void build_files_window(GtkApplication *app, const fs::path &start_dir) {
+void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs::path &select_path) {
     auto *fw = new FilesWin();
     fw->app = app;
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
@@ -1394,36 +1542,177 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir) {
         delete w;
     }), fw);
 
+    fw->pending_select = select_path;
     navigate_to(fw, start_dir, true);
     gtk_window_present(win);
 }
 
-fs::path resolve_start_dir(int argc, char **argv) {
+struct StartLaunchTarget {
+    fs::path dir;
+    fs::path select_item;
+};
+
+StartLaunchTarget resolve_start_target(int argc, char **argv) {
+    StartLaunchTarget res{fs::path(home_dir()), {}};
     if (argc >= 2 && argv[1] && *argv[1]) {
         std::string arg = argv[1];
-        if (arg.rfind("file://", 0) == 0) arg = arg.substr(7);
+        if (arg.rfind("file://", 0) == 0) {
+            g_autofree char *decoded = g_filename_from_uri(arg.c_str(), nullptr, nullptr);
+            if (decoded && *decoded) arg = decoded;
+            else arg = arg.substr(7);
+        }
         fs::path p(arg);
         std::error_code ec;
-        if (fs::is_directory(p, ec)) return p;
-        if (fs::is_regular_file(p, ec) && p.has_parent_path()) return p.parent_path();
+        if (fs::is_directory(p, ec)) {
+            res.dir = p;
+        } else if (fs::exists(p, ec) && p.has_parent_path()) {
+            res.dir = p.parent_path();
+            res.select_item = p;
+        }
     }
-    return fs::path(home_dir());
+    return res;
+}
+
+std::string resolve_self_files_bin() {
+    std::error_code ec;
+    fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+    if (!exe.empty() && fs::exists(exe, ec)) return exe.string();
+    return has_executable("spinel-files") ? "spinel-files" : "/usr/local/bin/spinel-files";
+}
+
+struct Fm1DbusState {
+    GMainLoop *loop = nullptr;
+    guint reg_id = 0;
+    guint name_id = 0;
+    guint idle_quit_timer = 0;
+    GDBusNodeInfo *introspection = nullptr;
+};
+
+void reset_fm1_idle_timer(Fm1DbusState *st) {
+    if (!st) return;
+    if (st->idle_quit_timer) g_source_remove(st->idle_quit_timer);
+    st->idle_quit_timer = g_timeout_add_seconds(60, +[](gpointer d) -> gboolean {
+        auto *s = static_cast<Fm1DbusState *>(d);
+        s->idle_quit_timer = 0;
+        if (s->loop) g_main_loop_quit(s->loop);
+        return G_SOURCE_REMOVE;
+    }, st);
+}
+
+int run_file_manager1_service() {
+    static const char kFm1Xml[] =
+        "<node>"
+        "  <interface name='org.freedesktop.FileManager1'>"
+        "    <method name='ShowFolders'>"
+        "      <arg type='as' name='URIs' direction='in'/>"
+        "      <arg type='s' name='StartupId' direction='in'/>"
+        "    </method>"
+        "    <method name='ShowItems'>"
+        "      <arg type='as' name='URIs' direction='in'/>"
+        "      <arg type='s' name='StartupId' direction='in'/>"
+        "    </method>"
+        "    <method name='ShowItemProperties'>"
+        "      <arg type='as' name='URIs' direction='in'/>"
+        "      <arg type='s' name='StartupId' direction='in'/>"
+        "    </method>"
+        "  </interface>"
+        "</node>";
+
+    Fm1DbusState st;
+    st.loop = g_main_loop_new(nullptr, FALSE);
+    st.introspection = g_dbus_node_info_new_for_xml(kFm1Xml, nullptr);
+
+    static const GDBusInterfaceVTable kVTable = {
+        +[](GDBusConnection *, const gchar *, const gchar *, const gchar *, const gchar *method_name,
+            GVariant *parameters, GDBusMethodInvocation *invocation, gpointer user_data) {
+            auto *s = static_cast<Fm1DbusState *>(user_data);
+            reset_fm1_idle_timer(s);
+
+            std::string method = method_name ? method_name : "";
+            GVariantIter *iter = nullptr;
+            const gchar *startup_id = nullptr;
+            g_variant_get(parameters, "(as&s)", &iter, &startup_id);
+
+            std::vector<std::string> targets;
+            if (iter) {
+                gchar *uri = nullptr;
+                while (g_variant_iter_next(iter, "s", &uri)) {
+                    if (uri && *uri) {
+                        g_autofree gchar *path = g_filename_from_uri(uri, nullptr, nullptr);
+                        targets.emplace_back(path ? path : uri);
+                    }
+                    g_free(uri);
+                }
+                g_variant_iter_free(iter);
+            }
+
+            std::string bin = resolve_self_files_bin();
+            if (targets.empty()) {
+                spawn_argv_detached({bin});
+            } else {
+                const std::string &first = targets[0];
+                if (method == "ShowFolders") {
+                    std::error_code ec;
+                    fs::path p(first);
+                    fs::path open_dir = fs::is_directory(p, ec) ? p : (p.has_parent_path() ? p.parent_path() : fs::path(home_dir()));
+                    spawn_argv_detached({bin, open_dir.string()});
+                } else {
+                    // ShowItems / ShowItemProperties: spinels-files opens parent dir and highlights exact file
+                    spawn_argv_detached({bin, first});
+                }
+            }
+            g_dbus_method_invocation_return_value(invocation, nullptr);
+        },
+        nullptr, nullptr, {nullptr}
+    };
+
+    st.name_id = g_bus_own_name(
+        G_BUS_TYPE_SESSION,
+        "org.freedesktop.FileManager1",
+        G_BUS_NAME_OWNER_FLAGS_REPLACE,
+        +[](GDBusConnection *conn, const gchar *, gpointer d) {
+            auto *s = static_cast<Fm1DbusState *>(d);
+            if (s->introspection && s->introspection->interfaces && s->introspection->interfaces[0]) {
+                s->reg_id = g_dbus_connection_register_object(
+                    conn, "/org/freedesktop/FileManager1", s->introspection->interfaces[0],
+                    &kVTable, s, nullptr, nullptr);
+            }
+            reset_fm1_idle_timer(s);
+        },
+        nullptr,
+        +[](GDBusConnection *, const gchar *, gpointer d) {
+            auto *s = static_cast<Fm1DbusState *>(d);
+            if (s->loop) g_main_loop_quit(s->loop);
+        },
+        &st, nullptr);
+
+    g_main_loop_run(st.loop);
+    if (st.idle_quit_timer) g_source_remove(st.idle_quit_timer);
+    if (st.name_id) g_bus_unown_name(st.name_id);
+    if (st.introspection) g_dbus_node_info_unref(st.introspection);
+    g_main_loop_unref(st.loop);
+    return 0;
 }
 
 }  // namespace
 
 int main(int argc, char **argv) {
+    if (argc >= 2 && argv[1] && std::string(argv[1]) == "--file-manager1") {
+        return run_file_manager1_service();
+    }
+
     ensure_display_env();
     const char *wlr = std::getenv("WLR_RENDERER");
     if (wlr && std::string(wlr) == "pixman") {
         setenv("GSK_RENDERER", "cairo", 0);
     }
 
-    fs::path start_dir = resolve_start_dir(argc, argv);
+    StartLaunchTarget target = resolve_start_target(argc, argv);
     GtkApplication *app = gtk_application_new("org.spinelos.files", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(app, "activate", G_CALLBACK(+[](GtkApplication *gapp, gpointer d) {
-        build_files_window(gapp, *static_cast<fs::path *>(d));
-    }), &start_dir);
+        auto *t = static_cast<StartLaunchTarget *>(d);
+        build_files_window(gapp, t->dir, t->select_item);
+    }), &target);
     int rc = g_application_run(G_APPLICATION(app), 0, nullptr);
     g_object_unref(app);
     return rc;
