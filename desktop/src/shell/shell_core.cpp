@@ -1,0 +1,1020 @@
+#include "shell_internal.hpp"
+#include "common.hpp"
+
+#include <pango/pangocairo.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+
+namespace shell_internal {
+
+void cairo_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r) {
+    double rad = std::min({r, w * 0.5, h * 0.5});
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - rad, y + rad, rad, -M_PI_2, 0.0);
+    cairo_arc(cr, x + w - rad, y + h - rad, rad, 0.0, M_PI_2);
+    cairo_arc(cr, x + rad, y + h - rad, rad, M_PI_2, M_PI);
+    cairo_arc(cr, x + rad, y + rad, rad, M_PI, 1.5 * M_PI);
+    cairo_close_path(cr);
+}
+
+std::string to_lower_copy(std::string s) {
+    for (char &ch : s) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return s;
+}
+
+bool contains_ci(const std::string &hay, const std::string &needle) {
+    return to_lower_copy(hay).find(to_lower_copy(needle)) != std::string::npos;
+}
+
+std::string match_app_kind(const std::string &s) {
+    std::string l = to_lower_copy(s);
+    if (l.find("steam") != std::string::npos) return "steam";
+    if (l.find("gamescope") != std::string::npos) return "gamepad";
+    if (l.find("chromium") != std::string::npos || l.find("chrome") != std::string::npos ||
+        l.find("firefox") != std::string::npos) return "browser";
+    if (l.find("thunar") != std::string::npos || l.find("files") != std::string::npos) return "files";
+    if (l.find("spinel-terminal") != std::string::npos || l.find("org.spinelos.terminal") != std::string::npos ||
+        l.find("ptyxis") != std::string::npos || l.find("foot") != std::string::npos ||
+        l.find("terminal") != std::string::npos || l.find("终端") != std::string::npos) return "terminal";
+    if (l.find("应用商店") != std::string::npos || l.find("app-store") != std::string::npos) return "store";
+    if (l.find("游戏与启动中心") != std::string::npos || l.find("app-games") != std::string::npos) return "games";
+    if (l.find("系统设置") != std::string::npos || l.find("settings") != std::string::npos) return "settings";
+    if (l.find("安装") != std::string::npos || l.find("installer") != std::string::npos) return "installer";
+    return "app";
+}
+
+std::string find_app_icon_path(const std::vector<DesktopAppInfo> &apps,
+                               const std::vector<std::string> &keys) {
+    for (const auto &k : keys) {
+        std::string lk = to_lower_copy(k);
+        if (lk.empty()) continue;
+        for (const auto &a : apps) {
+            if (!a.icon_path.empty() && to_lower_copy(a.id) == lk) return a.icon_path;
+        }
+    }
+    for (const auto &k : keys) {
+        std::string lk = to_lower_copy(k);
+        if (lk.empty()) continue;
+        for (const auto &a : apps) {
+            if (a.icon_path.empty()) continue;
+            std::string hay = to_lower_copy(a.id + " " + a.icon_name + " " + a.name);
+            if (hay.find(lk) != std::string::npos) return a.icon_path;
+        }
+    }
+    return "";
+}
+
+cairo_surface_t *pixbuf_to_cairo_surface(GdkPixbuf *pb) {
+    if (!pb) return nullptr;
+    int pw = gdk_pixbuf_get_width(pb);
+    int ph = gdk_pixbuf_get_height(pb);
+    int n_ch = gdk_pixbuf_get_n_channels(pb);
+    int rowstride = gdk_pixbuf_get_rowstride(pb);
+    const guchar *src = gdk_pixbuf_read_pixels(pb);
+
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return nullptr;
+    }
+    unsigned char *dst = cairo_image_surface_get_data(surf);
+    int dst_stride = cairo_image_surface_get_stride(surf);
+
+    for (int y = 0; y < ph; ++y) {
+        const guchar *srow = src + y * rowstride;
+        uint32_t *drow = reinterpret_cast<uint32_t *>(dst + y * dst_stride);
+        for (int x = 0; x < pw; ++x) {
+            uint32_t r = srow[x * n_ch + 0];
+            uint32_t g = srow[x * n_ch + 1];
+            uint32_t b = srow[x * n_ch + 2];
+            uint32_t a = (n_ch >= 4) ? srow[x * n_ch + 3] : 255u;
+            uint32_t pr = (r * a + 127u) / 255u;
+            uint32_t pg = (g * a + 127u) / 255u;
+            uint32_t pb_v = (b * a + 127u) / 255u;
+            drow[x] = (a << 24) | (pr << 16) | (pg << 8) | pb_v;
+        }
+    }
+    cairo_surface_mark_dirty(surf);
+    return surf;
+}
+
+cairo_surface_t *get_cached_surface(NativeShellState *ns, const std::string &path, int target_px) {
+    if (!ns || path.empty() || target_px <= 0) return nullptr;
+    std::string key = path + "@" + std::to_string(target_px);
+    auto it = ns->surface_cache.find(key);
+    if (it != ns->surface_cache.end()) return it->second;
+
+    GdkPixbuf *pb = nullptr;
+    if (contains_ci(path, ".svg")) {
+        pb = gdk_pixbuf_new_from_file_at_scale(path.c_str(), target_px, target_px, TRUE, nullptr);
+    } else {
+        GdkPixbuf *raw = gdk_pixbuf_new_from_file(path.c_str(), nullptr);
+        if (raw) {
+            int rw = gdk_pixbuf_get_width(raw);
+            int rh = gdk_pixbuf_get_height(raw);
+            if (rw == target_px && rh == target_px) {
+                pb = raw;
+            } else {
+                double aspect = (rh > 0) ? static_cast<double>(rw) / rh : 1.0;
+                int dw = aspect >= 1.0 ? target_px : std::max(1, static_cast<int>(std::round(target_px * aspect)));
+                int dh = aspect >= 1.0 ? std::max(1, static_cast<int>(std::round(target_px / aspect))) : target_px;
+                pb = gdk_pixbuf_scale_simple(raw, dw, dh, GDK_INTERP_HYPER);
+                g_object_unref(raw);
+            }
+        }
+    }
+    cairo_surface_t *surf = pixbuf_to_cairo_surface(pb);
+    if (pb) g_object_unref(pb);
+    ns->surface_cache[key] = surf;
+    return surf;
+}
+
+void set_rgb_hex(cairo_pattern_t *pat, double offset, uint32_t hex, double alpha) {
+    double r = ((hex >> 16) & 0xFF) / 255.0;
+    double g = ((hex >> 8) & 0xFF) / 255.0;
+    double b = (hex & 0xFF) / 255.0;
+    cairo_pattern_add_color_stop_rgba(pat, offset, r, g, b, alpha);
+}
+
+void parse_css_rgba(const std::string &css, double &r, double &g, double &b, double &a) {
+    r = 0.1; g = 0.14; b = 0.22; a = 0.85;
+    std::string s = trim_copy(css);
+    if (!s.empty() && s.front() == '#' && s.size() >= 7) {
+        unsigned long hex = std::strtoul(s.substr(1, 6).c_str(), nullptr, 16);
+        r = ((hex >> 16) & 0xFF) / 255.0;
+        g = ((hex >> 8) & 0xFF) / 255.0;
+        b = (hex & 0xFF) / 255.0;
+        a = 1.0;
+        return;
+    }
+    if (s.rfind("rgba(", 0) == 0 || s.rfind("rgb(", 0) == 0) {
+        auto lp = s.find('(');
+        auto rp = s.rfind(')');
+        if (lp != std::string::npos && rp != std::string::npos && rp > lp) {
+            double vals[4]{20, 28, 44, 0.85};
+            int idx = 0;
+            const char *p = s.c_str() + lp + 1;
+            while (*p && idx < 4) {
+                while (*p == ' ' || *p == ',') ++p;
+                if (!*p || *p == ')') break;
+                char *endp = nullptr;
+                vals[idx++] = std::strtod(p, &endp);
+                if (endp == p) break;
+                p = endp;
+            }
+            r = std::clamp(vals[0] / 255.0, 0.0, 1.0);
+            g = std::clamp(vals[1] / 255.0, 0.0, 1.0);
+            b = std::clamp(vals[2] / 255.0, 0.0, 1.0);
+            a = (idx >= 4) ? std::clamp(vals[3], 0.0, 1.0) : 1.0;
+        }
+    }
+}
+
+namespace {
+
+void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std::string &kind) {
+    double rad = sz * 0.235;
+    cairo_save(cr);
+
+    cairo_rounded_rect(cr, x, y + sz * 0.04, sz, sz, rad);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.34);
+    cairo_fill(cr);
+
+    cairo_pattern_t *bg = cairo_pattern_create_linear(x, y, x + sz, y + sz);
+    if (kind == "store") {
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x0EA5E9);
+        set_rgb_hex(bg, 1.0, 0x1D4ED8);
+    } else if (kind == "gamepad") {
+        set_rgb_hex(bg, 0.0, 0xF43F5E);
+        set_rgb_hex(bg, 0.55, 0xA855F7);
+        set_rgb_hex(bg, 1.0, 0x6366F1);
+    } else if (kind == "files") {
+        set_rgb_hex(bg, 0.0, 0x7DD3FC);
+        set_rgb_hex(bg, 0.55, 0x38BDF8);
+        set_rgb_hex(bg, 1.0, 0x0284C7);
+    } else if (kind == "terminal") {
+        set_rgb_hex(bg, 0.0, 0xE2E8F0);
+        set_rgb_hex(bg, 1.0, 0x94A3B8);
+    } else if (kind == "settings") {
+        set_rgb_hex(bg, 0.0, 0xE5E7EB);
+        set_rgb_hex(bg, 1.0, 0x9CA3AF);
+    } else if (kind == "installer") {
+        set_rgb_hex(bg, 0.0, 0x34D399);
+        set_rgb_hex(bg, 1.0, 0x059669);
+    } else {
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x6366F1);
+        set_rgb_hex(bg, 1.0, 0x4338CA);
+    }
+    cairo_rounded_rect(cr, x, y, sz, sz, rad);
+    cairo_set_source(cr, bg);
+    cairo_fill_preserve(cr);
+    cairo_pattern_destroy(bg);
+
+    cairo_pattern_t *sheen = cairo_pattern_create_linear(x, y, x, y + sz);
+    cairo_pattern_add_color_stop_rgba(sheen, 0.0, 1.0, 1.0, 1.0, 0.25);
+    cairo_pattern_add_color_stop_rgba(sheen, 0.45, 1.0, 1.0, 1.0, 0.02);
+    cairo_pattern_add_color_stop_rgba(sheen, 1.0, 0.0, 0.0, 0.0, 0.12);
+    cairo_set_source(cr, sheen);
+    cairo_fill(cr);
+    cairo_pattern_destroy(sheen);
+
+    cairo_rounded_rect(cr, x + 0.6, y + 0.6, sz - 1.2, sz - 1.2, rad - 0.5);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.34);
+    cairo_set_line_width(cr, 1.1);
+    cairo_stroke(cr);
+
+    double s = sz / 64.0;
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, s, s);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    if (kind == "store") {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
+        cairo_set_line_width(cr, 5.0);
+        cairo_move_to(cr, 32, 16);
+        cairo_line_to(cr, 20, 44);
+        cairo_move_to(cr, 32, 16);
+        cairo_line_to(cr, 44, 44);
+        cairo_stroke(cr);
+        cairo_set_line_width(cr, 4.5);
+        cairo_move_to(cr, 17, 37.5);
+        cairo_line_to(cr, 47, 37.5);
+        cairo_stroke(cr);
+    } else if (kind == "gamepad") {
+        cairo_rounded_rect(cr, 13, 17, 38, 30, 9);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.22);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.5);
+        cairo_stroke(cr);
+
+        cairo_set_line_width(cr, 3.0);
+        cairo_move_to(cr, 24, 27);
+        cairo_line_to(cr, 24, 37);
+        cairo_move_to(cr, 19, 32);
+        cairo_line_to(cr, 29, 32);
+        cairo_stroke(cr);
+
+        cairo_arc(cr, 41.5, 29.5, 2.3, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.99, 0.88, 0.28, 1.0);
+        cairo_arc(cr, 45, 34.5, 2.3, 0, 2 * M_PI);
+        cairo_fill(cr);
+    } else if (kind == "settings") {
+        cairo_save(cr);
+        cairo_translate(cr, 32, 32);
+        cairo_set_source_rgba(cr, 0.28, 0.34, 0.43, 1.0);
+        for (int i = 0; i < 8; ++i) {
+            cairo_save(cr);
+            cairo_rotate(cr, i * (M_PI / 4.0));
+            cairo_rounded_rect(cr, -3.5, -22.5, 7, 10, 2.2);
+            cairo_fill(cr);
+            cairo_restore(cr);
+        }
+        cairo_arc(cr, 0, 0, 17.5, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.34, 0.41, 0.51, 1.0);
+        cairo_fill(cr);
+        cairo_arc(cr, 0, 0, 12.5, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.82, 0.85, 0.90, 1.0);
+        cairo_fill(cr);
+        cairo_arc(cr, 0, 0, 6.2, 0, 2 * M_PI);
+        cairo_set_source_rgba(cr, 0.20, 0.25, 0.33, 1.0);
+        cairo_fill(cr);
+        cairo_restore(cr);
+    } else if (kind == "files") {
+        cairo_rounded_rect(cr, 11, 14, 21, 10, 4.5);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.45);
+        cairo_fill(cr);
+
+        cairo_rounded_rect(cr, 15, 19, 34, 9, 2.5);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.75);
+        cairo_fill(cr);
+
+        cairo_pattern_t *folder = cairo_pattern_create_linear(11, 22, 53, 50);
+        set_rgb_hex(folder, 0.0, 0xFFFFFF, 0.98);
+        set_rgb_hex(folder, 1.0, 0xDBEAFE, 0.96);
+        cairo_rounded_rect(cr, 11, 22, 42, 28, 7.0);
+        cairo_set_source(cr, folder);
+        cairo_fill_preserve(cr);
+        cairo_pattern_destroy(folder);
+
+        cairo_set_source_rgba(cr, 0.06, 0.35, 0.72, 0.20);
+        cairo_set_line_width(cr, 1.4);
+        cairo_stroke(cr);
+
+        cairo_set_source_rgba(cr, 0.01, 0.52, 0.78, 0.88);
+        cairo_set_line_width(cr, 2.6);
+        cairo_move_to(cr, 20.5, 32.5);
+        cairo_line_to(cr, 43.5, 32.5);
+        cairo_move_to(cr, 20.5, 39.5);
+        cairo_line_to(cr, 35.5, 39.5);
+        cairo_stroke(cr);
+    } else if (kind == "terminal") {
+        cairo_pattern_t *scr = cairo_pattern_create_linear(6, 7, 58, 57);
+        set_rgb_hex(scr, 0.0, 0x1E293B);
+        set_rgb_hex(scr, 1.0, 0x090D16);
+        cairo_rounded_rect(cr, 6.5, 7.0, 51, 50, 11);
+        cairo_set_source(cr, scr);
+        cairo_fill(cr);
+        cairo_pattern_destroy(scr);
+
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+        cairo_set_line_width(cr, 3.8);
+        cairo_move_to(cr, 16, 23);
+        cairo_line_to(cr, 25, 30);
+        cairo_line_to(cr, 16, 37);
+        cairo_stroke(cr);
+
+        cairo_set_source_rgba(cr, 0.22, 0.74, 0.97, 1.0);
+        cairo_set_line_width(cr, 3.8);
+        cairo_move_to(cr, 29, 37);
+        cairo_line_to(cr, 43, 37);
+        cairo_stroke(cr);
+    } else if (kind == "installer") {
+        cairo_rounded_rect(cr, 15, 16, 34, 32, 8);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.4);
+        cairo_stroke(cr);
+
+        cairo_set_line_width(cr, 3.0);
+        cairo_move_to(cr, 32, 22);
+        cairo_line_to(cr, 32, 37);
+        cairo_move_to(cr, 26, 31.5);
+        cairo_line_to(cr, 32, 37.5);
+        cairo_line_to(cr, 38, 31.5);
+        cairo_move_to(cr, 22, 42.5);
+        cairo_line_to(cr, 42, 42.5);
+        cairo_stroke(cr);
+    } else if (kind == "steam" || kind == "games") {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+        cairo_move_to(cr, 21, 23);
+        cairo_line_to(cr, 43, 23);
+        cairo_curve_to(cr, 48, 23, 51, 26.5, 52, 31);
+        cairo_line_to(cr, 53.5, 39);
+        cairo_curve_to(cr, 54, 43, 49.5, 45.5, 46, 42.5);
+        cairo_line_to(cr, 42, 38.5);
+        cairo_line_to(cr, 22, 38.5);
+        cairo_line_to(cr, 18, 42.5);
+        cairo_curve_to(cr, 14.5, 45.5, 10, 43, 10.5, 39);
+        cairo_line_to(cr, 12, 31);
+        cairo_curve_to(cr, 13, 26.5, 16, 23, 21, 23);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+
+        cairo_set_source_rgba(cr, 0.31, 0.27, 0.90, 1.0);
+        cairo_set_line_width(cr, 2.8);
+        cairo_move_to(cr, 21.5, 28);
+        cairo_line_to(cr, 21.5, 34);
+        cairo_move_to(cr, 18.5, 31);
+        cairo_line_to(cr, 24.5, 31);
+        cairo_stroke(cr);
+
+        cairo_arc(cr, 42.5, 28.5, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 46.5, 32.0, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 38.5, 32.0, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, 42.5, 35.5, 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+    } else {
+        cairo_rounded_rect(cr, 17, 17, 30, 30, 8);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.22);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.92);
+        cairo_set_line_width(cr, 2.5);
+        cairo_stroke(cr);
+        cairo_arc(cr, 32, 32, 5.5, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+    cairo_restore(cr);
+}
+
+std::string find_spinel_logo_path() {
+    static const char *kCandidates[] = {
+        "/usr/share/spinel-shell/ui/spinel-logo.png",
+        "/usr/share/pixmaps/spinelos.png",
+        "/usr/local/share/spinel-shell/ui/spinel-logo.png",
+        "desktop/ui/spinel-logo.png"
+    };
+    for (const char *p : kCandidates) {
+        if (g_file_test(p, G_FILE_TEST_EXISTS)) return p;
+    }
+    return "";
+}
+
+void draw_spinel_gem_vector(cairo_t *cr, double x, double y, double sz) {
+    double s = sz / 128.0;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, s, s);
+
+    auto tri = [&](double x1, double y1, double x2, double y2, double x3, double y3,
+                   double r, double g, double b, double a = 1.0) {
+        cairo_move_to(cr, x1, y1);
+        cairo_line_to(cr, x2, y2);
+        cairo_line_to(cr, x3, y3);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, r, g, b, a);
+        cairo_fill(cr);
+    };
+    auto quad = [&](double x1, double y1, double x2, double y2, double x3, double y3, double x4, double y4,
+                    double r, double g, double b) {
+        cairo_move_to(cr, x1, y1);
+        cairo_line_to(cr, x2, y2);
+        cairo_line_to(cr, x3, y3);
+        cairo_line_to(cr, x4, y4);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, r, g, b, 1.0);
+        cairo_fill(cr);
+    };
+
+    quad(64, 8, 28, 44, 45, 64, 64, 64, 0.98, 0.38, 0.50);
+    tri(64, 8, 45, 64, 64, 64, 1.00, 0.45, 0.56);
+    tri(64, 8, 64, 64, 83, 64, 0.94, 0.14, 0.39);
+    quad(64, 8, 83, 64, 100, 44, 64, 8, 0.49, 0.23, 0.93);
+    tri(28, 44, 10, 64, 45, 64, 0.94, 0.22, 0.43);
+    tri(100, 44, 118, 64, 83, 64, 0.22, 0.74, 0.97);
+    tri(10, 64, 45, 64, 64, 120, 0.30, 0.11, 0.58);
+    tri(45, 64, 64, 64, 64, 120, 0.93, 0.18, 0.43);
+    tri(64, 64, 83, 64, 64, 120, 0.36, 0.13, 0.71);
+    tri(83, 64, 118, 64, 64, 120, 0.23, 0.51, 0.96);
+
+    cairo_set_line_width(cr, 2.0);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_set_source_rgba(cr, 0.99, 0.81, 0.91, 0.85);
+    cairo_move_to(cr, 10, 64);
+    cairo_line_to(cr, 118, 64);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.96, 0.82, 1.00, 0.78);
+    cairo_move_to(cr, 64, 8);
+    cairo_line_to(cr, 45, 64);
+    cairo_line_to(cr, 64, 120);
+    cairo_line_to(cr, 83, 64);
+    cairo_close_path(cr);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+void queue_draw_tree(GtkWidget *w) {
+    if (!w) return;
+    if (GTK_IS_DRAWING_AREA(w)) gtk_widget_queue_draw(w);
+    for (GtkWidget *c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        queue_draw_tree(c);
+    }
+}
+
+}  // namespace
+
+void draw_app_icon(NativeShellState *ns,
+                   cairo_t *cr,
+                   double x,
+                   double y,
+                   double sz,
+                   const std::string &icon_path,
+                   const std::string &fallback_kind) {
+    int req = std::max(24, static_cast<int>(std::round(sz)));
+    cairo_surface_t *surf = get_cached_surface(ns, icon_path, req);
+    if (surf) {
+        int pw = cairo_image_surface_get_width(surf);
+        int ph = cairo_image_surface_get_height(surf);
+        double dx = x + (sz - pw) * 0.5;
+        double dy = y + (sz - ph) * 0.5;
+        cairo_save(cr);
+        cairo_set_source_surface(cr, surf, dx, dy);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        return;
+    }
+    draw_system_squircle(cr, x, y, sz, fallback_kind);
+}
+
+void draw_pango_text(cairo_t *cr,
+                     const std::string &text,
+                     double x,
+                     double y,
+                     double font_px,
+                     bool bold,
+                     double r,
+                     double g,
+                     double b,
+                     double a,
+                     int *out_w,
+                     int *out_h,
+                     bool measure_only) {
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoFontDescription *desc = pango_font_description_new();
+    pango_font_description_set_family(desc, "Noto Sans CJK SC, Inter, Sans");
+    pango_font_description_set_absolute_size(desc, font_px * PANGO_SCALE);
+    pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_MEDIUM);
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, text.c_str(), -1);
+    pango_font_description_free(desc);
+
+    int tw = 0, th = 0;
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    if (out_w) *out_w = tw;
+    if (out_h) *out_h = th;
+
+    if (!measure_only) {
+        cairo_save(cr);
+        cairo_move_to(cr, x, y);
+        cairo_set_source_rgba(cr, r, g, b, a);
+        pango_cairo_show_layout(cr, layout);
+        cairo_restore(cr);
+    }
+    g_object_unref(layout);
+}
+
+void draw_desktop_icon_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ctx = static_cast<DesktopIconDrawCtx *>(user_data);
+    double sz = std::min(w, h);
+    draw_app_icon(ctx->ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz, ctx->path, ctx->kind);
+}
+
+void free_desktop_icon_ctx(gpointer data) {
+    delete static_cast<DesktopIconDrawCtx *>(data);
+}
+
+void trigger_cmd(AppState *state, const std::string &cmd) {
+    if (!state || cmd.empty()) return;
+    if (cmd.rfind("dock:exec:", 0) == 0) {
+        std::string bin = cmd.substr(10);
+        if (!bin.empty() && has_executable(bin)) {
+            spawn_argv_detached({bin});
+        }
+        return;
+    }
+    handle_shell_command(state, cmd);
+}
+
+void on_cmd_button_clicked(GtkButton *btn, gpointer user_data) {
+    auto *state = static_cast<AppState *>(user_data);
+    const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "spinel-cmd"));
+    if (cmd) trigger_cmd(state, cmd);
+}
+
+GtkWidget *make_cmd_button(AppState *state, const char *label, const char *css_class, const char *cmd) {
+    GtkWidget *btn = label ? gtk_button_new_with_label(label) : gtk_button_new();
+    if (css_class && *css_class) gtk_widget_add_css_class(btn, css_class);
+    if (cmd) {
+        g_object_set_data_full(G_OBJECT(btn), "spinel-cmd", g_strdup(cmd), g_free);
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_cmd_button_clicked), state);
+    }
+    return btn;
+}
+
+void draw_spinel_logo_at(NativeShellState *ns, cairo_t *cr, double x, double y, double sz) {
+    std::string logo_path = find_spinel_logo_path();
+    int target_px = std::max(24, static_cast<int>(std::round(sz * 2.0)));
+    cairo_surface_t *surf = ns && !logo_path.empty() ? get_cached_surface(ns, logo_path, target_px) : nullptr;
+    if (surf) {
+        int sw = cairo_image_surface_get_width(surf);
+        int sh = cairo_image_surface_get_height(surf);
+        if (sw > 0 && sh > 0) {
+            cairo_save(cr);
+            cairo_translate(cr, x, y);
+            cairo_scale(cr, sz / static_cast<double>(sw), sz / static_cast<double>(sh));
+            cairo_set_source_surface(cr, surf, 0.0, 0.0);
+            cairo_paint(cr);
+            cairo_restore(cr);
+            return;
+        }
+    }
+    draw_spinel_gem_vector(cr, x, y, sz);
+}
+
+void draw_gem_glyph(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    double sz = std::max(12.0, static_cast<double>(std::min(w, h)) - 1.0);
+    draw_spinel_logo_at(ns, cr, (w - sz) * 0.5, (h - sz) * 0.5, sz);
+}
+
+void draw_monochrome_glyph(cairo_t *cr, int w, int h, BarGlyph kind, const GdkRGBA &fg) {
+    double s = std::min(w, h) / 16.0;
+    cairo_save(cr);
+    cairo_translate(cr, (w - 16.0 * s) * 0.5, (h - 16.0 * s) * 0.5);
+    cairo_scale(cr, s, s);
+    cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, fg.alpha);
+    cairo_set_line_width(cr, 1.45);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    switch (kind) {
+        case BarGlyph::Wifi:
+            cairo_arc(cr, 8, 12.6, 1.1, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_arc(cr, 8, 12.6, 3.6, -2.35, -0.79);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 12.6, 6.4, -2.32, -0.82);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 12.6, 9.2, -2.28, -0.86);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Search:
+            cairo_arc(cr, 7, 7, 4.3, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 10.4, 10.4);
+            cairo_line_to(cr, 13.5, 13.5);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::ControlCenter:
+            cairo_set_line_width(cr, 1.25);
+            cairo_rounded_rect(cr, 2.2, 3.0, 11.6, 4.2, 2.1);
+            cairo_stroke(cr);
+            cairo_arc(cr, 11.5, 5.1, 1.4, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_rounded_rect(cr, 2.2, 8.8, 11.6, 4.2, 2.1);
+            cairo_stroke(cr);
+            cairo_arc(cr, 4.5, 10.9, 1.4, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Reboot:
+            cairo_arc(cr, 8, 8, 4.8, -0.75, 1.8 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 12.6, 2.8);
+            cairo_line_to(cr, 12.6, 5.5);
+            cairo_line_to(cr, 9.9, 5.5);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Power:
+            cairo_move_to(cr, 8, 2.4);
+            cairo_line_to(cr, 8, 7.2);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 8.6, 4.8, -1.0, M_PI + 1.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Bluetooth:
+            cairo_move_to(cr, 5, 4.8);
+            cairo_line_to(cr, 11.2, 10.5);
+            cairo_line_to(cr, 8, 13.5);
+            cairo_line_to(cr, 8, 2.5);
+            cairo_line_to(cr, 11.2, 5.5);
+            cairo_line_to(cr, 5, 11.2);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Gamepad:
+            cairo_rounded_rect(cr, 2.2, 5.0, 11.6, 6.6, 3.0);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 4.8, 8.3);
+            cairo_line_to(cr, 6.8, 8.3);
+            cairo_move_to(cr, 5.8, 7.3);
+            cairo_line_to(cr, 5.8, 9.3);
+            cairo_stroke(cr);
+            cairo_arc(cr, 10.6, 7.6, 0.85, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_arc(cr, 10.6, 9.4, 0.85, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Hud:
+            cairo_arc(cr, 8, 10.5, 5.2, M_PI, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 8, 10.5);
+            cairo_line_to(cr, 11.0, 7.2);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Appearance:
+            cairo_arc(cr, 8, 8, 5.0, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8, 8, 5.0, M_PI_2, 1.5 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Settings:
+            cairo_rounded_rect(cr, 2.2, 3.2, 11.6, 7.6, 1.5);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 5.5, 13.0);
+            cairo_line_to(cr, 10.5, 13.0);
+            cairo_move_to(cr, 8, 10.8);
+            cairo_line_to(cr, 8, 13.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Lock:
+            cairo_rounded_rect(cr, 3.4, 7.2, 9.2, 6.4, 1.8);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 6.2, 2.7, M_PI, 2 * M_PI);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 10.4, 0.9, 0, 2 * M_PI);
+            cairo_fill(cr);
+            break;
+        case BarGlyph::Screenshot:
+            cairo_move_to(cr, 2.5, 5.5);
+            cairo_line_to(cr, 2.5, 3.0);
+            cairo_line_to(cr, 5.2, 3.0);
+            cairo_move_to(cr, 10.8, 3.0);
+            cairo_line_to(cr, 13.5, 3.0);
+            cairo_line_to(cr, 13.5, 5.5);
+            cairo_move_to(cr, 13.5, 10.5);
+            cairo_line_to(cr, 13.5, 13.0);
+            cairo_line_to(cr, 10.8, 13.0);
+            cairo_move_to(cr, 5.2, 13.0);
+            cairo_line_to(cr, 2.5, 13.0);
+            cairo_line_to(cr, 2.5, 10.5);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 8.0, 2.3, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Clipboard:
+            cairo_rounded_rect(cr, 3.2, 3.4, 9.6, 10.4, 1.8);
+            cairo_stroke(cr);
+            cairo_rounded_rect(cr, 5.6, 1.8, 4.8, 2.6, 1.0);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 5.5, 7.2);
+            cairo_line_to(cr, 10.5, 7.2);
+            cairo_move_to(cr, 5.5, 10.0);
+            cairo_line_to(cr, 9.2, 10.0);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Volume:
+            cairo_move_to(cr, 2.4, 6.4);
+            cairo_line_to(cr, 5.0, 6.4);
+            cairo_line_to(cr, 8.2, 3.6);
+            cairo_line_to(cr, 8.2, 12.4);
+            cairo_line_to(cr, 5.0, 9.6);
+            cairo_line_to(cr, 2.4, 9.6);
+            cairo_close_path(cr);
+            cairo_stroke(cr);
+            cairo_arc(cr, 9.2, 8.0, 2.6, -0.82, 0.82);
+            cairo_stroke(cr);
+            cairo_arc(cr, 9.2, 8.0, 4.6, -0.78, 0.78);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Mute:
+            cairo_move_to(cr, 2.4, 6.4);
+            cairo_line_to(cr, 5.0, 6.4);
+            cairo_line_to(cr, 8.2, 3.6);
+            cairo_line_to(cr, 8.2, 12.4);
+            cairo_line_to(cr, 5.0, 9.6);
+            cairo_line_to(cr, 2.4, 9.6);
+            cairo_close_path(cr);
+            cairo_stroke(cr);
+            cairo_move_to(cr, 10.6, 5.6);
+            cairo_line_to(cr, 14.0, 10.4);
+            cairo_move_to(cr, 14.0, 5.6);
+            cairo_line_to(cr, 10.6, 10.4);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Brightness:
+            cairo_arc(cr, 8.0, 8.0, 2.9, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            for (int i = 0; i < 8; ++i) {
+                double ang = i * (M_PI / 4.0);
+                cairo_move_to(cr, 8.0 + std::cos(ang) * 4.5, 8.0 + std::sin(ang) * 4.5);
+                cairo_line_to(cr, 8.0 + std::cos(ang) * 6.0, 8.0 + std::sin(ang) * 6.0);
+            }
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Dnd:
+            cairo_arc(cr, 7.6, 8.2, 4.9, 0.55 * M_PI, 1.85 * M_PI);
+            cairo_arc_negative(cr, 10.6, 5.4, 3.8, 1.35 * M_PI, 0.25 * M_PI);
+            cairo_close_path(cr);
+            cairo_stroke(cr);
+            break;
+        case BarGlyph::Bell:
+            cairo_move_to(cr, 3.4, 11.4);
+            cairo_line_to(cr, 12.6, 11.4);
+            cairo_move_to(cr, 4.4, 11.4);
+            cairo_line_to(cr, 4.4, 7.2);
+            cairo_arc(cr, 8.0, 7.2, 3.6, M_PI, 2.0 * M_PI);
+            cairo_line_to(cr, 11.6, 11.4);
+            cairo_stroke(cr);
+            cairo_arc(cr, 8.0, 12.9, 1.1, 0, 2.0 * M_PI);
+            cairo_fill(cr);
+            break;
+    }
+    cairo_restore(cr);
+}
+
+void draw_glyph_cb(GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer data) {
+    BarGlyph kind = static_cast<BarGlyph>(reinterpret_cast<intptr_t>(data));
+    GdkRGBA fg{1.0f, 1.0f, 1.0f, 0.94f};
+    gtk_widget_get_color(GTK_WIDGET(da), &fg);
+    draw_monochrome_glyph(cr, w, h, kind, fg);
+}
+
+GtkWidget *make_glyph_icon_btn(AppState *state, BarGlyph kind, const char *tooltip, const char *cmd, const char *extra_cls) {
+    GtkWidget *btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", cmd);
+    if (extra_cls) gtk_widget_add_css_class(btn, extra_cls);
+    gtk_widget_set_tooltip_text(btn, tooltip);
+    GtkWidget *da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(da, 16, 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_glyph_cb,
+                                   reinterpret_cast<gpointer>(static_cast<intptr_t>(kind)), nullptr);
+    gtk_button_set_child(GTK_BUTTON(btn), da);
+    return btn;
+}
+
+}  // namespace shell_internal
+
+/* ==================== Public Native Shell Lifecycle & Sync ==================== */
+
+void init_native_shell(GtkApplication *app, AppState *state) {
+    if (!state || state->native) return;
+    auto *ns = new NativeShellState();
+    ns->app_state = state;
+    state->native = ns;
+
+    ns->theme = get_active_theme();
+    ns->custom_wallpaper_path = get_custom_wallpaper_image();
+    shell_internal::apply_native_css(ns);
+    ns->telemetry = collect_telemetry();
+    ns->desktop_apps = list_desktop_apps();
+
+    shell_internal::build_native_desktop(app, ns);
+    shell_internal::build_native_top_bar(app, ns);
+    shell_internal::build_native_dock(app, ns);
+    shell_internal::build_native_control_center(app, ns);
+    shell_internal::build_native_launcher(app, ns);
+    shell_internal::build_osd_window(app, ns);
+    shell_internal::sync_monitor_wallpapers(app, ns);
+    if (GdkDisplay *disp = gdk_display_get_default()) {
+        if (GListModel *mons = gdk_display_get_monitors(disp)) {
+            ns->monitor_model = G_LIST_MODEL(g_object_ref(mons));
+            ns->monitor_sig_id = g_signal_connect(mons, "items-changed",
+                G_CALLBACK(+[](GListModel *, guint, guint, guint, gpointer d) {
+                    auto *n = static_cast<NativeShellState *>(d);
+                    if (!n || !n->desktop_win) return;
+                    shell_internal::sync_monitor_wallpapers(gtk_window_get_application(n->desktop_win), n);
+                }), ns);
+        }
+    }
+    shell_internal::show_desktop_startup_splash(app, ns);
+
+    native_shell_sync_telemetry(state);
+    native_shell_sync_perf(state);
+}
+
+void shutdown_native_shell(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    shell_internal::close_startup_splash(ns);
+    if (ns->osd_timer) g_source_remove(ns->osd_timer);
+    if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
+    if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
+    if (ns->monitor_model) {
+        if (ns->monitor_sig_id) g_signal_handler_disconnect(ns->monitor_model, ns->monitor_sig_id);
+        g_object_unref(ns->monitor_model);
+        ns->monitor_model = nullptr;
+    }
+    for (auto &ebg : ns->extra_desktop_bgs) {
+        if (ebg.win) gtk_window_destroy(ebg.win);
+        if (ebg.mon) g_object_unref(ebg.mon);
+    }
+    ns->extra_desktop_bgs.clear();
+    if (ns->css_provider) {
+        if (GdkDisplay *display = gdk_display_get_default()) {
+            gtk_style_context_remove_provider_for_display(display, GTK_STYLE_PROVIDER(ns->css_provider));
+        }
+        g_object_unref(ns->css_provider);
+    }
+    for (auto &kv : ns->wallpaper_surfs) {
+        if (kv.second) cairo_surface_destroy(kv.second);
+    }
+    ns->wallpaper_surfs.clear();
+    for (auto &kv : ns->surface_cache) {
+        if (kv.second) cairo_surface_destroy(kv.second);
+    }
+    for (auto *ctx : ns->slider_ctxs) delete ctx;
+    delete ns;
+    state->native = nullptr;
+}
+
+void native_shell_sync_telemetry(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    bool prev_live = ns->telemetry.is_live;
+    ns->telemetry = collect_telemetry();
+
+    if (ns->bar_mem_lbl) {
+        std::string m = ns->telemetry.mem_used_mb > 0
+            ? (std::to_string(ns->telemetry.mem_used_mb) + "M")
+            : ns->telemetry.mem;
+        gtk_label_set_text(GTK_LABEL(ns->bar_mem_lbl), m.c_str());
+    }
+    if (ns->bar_bat_lbl) {
+        if (ns->telemetry.battery_pct >= 0) {
+            std::string b = (ns->telemetry.battery_charging ? "充电 " : "电量 ") +
+                            std::to_string(ns->telemetry.battery_pct) + "%";
+            gtk_label_set_text(GTK_LABEL(ns->bar_bat_lbl), b.c_str());
+            gtk_widget_set_visible(ns->bar_bat_lbl, TRUE);
+        } else {
+            gtk_widget_set_visible(ns->bar_bat_lbl, FALSE);
+        }
+    }
+    if (ns->bar_net_btn) {
+        std::string tip = "网络: " + ns->telemetry.net;
+        gtk_widget_set_tooltip_text(ns->bar_net_btn, tip.c_str());
+    }
+    if (ns->cc_net_val) gtk_label_set_text(GTK_LABEL(ns->cc_net_val), ns->telemetry.net.c_str());
+    if (ns->cc_gpu_badge) gtk_label_set_text(GTK_LABEL(ns->cc_gpu_badge), ns->telemetry.gpu.c_str());
+    if (ns->cc_mem_val) {
+        std::string mem_s = "内存 " + ns->telemetry.mem;
+        gtk_label_set_text(GTK_LABEL(ns->cc_mem_val), mem_s.c_str());
+    }
+    if (prev_live != ns->telemetry.is_live) {
+        shell_internal::rebuild_desktop_shortcuts(ns);
+        shell_internal::rebuild_dock_items(ns, list_tracked_windows());
+    }
+}
+
+void native_shell_sync_windows(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    auto windows = list_tracked_windows();
+
+    const TrackedWindowInfo *active_win = nullptr;
+    for (const auto &w : windows) {
+        if (w.activated) {
+            active_win = &w;
+            break;
+        }
+    }
+    if (!active_win && !windows.empty()) {
+        active_win = &windows.front();
+    }
+
+    std::string active_name = "访达";
+    shell_internal::sync_top_bar_app_menus(ns, active_win, active_name);
+    if (ns->bar_active_lbl) gtk_label_set_text(GTK_LABEL(ns->bar_active_lbl), active_name.c_str());
+
+    shell_internal::rebuild_dock_items(ns, windows);
+}
+
+void native_shell_sync_desktop(AppState *state) {
+    if (!state || !state->native) return;
+    state->native->desktop_apps = list_desktop_apps();
+    shell_internal::rebuild_desktop_shortcuts(state->native);
+}
+
+void native_shell_sync_theme(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    ns->theme = get_active_theme();
+    std::string next_wp = get_custom_wallpaper_image();
+    if (next_wp != ns->custom_wallpaper_path) {
+        ns->custom_wallpaper_path = next_wp;
+        for (auto &kv : ns->wallpaper_surfs) {
+            if (kv.second) cairo_surface_destroy(kv.second);
+        }
+        ns->wallpaper_surfs.clear();
+    }
+    shell_internal::apply_native_css(ns);
+    if (ns->desktop_bg_da) gtk_widget_queue_draw(ns->desktop_bg_da);
+    for (const auto &ebg : ns->extra_desktop_bgs) {
+        if (ebg.da) gtk_widget_queue_draw(ebg.da);
+        if (ebg.win) gtk_widget_queue_draw(GTK_WIDGET(ebg.win));
+    }
+    if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
+    if (ns->desktop_win) gtk_widget_queue_draw(GTK_WIDGET(ns->desktop_win));
+    if (ns->dock_win) gtk_widget_queue_draw(GTK_WIDGET(ns->dock_win));
+    if (ns->bar_win) {
+        shell_internal::queue_draw_tree(GTK_WIDGET(ns->bar_win));
+        gtk_widget_queue_draw(GTK_WIDGET(ns->bar_win));
+    }
+    if (ns->cc_win) {
+        shell_internal::queue_draw_tree(GTK_WIDGET(ns->cc_win));
+        gtk_widget_queue_draw(GTK_WIDGET(ns->cc_win));
+    }
+}
+
+void native_shell_sync_wallpaper(AppState *state) {
+    native_shell_sync_theme(state);
+}
+
+void native_shell_sync_perf(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    PerfConfig cfg = load_perf_config();
+
+    if (ns->cc_gm_circle) {
+        if (cfg.gamemode) gtk_widget_add_css_class(ns->cc_gm_circle, "active-blue");
+        else gtk_widget_remove_css_class(ns->cc_gm_circle, "active-blue");
+    }
+    if (ns->cc_gm_val) gtk_label_set_text(GTK_LABEL(ns->cc_gm_val), cfg.gamemode ? "已开启" : "已关闭");
+
+    if (ns->cc_mh_circle) {
+        if (cfg.mangohud != "off") gtk_widget_add_css_class(ns->cc_mh_circle, "active-indigo");
+        else gtk_widget_remove_css_class(ns->cc_mh_circle, "active-indigo");
+    }
+    if (ns->cc_mh_val) {
+        const char *lbl = cfg.mangohud == "full" ? "详细监控" : (cfg.mangohud == "off" ? "已关闭" : "精简监控");
+        gtk_label_set_text(GTK_LABEL(ns->cc_mh_val), lbl);
+    }
+
+    bool dnd = get_dnd_enabled();
+    if (ns->cc_dnd_circle) {
+        if (dnd) gtk_widget_add_css_class(ns->cc_dnd_circle, "active-indigo");
+        else gtk_widget_remove_css_class(ns->cc_dnd_circle, "active-indigo");
+    }
+    if (ns->cc_dnd_val) gtk_label_set_text(GTK_LABEL(ns->cc_dnd_val), dnd ? "已开启" : "已关闭");
+}

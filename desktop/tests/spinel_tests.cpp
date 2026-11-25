@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "ipc_router.hpp"
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
@@ -358,6 +359,73 @@ void test_system_control_configs() {
     EXPECT(doc_report.find("[Health Checks]") != std::string::npos);
 }
 
+void test_ipc_router() {
+    // Legacy key=value payload parsing
+    IpcRequest leg;
+    EXPECT(parse_ipc_request("perf:set\nmangohud=full\nfps_limit=120\n", leg));
+    EXPECT(!leg.is_json);
+    EXPECT(!leg.has_id);
+    EXPECT(leg.method == "perf:set");
+    EXPECT(leg.param("mangohud") == "full");
+    EXPECT(leg.param("fps_limit") == "120");
+
+    // Structured JSON-RPC request parsing (dotted method + escaped chars)
+    IpcRequest jr;
+    EXPECT(parse_ipc_request(R"({"id":42,"method":"settings.proxy-save","params":{"http_proxy":"http://127.0.0.1:7890","enabled":true}})", jr));
+    EXPECT(jr.is_json);
+    EXPECT(jr.has_id);
+    EXPECT(jr.id_json == "42");
+    EXPECT(jr.method == "settings:proxy-save");
+    EXPECT(jr.param("http_proxy") == "http://127.0.0.1:7890");
+    EXPECT(jr.param("enabled") == "true");
+    EXPECT(jr.legacy_raw.find("settings:proxy-save\n") == 0);
+
+    // Malformed / empty JSON rejection
+    IpcRequest bad;
+    EXPECT(!parse_ipc_request("", bad));
+    EXPECT(!parse_ipc_request("{bad json", bad));
+    EXPECT(!parse_ipc_request(R"({"id":1})", bad));
+
+    // Mock dispatch verification (legacy + JSON + unknown method)
+    static std::string last_tab;
+    static std::string last_store_focus;
+    last_tab.clear();
+    last_store_focus.clear();
+
+    IpcHostActions mock_actions;
+    mock_actions.open_settings = +[](AppState *, const std::string &tab) { last_tab = tab; };
+    mock_actions.open_store = +[](AppState *, const std::string &focus) { last_store_focus = focus; };
+
+    AppState dummy;
+    std::string reply;
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":"r1","method":"settings.open","params":{"tab":"appearance"}})", mock_actions, &reply));
+    EXPECT(last_tab == "appearance");
+    EXPECT(reply.find("\"id\":\"r1\"") != std::string::npos);
+    EXPECT(reply.find("\"ok\":true") != std::string::npos);
+
+    reply.clear();
+    EXPECT(dispatch_ipc_command(&dummy, "store:open:steam", mock_actions, &reply));
+    EXPECT(last_store_focus == "steam");
+    EXPECT(reply.empty());  // Legacy string without id produces no reply envelope
+
+    reply.clear();
+    EXPECT(!dispatch_ipc_command(&dummy, R"({"id":9,"method":"nonexistent.op"})", mock_actions, &reply));
+    EXPECT(reply.find("\"id\":9") != std::string::npos);
+    EXPECT(reply.find("\"ok\":false") != std::string::npos);
+    EXPECT(reply.find("\"error\":\"unknown_method\"") != std::string::npos);
+
+    // Structured JSON perf.set end-to-end config persistence
+    reply.clear();
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":10,"method":"perf.set","params":{"mangohud":"off","fps_limit":144,"fsr":true,"gamemode":false,"render_res":"900p"}})", mock_actions, &reply));
+    EXPECT(reply.find("\"ok\":true") != std::string::npos);
+    PerfConfig saved_perf = load_perf_config();
+    EXPECT(saved_perf.mangohud == "off");
+    EXPECT(saved_perf.fps_limit == 144);
+    EXPECT(saved_perf.fsr == true);
+    EXPECT(saved_perf.gamemode == false);
+    EXPECT(saved_perf.render_res == "900p");
+}
+
 }  // namespace
 
 int main() {
@@ -367,6 +435,7 @@ int main() {
     test_desktop_apps();
     test_steam_library();
     test_system_control_configs();
+    test_ipc_router();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

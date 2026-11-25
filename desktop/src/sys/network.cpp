@@ -1,0 +1,755 @@
+#include "system_control.hpp"
+#include "sys_internal.hpp"
+#include "common.hpp"
+#include "native_shell.hpp"
+#include "steam_library.hpp"
+
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+struct JsIdleCall {
+    AppState *state;
+    std::string script;
+    bool also_bar = false;
+};
+
+gboolean run_js_idle(gpointer data) {
+    std::unique_ptr<JsIdleCall> call(static_cast<JsIdleCall *>(data));
+    if (call->state->shutting_down.load()) return G_SOURCE_REMOVE;
+    eval_js(call->state->settings_view, call->script);
+    if (call->also_bar) {
+        eval_js(call->state->bar_view, call->script);
+        eval_js(call->state->desktop_view, call->script);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+void sync_mangohud_config(const PerfConfig &cfg) {
+    if (cfg.mangohud == "off") return;
+    std::error_code ec;
+    fs::path mh_dir = fs::path(home_dir()) / ".config/MangoHud";
+    fs::create_directories(mh_dir, ec);
+    std::ofstream ofs(mh_dir / "MangoHud.conf");
+    if (!ofs.is_open()) return;
+
+    ofs << "# Managed by SpinelOS Performance Control\n";
+    ofs << "position=top-left\n";
+    ofs << "background_alpha=0.45\n";
+    ofs << "font_size=20\n";
+    ofs << "fps\n";
+    ofs << "gpu_stats\n";
+    ofs << "gpu_temp\n";
+    ofs << "cpu_stats\n";
+    ofs << "cpu_temp\n";
+    if (cfg.mangohud == "full") {
+        ofs << "frametime=1\n";
+        ofs << "frame_timing=1\n";
+        ofs << "ram\n";
+        ofs << "vram\n";
+        ofs << "gamemode\n";
+    } else {
+        ofs << "frametime=0\n";
+        ofs << "legacy_layout=0\n";
+        ofs << "horizontal\n";
+    }
+}
+
+std::vector<std::string> split_nmcli_escaped(const std::string &line) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == '\\' && i + 1 < line.size()) {
+            cur += line[i + 1];
+            ++i;
+        } else if (line[i] == ':') {
+            out.push_back(std::move(cur));
+            cur.clear();
+        } else {
+            cur += line[i];
+        }
+    }
+    out.push_back(std::move(cur));
+    return out;
+}
+
+bool is_valid_iface(const std::string &s) {
+    if (s.empty() || s.size() > 32) return false;
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && c != '_' && c != '-' && c != '.') return false;
+    }
+    return true;
+}
+
+bool is_valid_mac(const std::string &s) {
+    if (s.size() != 17) return false;
+    for (size_t i = 0; i < 17; ++i) {
+        if (i % 3 == 2) {
+            if (s[i] != ':') return false;
+        } else if (!std::isxdigit(static_cast<unsigned char>(s[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool is_valid_proxy_url(const std::string &s) {
+    if (s.empty()) return true;
+    if (s.size() > 256) return false;
+    bool ok_scheme = s.rfind("http://", 0) == 0 || s.rfind("https://", 0) == 0 ||
+                     s.rfind("socks5://", 0) == 0 || s.rfind("socks5h://", 0) == 0 ||
+                     s.rfind("socks4://", 0) == 0;
+    if (!ok_scheme) return false;
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (c <= 0x20 || c == '"' || c == '\'' || c == '\\' || c == ';') return false;
+    }
+    return true;
+}
+
+std::string sanitize_no_proxy(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || c == ',' || c == '.' || c == ':' || c == '/' || c == '-' || c == '_') {
+            out += ch;
+        }
+    }
+    return out;
+}
+
+std::string detect_gpu_summary() {
+    std::string gpu = run_cmd_capture(
+        "lspci -mm 2>/dev/null | awk -F'\"' '/VGA|3D|Display/ {print $6; exit}'"
+    );
+    return gpu.empty() ? "Generic DRM/Mesa" : gpu;
+}
+
+std::string detect_network_status() {
+    std::error_code ec;
+    fs::path net_dir("/sys/class/net");
+    if (!fs::is_directory(net_dir, ec)) return "Offline";
+    for (const auto &entry : fs::directory_iterator(net_dir, ec)) {
+        std::string iface = entry.path().filename().string();
+        if (iface == "lo" || iface.rfind("veth", 0) == 0 || iface.rfind("docker", 0) == 0 || iface.rfind("br-", 0) == 0) {
+            continue;
+        }
+        std::string oper = trim_copy(read_first_line((entry.path() / "operstate").string(), ""));
+        std::string carrier = trim_copy(read_first_line((entry.path() / "carrier").string(), ""));
+        if (oper == "up" || carrier == "1") {
+            bool is_wifi = fs::exists(entry.path() / "wireless", ec) || iface.rfind("wl", 0) == 0;
+            return iface + (is_wifi ? " (wifi)" : " (ethernet)");
+        }
+    }
+    return "Offline";
+}
+
+bool detect_low_fx_mode() {
+    std::error_code ec;
+    fs::path drm_dir("/sys/class/drm");
+    if (!fs::is_directory(drm_dir, ec)) return true;
+
+    for (const auto &entry : fs::directory_iterator(drm_dir, ec)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("card", 0) != 0 || name.find('-') != std::string::npos) continue;
+        std::string vendor = trim_copy(read_first_line((entry.path() / "device/vendor").string(), ""));
+        if (vendor == "0x10de" || vendor == "0x1002" || vendor == "0x8086") {
+            return false;  // Real NVIDIA, AMD, or Intel GPU present
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+namespace sys_internal {
+
+fs::path config_dir() {
+    return fs::path(home_dir()) / ".config/spinelos";
+}
+
+void post_js_to_main(AppState *state, std::string script, bool also_bar) {
+    if (!state || state->shutting_down.load()) return;
+    g_idle_add(run_js_idle, new JsIdleCall{state, std::move(script), also_bar});
+}
+
+std::string detect_mem_usage(int *used_mb_out) {
+    std::ifstream ifs("/proc/meminfo");
+    if (!ifs.is_open()) return "N/A";
+    long total_kb = 0;
+    long avail_kb = 0;
+    std::string key;
+    long val = 0;
+    std::string unit;
+    while (ifs >> key >> val >> unit) {
+        if (key == "MemTotal:") total_kb = val;
+        else if (key == "MemAvailable:") avail_kb = val;
+    }
+    if (total_kb <= 0) return "N/A";
+    long used_mb = (total_kb - avail_kb) / 1024;
+    long total_mb = total_kb / 1024;
+    if (used_mb_out) *used_mb_out = static_cast<int>(used_mb);
+    std::ostringstream oss;
+    oss << used_mb << " / " << total_mb << " MB";
+    return oss.str();
+}
+
+}  // namespace sys_internal
+
+PerfConfig load_perf_config() {
+    PerfConfig cfg;
+    std::ifstream ifs(sys_internal::config_dir() / "perf.conf");
+    if (!ifs.is_open()) return cfg;
+
+    std::string line;
+    while (std::getline(ifs, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "mangohud" && (v == "off" || v == "compact" || v == "full")) cfg.mangohud = v;
+        else if (k == "fps_limit") {
+            int fps = std::atoi(v.c_str());
+            if (fps == 0 || fps == 60 || fps == 90 || fps == 120 || fps == 144) cfg.fps_limit = fps;
+        } else if (k == "fsr") cfg.fsr = (v == "true");
+        else if (k == "gamemode") cfg.gamemode = (v == "true");
+        else if (k == "render_res" && (v == "native" || v == "720p" || v == "900p" || v == "1080p")) {
+            cfg.render_res = v;
+        }
+    }
+    return cfg;
+}
+
+ProxyConfig load_proxy_config() {
+    ProxyConfig cfg;
+    std::ifstream ifs(sys_internal::config_dir() / "proxy.conf");
+    if (!ifs.is_open()) return cfg;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "enabled") cfg.enabled = (v == "true" || v == "1");
+        else if (k == "http_proxy" && is_valid_proxy_url(v)) cfg.http_proxy = v;
+        else if (k == "socks_proxy" && is_valid_proxy_url(v)) cfg.socks_proxy = v;
+        else if (k == "no_proxy") {
+            std::string clean = sanitize_no_proxy(v);
+            if (!clean.empty()) cfg.no_proxy = clean;
+        }
+    }
+    return cfg;
+}
+
+void sync_process_proxy_env() {
+    ProxyConfig cfg = load_proxy_config();
+    const char *vars[] = {
+        "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+        "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"
+    };
+    if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) {
+        for (const char *v : vars) unsetenv(v);
+        return;
+    }
+    std::string http_val = !cfg.http_proxy.empty() ? cfg.http_proxy : cfg.socks_proxy;
+    std::string all_val = !cfg.socks_proxy.empty() ? cfg.socks_proxy : cfg.http_proxy;
+    setenv("http_proxy", http_val.c_str(), 1);
+    setenv("https_proxy", http_val.c_str(), 1);
+    setenv("HTTP_PROXY", http_val.c_str(), 1);
+    setenv("HTTPS_PROXY", http_val.c_str(), 1);
+    setenv("all_proxy", all_val.c_str(), 1);
+    setenv("ALL_PROXY", all_val.c_str(), 1);
+    setenv("no_proxy", cfg.no_proxy.c_str(), 1);
+    setenv("NO_PROXY", cfg.no_proxy.c_str(), 1);
+}
+
+void push_proxy_config(AppState *state) {
+    if (!state || !state->settings_view) return;
+    ProxyConfig cfg = load_proxy_config();
+    std::string gw = run_cmd_capture("ip route 2>/dev/null | awk '/default/ {print $3; exit}'");
+    std::ostringstream js;
+    js << "window.__spinelProxyConfig && window.__spinelProxyConfig({"
+       << "\"enabled\":" << (cfg.enabled ? "true" : "false") << ","
+       << "\"http_proxy\":\"" << json_escape(cfg.http_proxy) << "\","
+       << "\"socks_proxy\":\"" << json_escape(cfg.socks_proxy) << "\","
+       << "\"no_proxy\":\"" << json_escape(cfg.no_proxy) << "\","
+       << "\"gateway\":\"" << json_escape(gw) << "\""
+       << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void update_proxy_config(AppState *state, const std::string &payload) {
+    ProxyConfig cfg = load_proxy_config();
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "enabled") cfg.enabled = (v == "true" || v == "1");
+        else if (k == "http_proxy") {
+            if (!is_valid_proxy_url(v)) {
+                eval_js(state ? state->settings_view : nullptr,
+                        "window.__spinelProxyAction && window.__spinelProxyAction(false, \"HTTP 代理地址格式无效（需以 http://、https:// 或 socks5:// 开头）\");");
+                return;
+            }
+            cfg.http_proxy = v;
+        } else if (k == "socks_proxy") {
+            if (!is_valid_proxy_url(v)) {
+                eval_js(state ? state->settings_view : nullptr,
+                        "window.__spinelProxyAction && window.__spinelProxyAction(false, \"SOCKS 代理地址格式无效（需以 socks5:// 等开头）\");");
+                return;
+            }
+            cfg.socks_proxy = v;
+        } else if (k == "no_proxy") {
+            std::string clean = sanitize_no_proxy(v);
+            if (!clean.empty()) cfg.no_proxy = clean;
+        }
+    }
+    if (cfg.http_proxy.empty() && cfg.socks_proxy.empty()) {
+        cfg.enabled = false;
+    }
+
+    std::ostringstream out;
+    out << "enabled=" << (cfg.enabled ? "true" : "false") << "\n"
+        << "http_proxy=" << cfg.http_proxy << "\n"
+        << "socks_proxy=" << cfg.socks_proxy << "\n"
+        << "no_proxy=" << cfg.no_proxy << "\n";
+    write_text_file((sys_internal::config_dir() / "proxy.conf").string(), out.str());
+    sync_process_proxy_env();
+    append_app_log(cfg.enabled
+        ? ("[Proxy] 已启用系统代理: http=" + cfg.http_proxy + " socks=" + cfg.socks_proxy)
+        : "[Proxy] 已关闭系统代理（直连模式）");
+    if (state) {
+        push_proxy_config(state);
+        std::string pg_out;
+        int pg_rc = 1;
+        bool steam_running = run_argv_capture({"pgrep", "-f", "ubuntu12_32/steam"}, pg_out, pg_rc) && pg_rc == 0;
+        std::string ok_msg = cfg.enabled
+            ? (steam_running
+                ? "系统代理已启用！检测到 Steam 正在运行，再次点击任意 Steam 启动按钮会自动用新代理重启它。"
+                : "系统代理已启用，对新启动的 Steam / 商店 / 终端立即生效。")
+            : "已关闭代理并恢复直连。";
+        eval_js(state->settings_view,
+                "window.__spinelProxyAction && window.__spinelProxyAction(true,\"" + json_escape(ok_msg) + "\");");
+    }
+}
+
+void push_perf_config(AppState *state) {
+    if (!state) return;
+    PerfConfig cfg = load_perf_config();
+    std::ostringstream js;
+    js << "window.__spinelPerfConfig && window.__spinelPerfConfig({"
+       << "\"mangohud\":\"" << cfg.mangohud << "\","
+       << "\"fps_limit\":" << cfg.fps_limit << ","
+       << "\"fsr\":" << (cfg.fsr ? "true" : "false") << ","
+       << "\"gamemode\":" << (cfg.gamemode ? "true" : "false") << ","
+       << "\"render_res\":\"" << cfg.render_res << "\""
+       << "});";
+    std::string script = js.str();
+    eval_js(state->games_view, script);
+    eval_js(state->settings_view, script);
+    eval_js(state->desktop_view, script);
+    eval_js(state->bar_view, script);
+    eval_js(state->cc_view, script);
+    if (state->settings_view) {
+        gtk_widget_queue_draw(GTK_WIDGET(state->settings_view));
+    }
+}
+
+void update_perf_config(AppState *state, const std::string &payload) {
+    PerfConfig cfg = load_perf_config();
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "mangohud" && (v == "off" || v == "compact" || v == "full")) cfg.mangohud = v;
+        else if (k == "fps_limit") {
+            int fps = std::atoi(v.c_str());
+            if (fps == 0 || fps == 60 || fps == 90 || fps == 120 || fps == 144) cfg.fps_limit = fps;
+        } else if (k == "fsr") cfg.fsr = (v == "true");
+        else if (k == "gamemode") cfg.gamemode = (v == "true");
+        else if (k == "render_res" && (v == "native" || v == "720p" || v == "900p" || v == "1080p")) {
+            cfg.render_res = v;
+        }
+    }
+
+    std::ostringstream perf_out;
+    perf_out << "mangohud=" << cfg.mangohud << "\n"
+             << "fps_limit=" << cfg.fps_limit << "\n"
+             << "fsr=" << (cfg.fsr ? "true" : "false") << "\n"
+             << "gamemode=" << (cfg.gamemode ? "true" : "false") << "\n"
+             << "render_res=" << cfg.render_res << "\n";
+    write_text_file((sys_internal::config_dir() / "perf.conf").string(), perf_out.str());
+    sync_mangohud_config(cfg);
+    push_perf_config(state);
+    native_shell_sync_perf(state);
+
+    if (state && state->settings_view) {
+        SteamPerfApplyResult sr = apply_perf_to_steam_configs(cfg);
+        std::string msg;
+        bool ok = true;
+        if (sr.steam_running) {
+            msg = "系统性能预设与 MangoHud.conf 已保存；检测到 Steam 正在运行，退出 Steam 后点击右侧「写入全部 Steam 游戏」即可同步进库内游戏属性。";
+        } else if (sr.games_updated > 0) {
+            msg = "已自动保存系统预设、MangoHud.conf，并直接写入 " + std::to_string(sr.games_updated) + " 款 Steam 游戏配置！";
+        } else {
+            msg = "已保存系统性能预设与 MangoHud.conf（主机大屏、游戏中心及后续安装的 Steam 游戏均自动生效）。";
+        }
+        eval_js(state->settings_view,
+                "window.__spinelPerfFeedback && window.__spinelPerfFeedback(" +
+                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+    }
+}
+
+TelemetrySnapshot collect_telemetry() {
+    static const std::string cached_gpu = detect_gpu_summary();
+    static const std::string cached_kernel = read_first_line("/proc/sys/kernel/osrelease", "Linux");
+    static const bool cached_live = is_live_iso_env();
+    static const bool cached_low_fx = detect_low_fx_mode();
+
+    TelemetrySnapshot snap;
+    snap.gpu = cached_gpu;
+    snap.mem = sys_internal::detect_mem_usage(&snap.mem_used_mb);
+    snap.net = detect_network_status();
+    snap.kernel = cached_kernel;
+    snap.is_live = cached_live;
+    snap.low_fx = cached_low_fx;
+
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator("/sys/class/power_supply", ec)) {
+        std::string nm = entry.path().filename().string();
+        if (nm.rfind("BAT", 0) != 0) continue;
+        std::string cap_s = trim_copy(read_first_line((entry.path() / "capacity").string(), ""));
+        if (!cap_s.empty()) {
+            snap.battery_pct = std::clamp(std::atoi(cap_s.c_str()), 0, 100);
+            std::string st = trim_copy(read_first_line((entry.path() / "status").string(), ""));
+            snap.battery_charging = (st == "Charging" || st == "Full");
+            break;
+        }
+    }
+    return snap;
+}
+
+MediaSnapshot collect_media_state() {
+    MediaSnapshot snap;
+    std::string vol_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null");
+    auto pos = vol_out.find("Volume:");
+    if (pos != std::string::npos) {
+        double v = std::atof(vol_out.c_str() + pos + 7);
+        snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+    }
+    snap.volume_muted = (vol_out.find("MUTED") != std::string::npos);
+
+    if (has_executable("brightnessctl")) {
+        std::string b_out;
+        int b_rc = 1;
+        if (run_argv_capture({"brightnessctl", "-m"}, b_out, b_rc) && b_rc == 0 && !b_out.empty()) {
+            auto p = b_out.find('%');
+            if (p != std::string::npos) {
+                auto comma = b_out.rfind(',', p);
+                if (comma != std::string::npos) {
+                    snap.brightness = std::clamp(std::atoi(b_out.substr(comma + 1, p - comma - 1).c_str()), 5, 100);
+                }
+            }
+        }
+    }
+    if (snap.brightness < 0) {
+        std::string br_out = run_cmd_capture(
+            "for d in /sys/class/backlight/*; do "
+            "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
+            "cur=$(cat \"$d/brightness\"); max=$(cat \"$d/max_brightness\"); "
+            "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
+            "done 2>/dev/null");
+        if (!br_out.empty()) {
+            snap.brightness = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+        }
+    }
+
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator("/sys/class/power_supply", ec)) {
+        std::string nm = entry.path().filename().string();
+        if (nm.rfind("BAT", 0) != 0) continue;
+        std::string cap_s = trim_copy(read_first_line((entry.path() / "capacity").string(), ""));
+        if (!cap_s.empty()) {
+            snap.battery_pct = std::clamp(std::atoi(cap_s.c_str()), 0, 100);
+            std::string st = trim_copy(read_first_line((entry.path() / "status").string(), ""));
+            snap.battery_charging = (st == "Charging" || st == "Full");
+            break;
+        }
+    }
+
+    if (has_executable("powerprofilesctl")) {
+        std::string pp_out;
+        int pp_rc = 1;
+        if (run_argv_capture({"powerprofilesctl", "get"}, pp_out, pp_rc) && pp_rc == 0) {
+            snap.power_profile = trim_copy(pp_out);
+        }
+    }
+    return snap;
+}
+
+void push_telemetry_to_view(WebKitWebView *view) {
+    if (!view) return;
+    TelemetrySnapshot snap = collect_telemetry();
+    std::string gpu = json_escape(snap.gpu);
+    std::string mem = json_escape(snap.mem);
+    std::string net = json_escape(snap.net);
+    std::string kernel = json_escape(snap.kernel);
+
+    std::ostringstream js;
+    js << "window.__spinelUpdateTelemetry && window.__spinelUpdateTelemetry({"
+       << "\"gpu\":\"" << gpu << "\","
+       << "\"mem\":\"" << mem << "\","
+       << "\"net\":\"" << net << "\","
+       << "\"kernel\":\"" << kernel << "\","
+       << "\"is_live\":" << (snap.is_live ? "true" : "false") << ","
+       << "\"low_fx\":" << (snap.low_fx ? "true" : "false")
+       << "});";
+    eval_js(view, js.str());
+}
+
+void push_cc_media_state(AppState *state) {
+    if (!state || !state->cc_view) return;
+    MediaSnapshot snap = collect_media_state();
+    std::ostringstream js;
+    js << "window.__spinelControlState && window.__spinelControlState({"
+       << "\"volume\":" << snap.volume << ","
+       << "\"brightness\":" << snap.brightness
+       << "});";
+    eval_js(state->cc_view, js.str());
+}
+
+void push_wifi_state(AppState *state, bool rescan) {
+    if (!state || state->wifi_busy.exchange(true)) return;
+
+    std::thread([state, rescan]() {
+        std::string dev_out;
+        int dev_rc = 0;
+        run_argv_capture({"nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev", "status"}, dev_out, dev_rc);
+
+        std::vector<std::string> wifi_args = {"nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"};
+        if (rescan) {
+            wifi_args.push_back("--rescan");
+            wifi_args.push_back("yes");
+        }
+        std::string wifi_out;
+        int wifi_rc = 0;
+        run_argv_capture(wifi_args, wifi_out, wifi_rc);
+
+        struct WifiNet {
+            bool active = false;
+            std::string ssid;
+            int signal = 0;
+            std::string security;
+        };
+        std::map<std::string, WifiNet> by_ssid;
+        for (const auto &line : split_lines(wifi_out)) {
+            if (line.empty()) continue;
+            auto cols = split_nmcli_escaped(line);
+            if (cols.size() < 4) continue;
+            std::string ssid = cols[1];
+            if (ssid.empty()) continue;
+            bool active = (cols[0] == "yes");
+            int sig = std::atoi(cols[2].c_str());
+            std::string sec = cols[3];
+
+            auto it = by_ssid.find(ssid);
+            if (it == by_ssid.end() || active || (!it->second.active && sig > it->second.signal)) {
+                by_ssid[ssid] = WifiNet{active, ssid, sig, sec};
+            }
+        }
+
+        std::ostringstream js;
+        js << "window.__spinelWifiState && window.__spinelWifiState({\"interfaces\":[";
+        bool first_dev = true;
+        for (const auto &line : split_lines(dev_out)) {
+            if (line.empty()) continue;
+            auto cols = split_nmcli_escaped(line);
+            if (cols.size() < 4 || (cols[1] != "wifi" && cols[1] != "ethernet")) continue;
+            if (!first_dev) js << ",";
+            first_dev = false;
+            js << "{\"device\":\"" << json_escape(cols[0]) << "\","
+               << "\"type\":\"" << json_escape(cols[1]) << "\","
+               << "\"state\":\"" << json_escape(cols[2]) << "\","
+               << "\"connection\":\"" << json_escape(cols[3]) << "\"}";
+        }
+        js << "],\"networks\":[";
+        bool first_net = true;
+        for (const auto &kv : by_ssid) {
+            const auto &n = kv.second;
+            if (!first_net) js << ",";
+            first_net = false;
+            js << "{\"active\":" << (n.active ? "true" : "false") << ","
+               << "\"ssid\":\"" << json_escape(n.ssid) << "\","
+               << "\"signal\":" << n.signal << ","
+               << "\"security\":\"" << json_escape(n.security) << "\"}";
+        }
+        js << "]});";
+
+        state->wifi_busy.store(false);
+        sys_internal::post_js_to_main(state, js.str());
+    }).detach();
+}
+
+void connect_wifi(AppState *state, const std::string &payload) {
+    if (!state || state->wifi_busy.exchange(true)) return;
+
+    std::string ssid;
+    std::string password;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "ssid") ssid = v;
+        else if (k == "password") password = v;
+    }
+
+    if (ssid.empty()) {
+        state->wifi_busy.store(false);
+        sys_internal::post_js_to_main(state, "window.__spinelWifiAction && window.__spinelWifiAction(false, \"Wi-Fi 名称不能为空。\");");
+        return;
+    }
+
+    std::thread([state, ssid, password]() {
+        std::vector<std::string> args = {"nmcli", "dev", "wifi", "connect", ssid};
+        if (!password.empty()) {
+            args.push_back("password");
+            args.push_back(password);
+        }
+        std::string out;
+        int rc = 0;
+        run_argv_capture(args, out, rc);
+        state->wifi_busy.store(false);
+
+        std::ostringstream js;
+        js << "window.__spinelWifiAction && window.__spinelWifiAction("
+           << (rc == 0 ? "true" : "false") << ",\""
+           << json_escape(out.empty() ? (rc == 0 ? "已连接" : "连接失败") : out) << "\");";
+        sys_internal::post_js_to_main(state, js.str());
+        push_wifi_state(state, false);
+    }).detach();
+}
+
+void disconnect_iface(AppState *state, const std::string &iface) {
+    if (!state || !is_valid_iface(iface) || state->wifi_busy.exchange(true)) return;
+    std::thread([state, iface]() {
+        std::string out;
+        int rc = 0;
+        run_argv_capture({"nmcli", "dev", "disconnect", iface}, out, rc);
+        state->wifi_busy.store(false);
+
+        std::ostringstream js;
+        js << "window.__spinelWifiAction && window.__spinelWifiAction("
+           << (rc == 0 ? "true" : "false") << ",\"" << json_escape(out) << "\");";
+        sys_internal::post_js_to_main(state, js.str());
+        push_wifi_state(state, false);
+    }).detach();
+}
+
+void push_bt_state(AppState *state, bool do_scan) {
+    if (!state || state->bt_busy.exchange(true)) return;
+
+    std::thread([state, do_scan]() {
+        if (do_scan) {
+            std::string scan_out;
+            int scan_rc = 0;
+            run_argv_capture({"bluetoothctl", "--timeout", "6", "scan", "on"}, scan_out, scan_rc);
+        }
+
+        std::string show_out;
+        int show_rc = 0;
+        run_argv_capture({"bluetoothctl", "show"}, show_out, show_rc);
+        bool powered = (show_out.find("Powered: yes") != std::string::npos);
+
+        std::string devs_out;
+        int devs_rc = 0;
+        run_argv_capture({"bluetoothctl", "devices"}, devs_out, devs_rc);
+
+        std::ostringstream js;
+        js << "window.__spinelBtState && window.__spinelBtState({\"powered\":"
+           << (powered ? "true" : "false") << ",\"devices\":[";
+
+        bool first = true;
+        for (const auto &line : split_lines(devs_out)) {
+            if (line.rfind("Device ", 0) != 0 || line.size() < 25) continue;
+            std::string mac = line.substr(7, 17);
+            if (!is_valid_mac(mac)) continue;
+            std::string name = trim_copy(line.substr(24));
+
+            std::string info_out;
+            int info_rc = 0;
+            run_argv_capture({"bluetoothctl", "info", mac}, info_out, info_rc);
+            bool paired = (info_out.find("Paired: yes") != std::string::npos);
+            bool connected = (info_out.find("Connected: yes") != std::string::npos);
+            std::string icon;
+            for (const auto &iline : split_lines(info_out)) {
+                auto pos = iline.find("Icon:");
+                if (pos != std::string::npos) {
+                    icon = trim_copy(iline.substr(pos + 5));
+                    break;
+                }
+            }
+
+            if (!first) js << ",";
+            first = false;
+            js << "{\"mac\":\"" << mac << "\","
+               << "\"name\":\"" << json_escape(name.empty() ? mac : name) << "\","
+               << "\"paired\":" << (paired ? "true" : "false") << ","
+               << "\"connected\":" << (connected ? "true" : "false") << ","
+               << "\"icon\":\"" << json_escape(icon) << "\"}";
+        }
+        js << "]});";
+
+        state->bt_busy.store(false);
+        sys_internal::post_js_to_main(state, js.str());
+    }).detach();
+}
+
+void set_bt_power(AppState *state, bool on) {
+    if (!state || state->bt_busy.exchange(true)) return;
+    std::thread([state, on]() {
+        std::string out;
+        int rc = 0;
+        run_argv_capture({"bluetoothctl", "power", on ? "on" : "off"}, out, rc);
+        state->bt_busy.store(false);
+        push_bt_state(state, false);
+    }).detach();
+}
+
+void bt_device_action(AppState *state, const std::string &action, const std::string &mac) {
+    if (!state || !is_valid_mac(mac) || state->bt_busy.exchange(true)) return;
+    std::thread([state, action, mac]() {
+        std::string out;
+        int rc = 0;
+        if (action == "connect") {
+            run_argv_capture({"bluetoothctl", "trust", mac}, out, rc);
+            run_argv_capture({"bluetoothctl", "pair", mac}, out, rc);
+            run_argv_capture({"bluetoothctl", "connect", mac}, out, rc);
+        } else if (action == "disconnect") {
+            run_argv_capture({"bluetoothctl", "disconnect", mac}, out, rc);
+        } else if (action == "remove") {
+            run_argv_capture({"bluetoothctl", "remove", mac}, out, rc);
+        }
+        state->bt_busy.store(false);
+
+        std::ostringstream js;
+        js << "window.__spinelBtAction && window.__spinelBtAction("
+           << (rc == 0 ? "true" : "false") << ",\"" << json_escape(out) << "\");";
+        sys_internal::post_js_to_main(state, js.str());
+        push_bt_state(state, false);
+    }).detach();
+}

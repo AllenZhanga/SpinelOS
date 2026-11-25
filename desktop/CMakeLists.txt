@@ -47,12 +47,20 @@ set_source_files_properties(src/window_tracker.cpp PROPERTIES
 
 add_executable(spinel-shell
     src/main.cpp
+    src/ipc_router.cpp
     src/common.cpp
     src/steam_library.cpp
-    src/system_control.cpp
+    src/sys/network.cpp
+    src/sys/display_input.cpp
+    src/sys/audio_power.cpp
+    src/sys/doctor_logs.cpp
     src/desktop_apps.cpp
     src/theme_manager.cpp
-    src/native_shell.cpp
+    src/shell/shell_core.cpp
+    src/shell/top_bar.cpp
+    src/shell/desktop_monitors.cpp
+    src/shell/dock.cpp
+    src/shell/overlays.cpp
     src/window_tracker.cpp
     "${TOPLEVEL_HDR}"
     "${TOPLEVEL_SRC}"
@@ -65,6 +73,7 @@ target_compile_definitions(spinel-shell PRIVATE
 )
 
 target_include_directories(spinel-shell PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
@@ -80,9 +89,13 @@ target_compile_options(spinel-shell PRIVATE
 
 add_executable(spinel-webui
     src/main.cpp
+    src/ipc_router.cpp
     src/common.cpp
     src/steam_library.cpp
-    src/system_control.cpp
+    src/sys/network.cpp
+    src/sys/display_input.cpp
+    src/sys/audio_power.cpp
+    src/sys/doctor_logs.cpp
     src/installer.cpp
     src/desktop_apps.cpp
     src/app_store.cpp
@@ -91,6 +104,10 @@ add_executable(spinel-webui
 
 target_compile_definitions(spinel-webui PRIVATE
     SPINEL_HAS_WEBKIT=1
+)
+
+target_include_directories(spinel-webui PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
 target_link_libraries(spinel-webui PRIVATE
@@ -120,11 +137,15 @@ enable_testing()
 
 add_executable(spinel-tests
     tests/spinel_tests.cpp
+    src/ipc_router.cpp
     src/common.cpp
     src/theme_manager.cpp
     src/desktop_apps.cpp
     src/steam_library.cpp
-    src/system_control.cpp
+    src/sys/network.cpp
+    src/sys/display_input.cpp
+    src/sys/audio_power.cpp
+    src/sys/doctor_logs.cpp
 )
 
 target_compile_definitions(spinel-tests PRIVATE

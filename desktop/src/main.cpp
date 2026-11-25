@@ -1,6 +1,7 @@
 #include "app_state.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "ipc_router.hpp"
 #include "native_shell.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
@@ -465,136 +466,28 @@ void native_shell_show_osd(AppState *, const std::string &, int, bool) {}
 void handle_shell_command(AppState *state, const std::string &cmd) {
     if (!state) return;
 
-    if (cmd == "launch:steam") {
-        native_shell_set_cc_visible(state, false);
-        ensure_steam_play_preconfig();
-        launch_steam_client(state);
-    } else if (cmd == "launch:steam-gamepadui") {
-        native_shell_set_cc_visible(state, false);
-        ensure_steam_play_preconfig();
-        launch_steam_gamepadui(state, load_perf_config());
-    } else if (cmd.rfind("steam:launch:", 0) == 0) {
-        native_shell_set_cc_visible(state, false);
-        ensure_steam_play_preconfig();
-        launch_steam_game(cmd.substr(13), load_perf_config());
-    } else if (cmd == "steam:scan") {
-        push_steam_library(state);
-        push_storage_caches(state);
-    } else if (cmd.rfind("steam:compat:", 0) == 0) {
-        open_steam_compatdata(state, cmd.substr(13));
-    } else if (cmd.rfind("steam:override-set\n", 0) == 0) {
-        handle_game_override_command(state, cmd, false);
-    } else if (cmd.rfind("steam:override-clear:", 0) == 0) {
-        handle_game_override_command(state, cmd.substr(21), true);
-    } else if (cmd == "steam:scan-caches") {
-        push_storage_caches(state);
-    } else if (cmd.rfind("steam:clean-caches\n", 0) == 0) {
-        clean_storage_caches(state, cmd);
-    } else if (cmd == "welcome:open") {
-        native_shell_set_cc_visible(state, false);
-        open_welcome_window(state);
-    } else if (cmd == "welcome:complete") {
-        mark_welcome_completed();
+    IpcHostActions actions;
+    actions.open_games = open_games_window;
+    actions.open_store = open_store_window;
+    actions.open_installer = open_installer_window;
+    actions.open_settings = open_settings_window;
+    actions.open_welcome = open_welcome_window;
+    actions.push_all_telemetry = push_all_telemetry;
+    actions.confirm_power = confirm_power_action;
+
 #if SPINEL_HAS_WEBKIT
-        if (state->welcome_win) {
-            gtk_window_close(state->welcome_win);
-        }
-#endif
-    } else if (cmd == "launch:terminal") {
-        native_shell_set_cc_visible(state, false);
-        std::string term_bin = has_executable("spinel-terminal")
-            ? "spinel-terminal"
-            : (has_executable("ptyxis") ? "ptyxis" : "foot");
-        spawn_argv_logged({term_bin}, "Terminal");
-    } else if (cmd == "launch:files") {
-        native_shell_set_cc_visible(state, false);
-        spawn_argv_logged({"thunar"}, "Files");
-    } else if (cmd == "desktop:open-folder") {
-        std::error_code ec;
-        fs::path desk = fs::path(home_dir()) / "Desktop";
-        fs::create_directories(desk, ec);
-        spawn_argv_detached({"thunar", desk.string()});
-    } else if (cmd == "desktop:new-folder") {
-        std::error_code ec;
-        fs::path desk = fs::path(home_dir()) / "Desktop";
-        fs::create_directories(desk, ec);
-        fs::path target = desk / "新建文件夹";
-        int idx = 2;
-        while (fs::exists(target, ec) && idx < 100) {
-            target = desk / ("新建文件夹 " + std::to_string(idx++));
-        }
-        fs::create_directory(target, ec);
-        spawn_argv_detached({"thunar", desk.string()});
-    } else if (cmd == "launch:browser") {
-        native_shell_set_cc_visible(state, false);
-        std::string tmp_out;
-        int rc = 1;
-        if (run_argv_capture({"which", "google-chrome-stable"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"google-chrome-stable", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
-        } else if (run_argv_capture({"which", "chromium"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"chromium", "--ozone-platform=wayland", "--enable-wayland-ime", "--wayland-text-input-version=3"});
-        } else if (run_argv_capture({"which", "firefox"}, tmp_out, rc) && rc == 0) {
-            spawn_argv_detached({"firefox"});
-        } else {
-            open_store_window(state);
-        }
-    } else if (cmd.rfind("app:launch:", 0) == 0) {
-        native_shell_set_cc_visible(state, false);
-        launch_desktop_app_id(cmd.substr(11));
-    } else if (cmd == "games:open") {
-        native_shell_set_cc_visible(state, false);
-        open_games_window(state);
-    } else if (cmd == "store:open") {
-        native_shell_set_cc_visible(state, false);
-        open_store_window(state);
-    } else if (cmd.rfind("store:open:", 0) == 0) {
-        native_shell_set_cc_visible(state, false);
-        open_store_window(state, cmd.substr(11));
-#if SPINEL_HAS_WEBKIT
-    } else if (cmd == "store:refresh") {
-        push_desktop_apps(state);
-        push_store_catalog(state);
-    } else if (cmd.rfind("store:install\n", 0) == 0) {
-        start_store_action(state, "install", cmd);
-    } else if (cmd.rfind("store:remove\n", 0) == 0) {
-        start_store_action(state, "remove", cmd);
-    } else if (cmd.rfind("store:sys-update\n", 0) == 0) {
-        start_store_action(state, "sys-update", cmd);
-    } else if (cmd.rfind("store:mirror-test\n", 0) == 0) {
-        start_store_action(state, "mirror-test", cmd);
-    } else if (cmd.rfind("store:keyring-fix\n", 0) == 0) {
-        start_store_action(state, "keyring-fix", cmd);
-    } else if (cmd.rfind("store:launch:", 0) == 0) {
-        native_shell_set_cc_visible(state, false);
-        launch_store_app(state, cmd.substr(13));
-#endif
-    } else if (cmd == "installer:open") {
-        native_shell_set_cc_visible(state, false);
-        open_installer_window(state);
-    } else if (cmd.rfind("settings:open:", 0) == 0) {
-        std::string tab = cmd.substr(14);
-        if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "audio" || tab == "shortcuts" ||
-            tab == "perf" || tab == "appearance" || tab == "perms" || tab == "procs" || tab == "logs") {
-            native_shell_set_cc_visible(state, false);
-            open_settings_window(state, tab);
-        }
-    } else if (cmd == "logs:native") {
-        native_shell_set_cc_visible(state, false);
-        open_native_log_window(state);
-    } else if (cmd == "cc:toggle") {
-        native_shell_toggle_cc(state);
-    } else if (cmd == "cc:close") {
-        native_shell_set_cc_visible(state, false);
-    } else if (cmd == "launcher:toggle" || cmd == "launcher:open") {
-        native_shell_set_cc_visible(state, false);
-        native_shell_toggle_launcher(state);
-    } else if (cmd == "wallpaper:clear-image") {
-        set_custom_wallpaper_image(state, "");
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
-#endif
-#if SPINEL_HAS_WEBKIT
-    } else if (cmd == "wallpaper:pick-image") {
+    actions.close_welcome = +[](AppState *s) {
+        if (s && s->welcome_win) gtk_window_close(s->welcome_win);
+    };
+    actions.store_refresh = +[](AppState *s) {
+        push_desktop_apps(s);
+        push_store_catalog(s);
+    };
+    actions.store_action = start_store_action;
+    actions.store_launch = launch_store_app;
+    actions.installer_scan = push_installer_env;
+    actions.installer_start = start_disk_install;
+    actions.pick_wallpaper = +[](AppState *s) {
         GtkFileDialog *dlg = gtk_file_dialog_new();
         gtk_file_dialog_set_title(dlg, "选择自定义桌面壁纸图片");
         GtkFileFilter *flt = gtk_file_filter_new();
@@ -616,7 +509,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         gtk_file_dialog_set_initial_folder(dlg, init_folder);
         g_object_unref(init_folder);
 
-        gtk_file_dialog_open(dlg, state->settings_win, nullptr,
+        gtk_file_dialog_open(dlg, s->settings_win, nullptr,
             +[](GObject *src, GAsyncResult *res, gpointer data) {
                 auto *st = static_cast<AppState *>(data);
                 GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, nullptr);
@@ -628,232 +521,19 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
                     g_free(path);
                     g_object_unref(file);
                 }
-            }, state);
+            }, s);
         g_object_unref(dlg);
+    };
+#else
+    actions.notify_webui_sync = +[](const char *action) {
+        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", action);
+    };
+    actions.push_windows = push_windows_to_ui;
+    actions.window_toggle = toggle_or_activate_window;
+    actions.window_close = close_tracked_window;
 #endif
-    } else if (cmd.rfind("system:audio-set:", 0) == 0) {
-        int pct = std::clamp(std::atoi(cmd.substr(17).c_str()), 0, 100);
-        spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", std::to_string(pct) + "%"});
-    } else if (cmd == "system:audio-mute-toggle") {
-        trigger_media_osd(state, "mute");
-    } else if (cmd == "dnd:toggle") {
-        toggle_dnd_mode(state);
-    } else if (cmd.rfind("system:brightness-set:", 0) == 0) {
-        int pct = std::clamp(std::atoi(cmd.substr(22).c_str()), 5, 100);
-        set_system_brightness_pct(pct);
-    } else if (cmd == "system:idle-lock:on" || cmd == "system:idle-lock:off") {
-        set_idle_lock_enabled(state, cmd == "system:idle-lock:on");
-    } else if (cmd == "system:lock") {
-        native_shell_set_cc_visible(state, false);
-        spawn_argv_detached({has_executable("spinel-lock") ? "spinel-lock" : "swaylock"});
-    } else if (cmd == "system:suspend") {
-        native_shell_set_cc_visible(state, false);
-        spawn_argv_detached({"sh", "-c", "(spinel-lock || true); systemctl suspend"});
-    } else if (cmd.rfind("system:screenshot:", 0) == 0) {
-        std::string smode = cmd.substr(18) == "full" ? "full" : "area";
-        native_shell_set_cc_visible(state, false);
-        auto *shot_arg = new std::string(smode);
-        g_timeout_add(180, [](gpointer d) -> gboolean {
-            std::unique_ptr<std::string> m(static_cast<std::string *>(d));
-            if (has_executable("spinel-screenshot")) {
-                spawn_argv_detached({"spinel-screenshot", *m});
-            } else if (has_executable("grim")) {
-                spawn_argv_detached({"grim"});
-            }
-            return G_SOURCE_REMOVE;
-        }, shot_arg);
-    } else if (cmd.rfind("system:power-profile:", 0) == 0) {
-        set_power_profile(state, cmd.substr(21));
-    } else if (cmd == "settings:audio-get") {
-        push_audio_power_state(state);
-    } else if (cmd.rfind("settings:audio-sink:", 0) == 0) {
-        set_audio_default_node(state, std::atoi(cmd.substr(20).c_str()), true);
-    } else if (cmd.rfind("settings:audio-source:", 0) == 0) {
-        set_audio_default_node(state, std::atoi(cmd.substr(22).c_str()), false);
-    } else if (cmd.rfind("settings:mic-vol:", 0) == 0) {
-        set_mic_volume(state, std::atoi(cmd.substr(17).c_str()));
-    } else if (cmd == "settings:mic-mute") {
-        toggle_mic_mute(state);
-    } else if (cmd == "settings:shortcuts-get") {
-        push_shortcuts_config(state);
-    } else if (cmd.rfind("settings:shortcuts-set\n", 0) == 0) {
-        update_shortcuts_config(state, cmd);
-    } else if (cmd == "settings:shortcuts-reset") {
-        reset_shortcuts_config(state);
-#if !SPINEL_HAS_WEBKIT
-    } else if (cmd.rfind("window:toggle:", 0) == 0) {
-        uint64_t wid = std::strtoull(cmd.substr(14).c_str(), nullptr, 10);
-        if (wid > 0) toggle_or_activate_window(wid);
-    } else if (cmd.rfind("window:close:", 0) == 0) {
-        uint64_t wid = std::strtoull(cmd.substr(13).c_str(), nullptr, 10);
-        if (wid > 0) close_tracked_window(wid);
-#endif
-    } else if (cmd.rfind("wallpaper:set:", 0) == 0) {
-        std::string wp = cmd.substr(14);
-        if (wp == "crystal-blue") wp = "crystal-aurora";
-        else if (wp == "obsidian-purple") wp = "obsidian-neon";
-        else if (wp == "emerald-aurora") wp = "emerald-nordic";
-        set_active_theme(state, wp);
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
-#endif
-    } else if (cmd.rfind("theme:set:", 0) == 0) {
-        set_active_theme(state, cmd.substr(10));
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-theme");
-#endif
-    } else if (cmd == "theme:refresh") {
-        push_theme_state(state);
-        native_shell_sync_theme(state);
-    } else if (cmd == "theme:export") {
-        export_custom_theme_template();
-    } else if (cmd == "system:audio-down") {
-        spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"});
-    } else if (cmd == "system:audio-up") {
-        spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"});
-    } else if (cmd == "power:reboot") {
-        confirm_power_action(state, false);
-    } else if (cmd == "power:shutdown") {
-        confirm_power_action(state, true);
-    } else if (cmd == "telemetry:refresh") {
-        push_all_telemetry(state);
-        push_theme_state(state);
-        push_perf_config(state);
-        push_steam_library(state);
-        push_desktop_apps(state);
-        push_wallpaper_pref(state);
-        push_storage_caches(state);
-        push_welcome_status(state);
-#if !SPINEL_HAS_WEBKIT
-        push_windows_to_ui(state);
-#endif
-    } else if (cmd == "perf:get") {
-        push_perf_config(state);
-    } else if (cmd == "perf:toggle-gamemode") {
-        PerfConfig cfg = load_perf_config();
-        update_perf_config(state, std::string("gamemode=") + (cfg.gamemode ? "false" : "true"));
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
-#endif
-    } else if (cmd == "perf:toggle-fsr") {
-        PerfConfig cfg = load_perf_config();
-        update_perf_config(state, std::string("fsr=") + (cfg.fsr ? "false" : "true"));
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
-#endif
-    } else if (cmd == "perf:cycle-mangohud") {
-        PerfConfig cfg = load_perf_config();
-        std::string next = cfg.mangohud == "off" ? "compact" : (cfg.mangohud == "compact" ? "full" : "off");
-        update_perf_config(state, "mangohud=" + next);
-#if !SPINEL_HAS_WEBKIT
-        notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", "sync-perf");
-#endif
-    } else if (cmd.rfind("perf:set\n", 0) == 0) {
-        update_perf_config(state, cmd);
-    } else if (cmd == "perf:apply-steam") {
-        PerfConfig cfg = load_perf_config();
-        SteamPerfApplyResult sr = apply_perf_to_steam_configs(cfg);
-        std::string msg;
-        bool ok = true;
-        if (sr.steam_running) {
-            ok = false;
-            msg = "检测到 Steam 正在运行中（退出时 Steam 会覆盖本地配置）。请先完全退出 Steam 后再点击「写入全部 Steam 游戏」。";
-        } else if (sr.games_updated > 0) {
-            msg = "已成功将当前性能参数直接写入 " + std::to_string(sr.games_updated) + " 款已安装 Steam 游戏的启动配置！";
-        } else {
-            msg = "当前尚未检测到本地已安装的 Steam 游戏；系统全局预设与 MangoHud.conf 已准备就绪。";
-        }
-        eval_js(state->settings_view,
-                "window.__spinelPerfFeedback && window.__spinelPerfFeedback(" +
-                    std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
-    } else if (cmd == "settings:wifi-list") {
-        push_wifi_state(state, false);
-        push_proxy_config(state);
-    } else if (cmd == "settings:proxy-get") {
-        push_proxy_config(state);
-    } else if (cmd.rfind("settings:proxy-save\n", 0) == 0) {
-        update_proxy_config(state, cmd);
-    } else if (cmd == "settings:proxy-clear") {
-        update_proxy_config(state, "enabled=false");
-    } else if (cmd == "settings:wifi-scan") {
-        push_wifi_state(state, true);
-    } else if (cmd.rfind("settings:wifi-connect\n", 0) == 0) {
-        connect_wifi(state, cmd);
-    } else if (cmd.rfind("settings:wifi-disconnect:", 0) == 0) {
-        disconnect_iface(state, cmd.substr(25));
-    } else if (cmd == "settings:bt-status") {
-        push_bt_state(state, false);
-    } else if (cmd == "settings:bt-scan") {
-        push_bt_state(state, true);
-    } else if (cmd == "settings:bt-power:on") {
-        set_bt_power(state, true);
-    } else if (cmd == "settings:bt-power:off") {
-        set_bt_power(state, false);
-    } else if (cmd.rfind("settings:bt-connect:", 0) == 0) {
-        bt_device_action(state, "connect", cmd.substr(20));
-    } else if (cmd.rfind("settings:bt-disconnect:", 0) == 0) {
-        bt_device_action(state, "disconnect", cmd.substr(23));
-    } else if (cmd.rfind("settings:bt-remove:", 0) == 0) {
-        bt_device_action(state, "remove", cmd.substr(19));
-    } else if (cmd == "settings:display-scan") {
-        push_display_state(state);
-    } else if (cmd.rfind("settings:display-apply\n", 0) == 0) {
-        apply_display_mode(state, cmd);
-    } else if (cmd.rfind("settings:logs:", 0) == 0) {
-        push_system_logs(state, cmd.substr(14));
-    } else if (cmd.rfind("settings:logs-clear:", 0) == 0) {
-        clear_system_logs(state, cmd.substr(20));
-    } else if (cmd == "settings:doctor-scan") {
-        push_doctor_report(state);
-    } else if (cmd == "settings:doctor-export") {
-        export_diagnostic_report(state);
-#if SPINEL_HAS_WEBKIT
-    } else if (cmd == "installer:scan-disks") {
-        push_installer_env(state);
-#endif
-    } else if (cmd == "ime:status") {
-        push_ime_state(state);
-    } else if (cmd == "ime:mode:pinyin") {
-        set_ime_engine(state, "pinyin");
-    } else if (cmd == "ime:mode:rime") {
-        set_ime_engine(state, "rime");
-    } else if (cmd == "ime:install-rime-ice") {
-        install_rime_ice_dict(state);
-    } else if (cmd == "ime:restart") {
-        restart_fcitx5_daemon(state);
-    } else if (cmd == "ime:config") {
-        spawn_argv_logged({"fcitx5-configtool"}, "IME-Config");
-    } else if (cmd == "settings:perms-get") {
-        push_perms_state(state);
-    } else if (cmd == "settings:perms-polkit") {
-        restart_polkit_agent(state);
-    } else if (cmd == "settings:perms-portal") {
-        reload_desktop_portals(state);
-    } else if (cmd.rfind("perms:set\n", 0) == 0) {
-        apply_flatpak_perm(state, cmd);
-    } else if (cmd.rfind("perms:reset:", 0) == 0) {
-        reset_flatpak_app_perms(state, cmd.substr(12));
-    } else if (cmd.rfind("perms:portal-reset\n", 0) == 0) {
-        reset_portal_perm(state, cmd);
-    } else if (cmd == "settings:procs-get") {
-        push_process_list(state);
-    } else if (cmd.rfind("procs:kill:", 0) == 0) {
-        kill_process_by_pid(state, std::atoi(cmd.substr(11).c_str()), false);
-    } else if (cmd.rfind("procs:force:", 0) == 0) {
-        kill_process_by_pid(state, std::atoi(cmd.substr(12).c_str()), true);
-    } else if (cmd.rfind("clip:copy:", 0) == 0) {
-        size_t idx = static_cast<size_t>(std::strtoul(cmd.substr(10).c_str(), nullptr, 10));
-        auto items = load_clipboard_history();
-        if (idx < items.size()) {
-            copy_text_to_clipboard(items[idx].text);
-        }
-    } else if (cmd == "clip:clear") {
-        clear_clipboard_history();
-#if SPINEL_HAS_WEBKIT
-    } else if (cmd.rfind("installer:start\n", 0) == 0) {
-        start_disk_install(state, cmd);
-#endif
-    }
+
+    dispatch_ipc_command(state, cmd, actions);
 }
 
 int main(int argc, char **argv) {
