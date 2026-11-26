@@ -281,8 +281,12 @@ fi
 
 pkill -x spinel-webui 2>/dev/null || true
 pkill -x spinel-shell 2>/dev/null || true
+pkill -f 'spinel-sandbox hostd' 2>/dev/null || true
 sleep 0.3
 launch_bg sh -c 'exec /usr/local/bin/spinel-shell >/tmp/spinel-shell.log 2>&1'
+if grep -qx 'allow_remote=true' "$HOME/.config/spinelos/relay.conf" 2>/dev/null; then
+  launch_bg sh -c 'exec /usr/local/bin/spinel-sandbox hostd >/tmp/spinel-sandbox-hostd.log 2>&1'
+fi
 
 if command -v mako >/dev/null 2>&1; then
   pkill -x mako 2>/dev/null || true

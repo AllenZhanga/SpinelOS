@@ -2,6 +2,7 @@
 #include "relay_client.hpp"
 #include "sandbox_manager.hpp"
 
+#include <csignal>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -103,6 +104,7 @@ int handle_relay_cli(int argc, char **argv) {
 }  // namespace
 
 int main(int argc, char **argv) {
+    std::signal(SIGPIPE, SIG_IGN);
     ensure_display_env();
     if (argc < 2) {
         print_usage();

@@ -433,15 +433,19 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
 int run_sandbox_host_daemon() {
     g_stop_hostd.store(false);
     signal(SIGCHLD, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, +[](int) { g_stop_hostd.store(true); });
     signal(SIGINT, +[](int) { g_stop_hostd.store(true); });
 
-    write_text_file(relay_hostd_pid_file(), std::to_string(::getpid()) + "\n");
+    const std::string my_pid = std::to_string(::getpid());
+    write_text_file(relay_hostd_pid_file(), my_pid + "\n");
     run_relay_host_signaling(g_stop_hostd, [](std::unique_ptr<E2eeTunnel> tun) {
         serve_remote_session(std::move(tun));
     });
 
     std::error_code ec;
-    fs::remove(relay_hostd_pid_file(), ec);
+    if (trim_copy(read_first_line(relay_hostd_pid_file())) == my_pid) {
+        fs::remove(relay_hostd_pid_file(), ec);
+    }
     return 0;
 }

@@ -128,7 +128,7 @@ struct MenuBarView: View {
                 }
                 Spacer()
                 Button {
-                    model.refreshDevices()
+                    model.refreshDevices(showNoticeOnSuccess: true)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }

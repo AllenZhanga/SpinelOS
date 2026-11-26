@@ -146,7 +146,7 @@ final class RelayAppModel: ObservableObject {
         }
     }
 
-    func refreshDevices() {
+    func refreshDevices(showNoticeOnSuccess: Bool = false) {
         guard config.isLoggedIn else { return }
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
@@ -155,6 +155,11 @@ final class RelayAppModel: ObservableObject {
                 Task { @MainActor in
                     self.busy = false
                     self.devices = list
+                    if showNoticeOnSuccess {
+                        let fmt = DateFormatter()
+                        fmt.dateFormat = "HH:mm:ss"
+                        self.showNotice("已刷新（\(fmt.string(from: Date()))）")
+                    }
                 }
             } catch {
                 Task { @MainActor in
