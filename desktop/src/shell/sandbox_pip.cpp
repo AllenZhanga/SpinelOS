@@ -1,6 +1,7 @@
 #include "sandbox_pip.hpp"
 
 #include "../common.hpp"
+#include "../desktop_apps.hpp"
 #include "../sandbox_manager.hpp"
 
 extern "C" {
@@ -22,6 +23,26 @@ extern "C" {
 #include <thread>
 #include <vector>
 
+namespace {
+
+enum class PipGlyph {
+    Shield,
+    Plus,
+    Refresh,
+    Expand,
+    Shrink,
+    Minimize,
+    Stop,
+};
+
+struct PipGlyphCtx {
+    NativeShellState *ns = nullptr;
+    PipGlyph kind = PipGlyph::Shield;
+    bool danger = false;
+};
+
+}  // namespace
+
 struct SandboxPipState {
     NativeShellState *ns = nullptr;
 
@@ -32,9 +53,13 @@ struct SandboxPipState {
     GtkWidget *title_lbl = nullptr;
     GtkWidget *net_lbl = nullptr;
     GtkWidget *btn_launch = nullptr;
+    GtkWidget *launch_popover = nullptr;
+    GtkWidget *launch_popover_box = nullptr;
     GtkWidget *btn_reset = nullptr;
-    GtkWidget *btn_min = nullptr;
     GtkWidget *btn_expand = nullptr;
+    GtkWidget *expand_icon_da = nullptr;
+    GtkWidget *expand_lbl = nullptr;
+    GtkWidget *btn_min = nullptr;
     GtkWidget *btn_stop = nullptr;
     GtkWidget *video_da = nullptr;
 
@@ -42,10 +67,16 @@ struct SandboxPipState {
     bool minimized = false;
     bool takeover = false;
     bool last_running = false;
-    int margin_right = 18;
-    int margin_bottom = 86;
-    int drag_start_right = 18;
-    int drag_start_bottom = 86;
+
+    bool pos_initialized = false;
+    int compact_x = 0;
+    int compact_y = 0;
+    int takeover_x = 0;
+    int takeover_y = 0;
+    int drag_base_x = 0;
+    int drag_base_y = 0;
+    bool header_dragging = false;
+    bool canvas_dragging = false;
 
     guint poll_timer_id = 0;
     guint capture_timer_id = 0;
@@ -92,6 +123,180 @@ namespace {
 
 uint32_t now_msec() {
     return static_cast<uint32_t>(g_get_monotonic_time() / 1000);
+}
+
+void get_monitor_size(int &out_w, int &out_h) {
+    out_w = 1920;
+    out_h = 1080;
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return;
+    GListModel *mons = gdk_display_get_monitors(display);
+    if (!mons || g_list_model_get_n_items(mons) == 0) return;
+    GdkMonitor *mon = GDK_MONITOR(g_list_model_get_item(mons, 0));
+    if (!mon) return;
+    GdkRectangle geom{};
+    gdk_monitor_get_geometry(mon, &geom);
+    g_object_unref(mon);
+    if (geom.width > 0 && geom.height > 0) {
+        out_w = geom.width;
+        out_h = geom.height;
+    }
+}
+
+void ensure_pip_positions(SandboxPipState *pip) {
+    if (!pip || pip->pos_initialized) return;
+    int mw = 1920;
+    int mh = 1080;
+    get_monitor_size(mw, mh);
+    pip->compact_x = std::max(12, mw - 460);
+    pip->compact_y = std::max(36, mh - 365);
+    pip->takeover_x = std::max(12, (mw - 1096) / 2);
+    pip->takeover_y = std::max(32, (mh - 695) / 2);
+    pip->pos_initialized = true;
+}
+
+void apply_pip_layer_position(SandboxPipState *pip) {
+    if (!pip || !pip->win) return;
+    ensure_pip_positions(pip);
+    int mw = 1920;
+    int mh = 1080;
+    get_monitor_size(mw, mh);
+
+    int est_w = pip->takeover ? 1096 : 444;
+    int est_h = pip->takeover ? 688 : 284;
+    int &px = pip->takeover ? pip->takeover_x : pip->compact_x;
+    int &py = pip->takeover ? pip->takeover_y : pip->compact_y;
+    px = std::clamp(px, -16, std::max(-16, mw - est_w + 16));
+    py = std::clamp(py, 26, std::max(26, mh - est_h + 16));
+
+    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_BOTTOM, FALSE);
+    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_RIGHT, FALSE);
+    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_margin(pip->win, GTK_LAYER_SHELL_EDGE_LEFT, px);
+    gtk_layer_set_margin(pip->win, GTK_LAYER_SHELL_EDGE_TOP, py);
+}
+
+void draw_pip_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer data) {
+    auto *ctx = static_cast<PipGlyphCtx *>(data);
+    if (!ctx || !ctx->ns || w <= 0 || h <= 0) return;
+
+    double r = 0.94, g = 0.96, b = 0.99, a = 0.92;
+    if (ctx->ns->theme.is_light) {
+        r = 0.08;
+        g = 0.12;
+        b = 0.20;
+    }
+    if (ctx->danger) {
+        r = 0.94;
+        g = 0.32;
+        b = 0.36;
+    }
+
+    cairo_save(cr);
+    cairo_set_source_rgba(cr, r, g, b, a);
+    cairo_set_line_width(cr, 1.5);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    double cx = w * 0.5;
+    double cy = h * 0.5;
+    double u = std::min(w, h) * 0.34;
+
+    switch (ctx->kind) {
+    case PipGlyph::Shield:
+        cairo_move_to(cr, cx, cy - u * 1.15);
+        cairo_line_to(cr, cx + u, cy - u * 0.65);
+        cairo_line_to(cr, cx + u * 0.85, cy + u * 0.35);
+        cairo_line_to(cr, cx, cy + u * 1.15);
+        cairo_line_to(cr, cx - u * 0.85, cy + u * 0.35);
+        cairo_line_to(cr, cx - u, cy - u * 0.65);
+        cairo_close_path(cr);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Plus:
+        cairo_move_to(cr, cx - u, cy);
+        cairo_line_to(cr, cx + u, cy);
+        cairo_move_to(cr, cx, cy - u);
+        cairo_line_to(cr, cx, cy + u);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Refresh:
+        cairo_arc(cr, cx, cy, u * 0.92, -0.35, 1.38 * M_PI);
+        cairo_stroke(cr);
+        cairo_move_to(cr, cx + u * 0.55, cy - u * 0.95);
+        cairo_line_to(cr, cx + u * 0.95, cy - u * 0.35);
+        cairo_line_to(cr, cx + u * 0.32, cy - u * 0.25);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Expand:
+        cairo_move_to(cr, cx + u * 0.15, cy - u);
+        cairo_line_to(cr, cx + u, cy - u);
+        cairo_line_to(cr, cx + u, cy - u * 0.15);
+        cairo_move_to(cr, cx + u, cy - u);
+        cairo_line_to(cr, cx + u * 0.2, cy - u * 0.2);
+        cairo_move_to(cr, cx - u * 0.15, cy + u);
+        cairo_line_to(cr, cx - u, cy + u);
+        cairo_line_to(cr, cx - u, cy + u * 0.15);
+        cairo_move_to(cr, cx - u, cy + u);
+        cairo_line_to(cr, cx - u * 0.2, cy + u * 0.2);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Shrink:
+        cairo_move_to(cr, cx + u * 0.22, cy - u * 0.22);
+        cairo_line_to(cr, cx + u * 0.22, cy - u * 0.92);
+        cairo_move_to(cr, cx + u * 0.22, cy - u * 0.22);
+        cairo_line_to(cr, cx + u * 0.92, cy - u * 0.22);
+        cairo_move_to(cr, cx + u, cy - u);
+        cairo_line_to(cr, cx + u * 0.22, cy - u * 0.22);
+        cairo_move_to(cr, cx - u * 0.22, cy + u * 0.22);
+        cairo_line_to(cr, cx - u * 0.22, cy + u * 0.92);
+        cairo_move_to(cr, cx - u * 0.22, cy + u * 0.22);
+        cairo_line_to(cr, cx - u * 0.92, cy + u * 0.22);
+        cairo_move_to(cr, cx - u, cy + u);
+        cairo_line_to(cr, cx - u * 0.22, cy + u * 0.22);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Minimize:
+        cairo_move_to(cr, cx - u, cy + u * 0.45);
+        cairo_line_to(cr, cx + u, cy + u * 0.45);
+        cairo_stroke(cr);
+        break;
+    case PipGlyph::Stop:
+        shell_internal::cairo_rounded_rect(cr, cx - u * 0.78, cy - u * 0.78, u * 1.56, u * 1.56, 2.0);
+        cairo_fill(cr);
+        break;
+    }
+    cairo_restore(cr);
+}
+
+void free_glyph_ctx(gpointer d) {
+    delete static_cast<PipGlyphCtx *>(d);
+}
+
+GtkWidget *make_pip_glyph_da(NativeShellState *ns, PipGlyph kind, bool danger = false, int sz = 13) {
+    GtkWidget *da = gtk_drawing_area_new();
+    gtk_widget_set_size_request(da, sz, sz);
+    auto *ctx = new PipGlyphCtx{ns, kind, danger};
+    g_object_set_data_full(G_OBJECT(da), "pip-glyph-ctx", ctx, free_glyph_ctx);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_pip_glyph_cb, ctx, nullptr);
+    return da;
+}
+
+GtkWidget *make_pip_btn_content(NativeShellState *ns,
+                                PipGlyph kind,
+                                const char *text,
+                                bool danger,
+                                GtkWidget **out_da = nullptr,
+                                GtkWidget **out_lbl = nullptr) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *da = make_pip_glyph_da(ns, kind, danger, 13);
+    GtkWidget *lbl = gtk_label_new(text);
+    gtk_box_append(GTK_BOX(row), da);
+    gtk_box_append(GTK_BOX(row), lbl);
+    if (out_da) *out_da = da;
+    if (out_lbl) *out_lbl = lbl;
+    return row;
 }
 
 void release_shm_buffer(SandboxPipState *pip) {
@@ -292,9 +497,9 @@ const struct zwlr_screencopy_frame_v1_listener kFrameListener = {
     on_frame_flags,
     on_frame_ready,
     on_frame_failed,
-    nullptr,  // damage (since 2, unused at v1)
-    nullptr,  // linux_dmabuf (since 3, unused at v1)
-    nullptr,  // buffer_done (since 3, unused at v1)
+    nullptr,
+    nullptr,
+    nullptr,
 };
 
 void on_reg_global(void *data,
@@ -465,32 +670,92 @@ void refresh_capture_timer(SandboxPipState *pip) {
     trigger_screencopy_frame(pip);
 }
 
+void rebuild_launch_popover_items(SandboxPipState *pip) {
+    if (!pip || !pip->launch_popover || !pip->launch_popover_box) return;
+    while (GtkWidget *c = gtk_widget_get_first_child(pip->launch_popover_box)) {
+        gtk_box_remove(GTK_BOX(pip->launch_popover_box), c);
+    }
+
+    SandboxConfig cfg = load_sandbox_config();
+    if (cfg.apps.empty()) {
+        GtkWidget *empty = gtk_label_new("未配置应用，请点击下方设置");
+        gtk_widget_set_margin_top(empty, 4);
+        gtk_widget_set_margin_bottom(empty, 4);
+        gtk_box_append(GTK_BOX(pip->launch_popover_box), empty);
+    } else {
+        for (const auto &app : cfg.apps) {
+            std::string title = app.name.empty() ? app.cmd : app.name;
+            if (app.auto_start) title += " · 自启";
+            GtkWidget *b = gtk_button_new_with_label(title.c_str());
+            gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+            gtk_widget_add_css_class(b, "spinel-ctx-item");
+            g_object_set_data_full(G_OBJECT(b), "sb-cmd", g_strdup(app.cmd.c_str()), g_free);
+            g_object_set_data(G_OBJECT(b), "sb-pop", pip->launch_popover);
+            g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer) {
+                const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "sb-cmd"));
+                GtkWidget *p = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "sb-pop"));
+                if (p) gtk_popover_popdown(GTK_POPOVER(p));
+                if (cmd && *cmd) {
+                    std::string c = cmd;
+                    std::thread([c]() {
+                        std::string err;
+                        launch_cmd_in_sandbox(c, err);
+                    }).detach();
+                }
+            }), nullptr);
+            gtk_box_append(GTK_BOX(pip->launch_popover_box), b);
+        }
+    }
+
+    gtk_box_append(GTK_BOX(pip->launch_popover_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    GtkWidget *cfg_b = gtk_button_new_with_label("应用与自启 / 白名单设置…");
+    gtk_button_set_has_frame(GTK_BUTTON(cfg_b), FALSE);
+    gtk_widget_add_css_class(cfg_b, "spinel-ctx-item");
+    g_object_set_data(G_OBJECT(cfg_b), "sb-pop", pip->launch_popover);
+    g_signal_connect(cfg_b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer d) {
+        auto *p = static_cast<SandboxPipState *>(d);
+        GtkWidget *pop_w = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "sb-pop"));
+        if (pop_w) gtk_popover_popdown(GTK_POPOVER(pop_w));
+        if (p && p->ns && p->ns->app_state) {
+            p->takeover = false;
+            shell_internal::trigger_cmd(p->ns->app_state, "settings:open:perms");
+        }
+    }), pip);
+    gtk_box_append(GTK_BOX(pip->launch_popover_box), cfg_b);
+}
+
 void apply_pip_window_geometry(SandboxPipState *pip) {
     if (!pip || !pip->win) return;
     GtkWindow *win = pip->win;
 
+    apply_pip_layer_position(pip);
+
     if (pip->takeover) {
-        gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, FALSE);
-        gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, FALSE);
         gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
         gtk_widget_set_size_request(pip->video_da, 1024, 576);
         gtk_widget_add_css_class(pip->card, "is-takeover");
-        gtk_button_set_label(GTK_BUTTON(pip->btn_expand), "缩小画中画");
-        gtk_widget_set_visible(pip->btn_launch, TRUE);
+        if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "画中画");
+        if (auto *ctx = pip->expand_icon_da ? static_cast<PipGlyphCtx *>(g_object_get_data(G_OBJECT(pip->expand_icon_da), "pip-glyph-ctx")) : nullptr) {
+            ctx->kind = PipGlyph::Shrink;
+            gtk_widget_queue_draw(pip->expand_icon_da);
+        }
+        gtk_widget_set_tooltip_text(pip->btn_expand, "缩小回悬浮画中画");
         gtk_widget_set_visible(pip->btn_reset, TRUE);
-        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出接管");
+        gtk_widget_set_visible(pip->net_lbl, TRUE);
+        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出");
     } else {
-        gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-        gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-        gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, pip->margin_right);
-        gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, pip->margin_bottom);
         gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
-        gtk_widget_set_size_request(pip->video_da, 360, 202);
+        gtk_widget_set_size_request(pip->video_da, 384, 216);
         gtk_widget_remove_css_class(pip->card, "is-takeover");
-        gtk_button_set_label(GTK_BUTTON(pip->btn_expand), "放大接管");
-        gtk_widget_set_visible(pip->btn_launch, FALSE);
+        if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "接管");
+        if (auto *ctx = pip->expand_icon_da ? static_cast<PipGlyphCtx *>(g_object_get_data(G_OBJECT(pip->expand_icon_da), "pip-glyph-ctx")) : nullptr) {
+            ctx->kind = PipGlyph::Expand;
+            gtk_widget_queue_draw(pip->expand_icon_da);
+        }
+        gtk_widget_set_tooltip_text(pip->btn_expand, "放大并接管键鼠操作（拖动标题栏或预览区可移动位置）");
         gtk_widget_set_visible(pip->btn_reset, FALSE);
-        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "平行沙箱桌面");
+        gtk_widget_set_visible(pip->net_lbl, FALSE);
+        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "平行沙箱");
     }
 
     SandboxConfig cfg = load_sandbox_config();
@@ -515,7 +780,7 @@ void draw_pip_video_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
     shell_internal::cairo_rounded_rect(cr, 0, 0, w, h, 10.0);
     cairo_clip(cr);
 
-    cairo_set_source_rgb(cr, 0.06, 0.08, 0.14);
+    cairo_set_source_rgb(cr, 0.05, 0.08, 0.14);
     cairo_paint(cr);
 
     if (pip->surface && pip->surface_w > 0 && pip->surface_h > 0) {
@@ -532,11 +797,11 @@ void draw_pip_video_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
         cairo_paint(cr);
     } else {
-        cairo_set_source_rgba(cr, 0.78, 0.85, 0.96, 0.82);
+        cairo_set_source_rgba(cr, 0.78, 0.85, 0.96, 0.84);
         cairo_select_font_face(cr, "Noto Sans CJK SC", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, pip->takeover ? 15.0 : 12.0);
-        const char *hint = "平行桌面已就绪 · 点击下方或在“+ 启动应用”中运行程序";
-        if (!pip->takeover) hint = "平行桌面等待窗口打开…";
+        const char *hint = "平行桌面已就绪 · 点击「+ 应用」运行程序（支持拖拽标题栏移动）";
+        if (!pip->takeover) hint = "平行桌面就绪 · 点击接管 / 拖拽移动";
         cairo_text_extents_t ext{};
         cairo_text_extents(cr, hint, &ext);
         cairo_move_to(cr, (w - ext.width) * 0.5, (h + ext.height) * 0.5);
@@ -589,67 +854,26 @@ uint32_t gdk_button_to_evdev(guint btn) {
 void build_launch_popover(SandboxPipState *pip) {
     GtkWidget *pop = gtk_popover_new();
     gtk_popover_set_position(GTK_POPOVER(pop), GTK_POS_BOTTOM);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
     gtk_widget_add_css_class(pop, "spinel-ctx-popover");
 
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
     gtk_widget_set_margin_top(box, 6);
     gtk_widget_set_margin_bottom(box, 6);
     gtk_widget_set_margin_start(box, 6);
     gtk_widget_set_margin_end(box, 6);
 
-    struct AppItem {
-        const char *label;
-        const char *bin;
-    };
-    static const AppItem kApps[] = {
-        {"Spinel 终端", "spinel-terminal"},
-        {"Spinel 文件管理器", "spinel-files"},
-        {"Google Chrome", "google-chrome-stable"},
-        {"Chromium 浏览器", "chromium"},
-        {"Antigravity", "antigravity"},
-        {"VS Code", "code"},
-    };
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    pip->launch_popover = pop;
+    pip->launch_popover_box = box;
 
-    for (const auto &app : kApps) {
-        if (!has_executable(app.bin)) continue;
-        GtkWidget *b = gtk_button_new_with_label(app.label);
-        gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
-        gtk_widget_add_css_class(b, "spinel-ctx-item");
-        g_object_set_data_full(G_OBJECT(b), "sb-bin", g_strdup(app.bin), g_free);
-        g_object_set_data(G_OBJECT(b), "sb-pop", pop);
-        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer) {
-            const char *bin = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "sb-bin"));
-            GtkWidget *p = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "sb-pop"));
-            if (p) gtk_popover_popdown(GTK_POPOVER(p));
-            if (bin && *bin) {
-                std::string err;
-                launch_in_sandbox({bin}, "", err);
-            }
-        }), nullptr);
-        gtk_box_append(GTK_BOX(box), b);
-    }
-
-    gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-    GtkWidget *cfg_b = gtk_button_new_with_label("目录授权与网络设置…");
-    gtk_button_set_has_frame(GTK_BUTTON(cfg_b), FALSE);
-    gtk_widget_add_css_class(cfg_b, "spinel-ctx-item");
-    g_object_set_data(G_OBJECT(cfg_b), "sb-pop", pop);
-    g_signal_connect(cfg_b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer d) {
-        auto *p = static_cast<SandboxPipState *>(d);
-        GtkWidget *pop_w = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "sb-pop"));
-        if (pop_w) gtk_popover_popdown(GTK_POPOVER(pop_w));
-        if (p) {
-            p->takeover = false;
-            apply_pip_window_geometry(p);
-            if (p->ns && p->ns->app_state) {
-                shell_internal::trigger_cmd(p->ns->app_state, "settings:open:perms");
-            }
+    g_signal_connect(pop, "notify::visible", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        if (gtk_widget_get_visible(GTK_WIDGET(obj))) {
+            rebuild_launch_popover_items(static_cast<SandboxPipState *>(d));
         }
     }), pip);
-    gtk_box_append(GTK_BOX(box), cfg_b);
-
-    gtk_popover_set_child(GTK_POPOVER(pop), box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(pip->btn_launch), pop);
+    rebuild_launch_popover_items(pip);
 }
 
 void sync_pip_state(SandboxPipState *pip) {
@@ -694,31 +918,29 @@ void init_sandbox_pip(NativeShellState *ns) {
     GtkWindow *win = GTK_WINDOW(gtk_window_new());
     gtk_window_set_decorated(win, FALSE);
     gtk_window_set_resizable(win, FALSE);
-    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent-win");
+    gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
     gtk_layer_init_for_window(win);
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_namespace(win, "spinel-sandbox-pip");
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-    gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, pip->margin_right);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, pip->margin_bottom);
 
+    // Outer padding exceeds CSS box-shadow spread to guarantee zero rectangular shadow clipping on Wayland
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_margin_top(outer, 16);
-    gtk_widget_set_margin_bottom(outer, 18);
-    gtk_widget_set_margin_start(outer, 16);
-    gtk_widget_set_margin_end(outer, 16);
+    gtk_widget_set_margin_top(outer, 24);
+    gtk_widget_set_margin_bottom(outer, 34);
+    gtk_widget_set_margin_start(outer, 28);
+    gtk_widget_set_margin_end(outer, 28);
 
-    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(card, "spinel-sandbox-pip-card");
 
-    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_widget_add_css_class(header, "spinel-sandbox-pip-head");
 
     GtkWidget *dot = gtk_label_new("●");
     gtk_widget_add_css_class(dot, "spinel-sandbox-dot");
-    GtkWidget *title = gtk_label_new("平行沙箱桌面");
+    GtkWidget *shield = make_pip_glyph_da(ns, PipGlyph::Shield, false, 14);
+    GtkWidget *title = gtk_label_new("平行沙箱");
     gtk_widget_add_css_class(title, "spinel-sandbox-title");
     gtk_widget_set_hexpand(title, TRUE);
     gtk_widget_set_halign(title, GTK_ALIGN_START);
@@ -728,25 +950,35 @@ void init_sandbox_pip(NativeShellState *ns) {
     gtk_widget_add_css_class(net_lbl, "spinel-sandbox-badge");
 
     GtkWidget *btn_launch = gtk_menu_button_new();
-    gtk_menu_button_set_label(GTK_MENU_BUTTON(btn_launch), "+ 启动应用");
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(btn_launch), make_pip_btn_content(ns, PipGlyph::Plus, "应用", false));
     gtk_widget_add_css_class(btn_launch, "spinel-sandbox-btn");
-    gtk_widget_set_visible(btn_launch, FALSE);
+    gtk_widget_set_tooltip_text(btn_launch, "在沙箱中打开应用（可在设置中自定义列表）");
 
-    GtkWidget *btn_reset = gtk_button_new_with_label("重置");
+    GtkWidget *btn_reset = gtk_button_new();
+    gtk_button_set_child(GTK_BUTTON(btn_reset), make_pip_btn_content(ns, PipGlyph::Refresh, "重置", false));
     gtk_widget_add_css_class(btn_reset, "spinel-sandbox-btn");
+    gtk_widget_set_tooltip_text(btn_reset, "清空沙箱临时环境（白名单目录保留）");
     gtk_widget_set_visible(btn_reset, FALSE);
 
-    GtkWidget *btn_expand = gtk_button_new_with_label("放大接管");
+    GtkWidget *btn_expand = gtk_button_new();
+    gtk_button_set_child(GTK_BUTTON(btn_expand),
+                         make_pip_btn_content(ns, PipGlyph::Expand, "接管", false, &pip->expand_icon_da, &pip->expand_lbl));
     gtk_widget_add_css_class(btn_expand, "spinel-sandbox-btn");
+    gtk_widget_add_css_class(btn_expand, "accent");
 
-    GtkWidget *btn_min = gtk_button_new_with_label("收起");
+    GtkWidget *btn_min = gtk_button_new();
+    gtk_button_set_child(GTK_BUTTON(btn_min), make_pip_btn_content(ns, PipGlyph::Minimize, "收起", false));
     gtk_widget_add_css_class(btn_min, "spinel-sandbox-btn");
+    gtk_widget_set_tooltip_text(btn_min, "收起到顶部栏胶囊（后台零占用挂起）");
 
-    GtkWidget *btn_stop = gtk_button_new_with_label("停止");
+    GtkWidget *btn_stop = gtk_button_new();
+    gtk_button_set_child(GTK_BUTTON(btn_stop), make_pip_btn_content(ns, PipGlyph::Stop, "停止", true));
     gtk_widget_add_css_class(btn_stop, "spinel-sandbox-btn");
     gtk_widget_add_css_class(btn_stop, "danger");
+    gtk_widget_set_tooltip_text(btn_stop, "停止平行沙箱会话");
 
     gtk_box_append(GTK_BOX(header), dot);
+    gtk_box_append(GTK_BOX(header), shield);
     gtk_box_append(GTK_BOX(header), title);
     gtk_box_append(GTK_BOX(header), net_lbl);
     gtk_box_append(GTK_BOX(header), btn_launch);
@@ -756,7 +988,7 @@ void init_sandbox_pip(NativeShellState *ns) {
     gtk_box_append(GTK_BOX(header), btn_stop);
 
     GtkWidget *da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(da, 360, 202);
+    gtk_widget_set_size_request(da, 384, 216);
     gtk_widget_set_focusable(da, TRUE);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), draw_pip_video_cb, pip, nullptr);
 
@@ -774,29 +1006,65 @@ void init_sandbox_pip(NativeShellState *ns) {
     pip->net_lbl = net_lbl;
     pip->btn_launch = btn_launch;
     pip->btn_reset = btn_reset;
-    pip->btn_min = btn_min;
     pip->btn_expand = btn_expand;
+    pip->btn_min = btn_min;
     pip->btn_stop = btn_stop;
     pip->video_da = da;
 
     build_launch_popover(pip);
+    apply_pip_layer_position(pip);
 
-    // Drag gesture on compact PiP header
-    GtkGesture *drag = gtk_gesture_drag_new();
-    g_signal_connect(drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer d) {
+    // Drag gesture on header bar works in BOTH Compact PiP & Expanded Takeover modes
+    GtkGesture *hdr_drag = gtk_gesture_drag_new();
+    g_signal_connect(hdr_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *g, double sx, double sy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        p->drag_start_right = p->margin_right;
-        p->drag_start_bottom = p->margin_bottom;
+        if (!p || !p->header_box) return;
+        GtkWidget *hit = gtk_widget_pick(p->header_box, sx, sy, GTK_PICK_DEFAULT);
+        if (hit && (gtk_widget_get_ancestor(hit, GTK_TYPE_BUTTON) || gtk_widget_get_ancestor(hit, GTK_TYPE_MENU_BUTTON))) {
+            p->header_dragging = false;
+            gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_DENIED);
+            return;
+        }
+        p->header_dragging = true;
+        p->drag_base_x = p->takeover ? p->takeover_x : p->compact_x;
+        p->drag_base_y = p->takeover ? p->takeover_y : p->compact_y;
     }), pip);
-    g_signal_connect(drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double dx, double dy, gpointer d) {
+    g_signal_connect(hdr_drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double dx, double dy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || p->takeover || !p->win) return;
-        p->margin_right = std::clamp(p->drag_start_right - static_cast<int>(std::round(dx)), 8, 1400);
-        p->margin_bottom = std::clamp(p->drag_start_bottom - static_cast<int>(std::round(dy)), 12, 900);
-        gtk_layer_set_margin(p->win, GTK_LAYER_SHELL_EDGE_RIGHT, p->margin_right);
-        gtk_layer_set_margin(p->win, GTK_LAYER_SHELL_EDGE_BOTTOM, p->margin_bottom);
+        if (!p || !p->header_dragging || !p->win) return;
+        if (p->takeover) {
+            p->takeover_x = p->drag_base_x + static_cast<int>(std::round(dx));
+            p->takeover_y = p->drag_base_y + static_cast<int>(std::round(dy));
+        } else {
+            p->compact_x = p->drag_base_x + static_cast<int>(std::round(dx));
+            p->compact_y = p->drag_base_y + static_cast<int>(std::round(dy));
+        }
+        apply_pip_layer_position(p);
     }), pip);
-    gtk_widget_add_controller(header, GTK_EVENT_CONTROLLER(drag));
+    g_signal_connect(hdr_drag, "drag-end", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer d) {
+        static_cast<SandboxPipState *>(d)->header_dragging = false;
+    }), pip);
+    gtk_widget_add_controller(header, GTK_EVENT_CONTROLLER(hdr_drag));
+
+    // In Compact PiP mode, dragging preview canvas moves window; quick tap opens Takeover
+    GtkGesture *da_drag = gtk_gesture_drag_new();
+    g_signal_connect(da_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer d) {
+        auto *p = static_cast<SandboxPipState *>(d);
+        if (!p || p->takeover) return;
+        p->canvas_dragging = false;
+        p->drag_base_x = p->compact_x;
+        p->drag_base_y = p->compact_y;
+    }), pip);
+    g_signal_connect(da_drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double dx, double dy, gpointer d) {
+        auto *p = static_cast<SandboxPipState *>(d);
+        if (!p || p->takeover) return;
+        if (std::abs(dx) > 5.0 || std::abs(dy) > 5.0) p->canvas_dragging = true;
+        if (!p->canvas_dragging) return;
+        p->compact_x = p->drag_base_x + static_cast<int>(std::round(dx));
+        p->compact_y = p->drag_base_y + static_cast<int>(std::round(dy));
+        apply_pip_layer_position(p);
+    }), pip);
+    gtk_widget_add_controller(da, GTK_EVENT_CONTROLLER(da_drag));
 
     // Buttons
     g_signal_connect(btn_expand, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
@@ -813,18 +1081,28 @@ void init_sandbox_pip(NativeShellState *ns) {
     }), pip);
     g_signal_connect(btn_stop, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        std::string err;
-        stop_sandbox_session(err);
-        sync_pip_state(p);
+        std::thread([p]() {
+            std::string err;
+            stop_sandbox_session(err);
+            g_idle_add(+[](gpointer ptr) -> gboolean {
+                sync_pip_state(static_cast<SandboxPipState *>(ptr));
+                return G_SOURCE_REMOVE;
+            }, p);
+        }).detach();
     }), pip);
     g_signal_connect(btn_reset, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        std::string err;
-        reset_sandbox_home(err);
-        sync_pip_state(p);
+        std::thread([p]() {
+            std::string err;
+            reset_sandbox_home(err);
+            g_idle_add(+[](gpointer ptr) -> gboolean {
+                sync_pip_state(static_cast<SandboxPipState *>(ptr));
+                return G_SOURCE_REMOVE;
+            }, p);
+        }).detach();
     }), pip);
 
-    // Mouse / Pointer forwarding in takeover mode, or click compact preview -> takeover
+    // Mouse / Pointer forwarding in takeover mode
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "motion", G_CALLBACK(+[](GtkEventControllerMotion *, double x, double y, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
@@ -843,12 +1121,7 @@ void init_sandbox_pip(NativeShellState *ns) {
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
     g_signal_connect(click, "pressed", G_CALLBACK(+[](GtkGestureClick *g, int, double x, double y, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p) return;
-        if (!p->takeover) {
-            p->takeover = true;
-            apply_pip_window_geometry(p);
-            return;
-        }
+        if (!p || !p->takeover) return;
         gtk_widget_grab_focus(p->video_da);
         if (!p->vptr || !p->wl_dpy) return;
         uint32_t nx = 0;
@@ -863,7 +1136,17 @@ void init_sandbox_pip(NativeShellState *ns) {
     }), pip);
     g_signal_connect(click, "released", G_CALLBACK(+[](GtkGestureClick *g, int, double, double, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || !p->takeover || !p->vptr || !p->wl_dpy) return;
+        if (!p) return;
+        if (!p->takeover) {
+            bool was_drag = p->canvas_dragging;
+            p->canvas_dragging = false;
+            if (!was_drag) {
+                p->takeover = true;
+                apply_pip_window_geometry(p);
+            }
+            return;
+        }
+        if (!p->vptr || !p->wl_dpy) return;
         guint btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
         zwlr_virtual_pointer_v1_button(p->vptr, now_msec(), gdk_button_to_evdev(btn), WL_POINTER_BUTTON_STATE_RELEASED);
         zwlr_virtual_pointer_v1_frame(p->vptr);
@@ -967,6 +1250,7 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
             std::thread([ns]() {
                 std::string err;
                 if (start_sandbox_session(err)) {
+                    launch_sandbox_autostart_apps();
                     g_idle_add(+[](gpointer d) -> gboolean {
                         auto *n = static_cast<NativeShellState *>(d);
                         if (n && n->sandbox_pip) sandbox_pip_sync_action(n, "show");
@@ -983,6 +1267,7 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
             pip->minimized = false;
         }
     }
+    rebuild_launch_popover_items(pip);
     apply_pip_window_geometry(pip);
     sync_pip_state(pip);
 }
@@ -994,42 +1279,51 @@ void sandbox_pip_on_theme_changed(NativeShellState *ns) {
 
 std::string sandbox_pip_css(const NativeShellState *ns) {
     const ThemeSpec &t = ns->theme;
-    const char *pill_bg = t.is_light ? "rgba(15, 23, 42, 0.08)" : "rgba(255, 255, 255, 0.12)";
-    const char *hover_bg = t.is_light ? "rgba(15, 23, 42, 0.14)" : "rgba(255, 255, 255, 0.20)";
+    const char *pill_bg = t.is_light ? "rgba(15, 23, 42, 0.06)" : "rgba(255, 255, 255, 0.09)";
+    const char *hover_bg = t.is_light ? "rgba(15, 23, 42, 0.12)" : "rgba(255, 255, 255, 0.17)";
     const char *sub_fg = t.is_light ? "rgba(15, 23, 42, 0.65)" : "rgba(226, 232, 240, 0.72)";
+    const char *shadow = t.is_light
+        ? "0 10px 24px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08)"
+        : "0 10px 26px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.22)";
     return
         ".spinel-sandbox-pip-card {\n"
         "  background-color: " + t.popover_bg + ";\n"
-        "  border: 1px solid " + t.cc_border + ";\n"
-        "  border-radius: 14px;\n"
-        "  padding: 8px;\n"
-        "  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);\n"
+        "  border: 1px solid " + t.bar_border + ";\n"
+        "  border-radius: 16px;\n"
+        "  padding: 9px 10px 10px 10px;\n"
+        "  box-shadow: " + std::string(shadow) + ";\n"
         "}\n"
         ".spinel-sandbox-pip-card.is-takeover {\n"
-        "  border: 1.5px solid #22c55e;\n"
-        "  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.56);\n"
+        "  border: 1.5px solid " + t.cc_accent + ";\n"
         "}\n"
-        ".spinel-sandbox-pip-head { min-height: 24px; }\n"
-        ".spinel-sandbox-dot { color: #22c55e; font-size: 11px; }\n"
+        ".spinel-sandbox-pip-head { min-height: 26px; padding: 0 2px; }\n"
+        ".spinel-sandbox-dot { color: #22c55e; font-size: 10px; }\n"
         ".spinel-sandbox-title { color: " + t.bar_fg + "; font-size: 12px; font-weight: 600; }\n"
         ".spinel-sandbox-badge {\n"
         "  color: " + std::string(sub_fg) + ";\n"
         "  background-color: " + std::string(pill_bg) + ";\n"
         "  border-radius: 999px;\n"
         "  padding: 2px 8px;\n"
-        "  font-size: 11px;\n"
+        "  font-size: 10.5px;\n"
         "}\n"
-        ".spinel-sandbox-btn {\n"
-        "  min-height: 22px;\n"
-        "  padding: 2px 8px;\n"
-        "  border-radius: 7px;\n"
+        ".spinel-sandbox-btn, .spinel-sandbox-btn > button {\n"
+        "  min-height: 24px;\n"
+        "  padding: 2px 9px;\n"
+        "  border-radius: 8px;\n"
         "  font-size: 11px;\n"
+        "  font-weight: 600;\n"
         "  background-color: " + std::string(pill_bg) + ";\n"
+        "  background-image: none;\n"
+        "  box-shadow: none;\n"
         "  color: " + t.bar_fg + ";\n"
-        "  border: 1px solid " + t.cc_border + ";\n"
+        "  border: 1px solid " + t.bar_border + ";\n"
         "}\n"
-        ".spinel-sandbox-btn:hover { background-color: " + std::string(hover_bg) + "; }\n"
-        ".spinel-sandbox-btn.danger:hover { color: #ef4444; }\n";
+        ".spinel-sandbox-btn.accent {\n"
+        "  background-color: rgba(10, 132, 255, 0.22);\n"
+        "  border-color: rgba(56, 189, 248, 0.36);\n"
+        "}\n"
+        ".spinel-sandbox-btn:hover, .spinel-sandbox-btn > button:hover { background-color: " + std::string(hover_bg) + "; }\n"
+        ".spinel-sandbox-btn.danger:hover { background-color: rgba(239, 68, 68, 0.18); color: #f87171; }\n";
 }
 
 bool sandbox_pip_is_running(const NativeShellState *ns) {

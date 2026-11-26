@@ -3,6 +3,12 @@
 #include <string>
 #include <vector>
 
+struct SandboxAppEntry {
+    std::string name;
+    std::string cmd;
+    bool auto_start = false;
+};
+
 struct SandboxConfig {
     bool allow_network = true;
     bool sync_clipboard = true;
@@ -10,6 +16,8 @@ struct SandboxConfig {
     std::string resolution = "1600x900";
     std::vector<std::string> rw_dirs;
     std::vector<std::string> ro_dirs;
+    bool apps_configured = false;
+    std::vector<SandboxAppEntry> apps;
 };
 
 struct SandboxStatus {
@@ -41,6 +49,9 @@ SandboxConfig load_sandbox_config();
 bool save_sandbox_config(const SandboxConfig &cfg);
 bool add_sandbox_mount_dir(const std::string &path, bool writable, std::string &error_out);
 bool remove_sandbox_mount_dir(const std::string &path);
+bool add_sandbox_app(const std::string &name, const std::string &cmd, bool auto_start, std::string &error_out);
+bool remove_sandbox_app(const std::string &cmd);
+bool set_sandbox_app_autostart(const std::string &cmd, bool auto_start);
 
 std::string build_sandbox_rc_xml(const SandboxConfig &cfg);
 std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,

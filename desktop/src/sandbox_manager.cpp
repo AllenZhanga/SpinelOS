@@ -349,37 +349,80 @@ bool is_valid_sandbox_mount_dir(const std::string &raw_path, std::string &normal
 SandboxConfig load_sandbox_config() {
     SandboxConfig cfg;
     std::ifstream in(sandbox_config_path());
-    if (!in) return cfg;
-    std::string line;
     auto push_unique = [](std::vector<std::string> &vec, const std::string &v) {
         if (v.empty()) return;
         if (std::find(vec.begin(), vec.end(), v) == vec.end()) vec.push_back(v);
     };
-    while (std::getline(in, line)) {
-        line = trim_copy(line);
-        if (line.empty() || line.front() == '#') continue;
-        auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        std::string k = trim_copy(line.substr(0, eq));
-        std::string v = trim_copy(line.substr(eq + 1));
-        if (k == "allow_network") {
-            cfg.allow_network = (v != "false" && v != "0" && v != "no");
-        } else if (k == "sync_clipboard") {
-            cfg.sync_clipboard = (v != "false" && v != "0" && v != "no");
-        } else if (k == "perf_mode" && is_valid_sandbox_perf_mode(v)) {
-            cfg.perf_mode = v;
-        } else if (k == "resolution") {
-            int w = 0, h = 0;
-            if (is_valid_sandbox_resolution(v, w, h)) cfg.resolution = std::to_string(w) + "x" + std::to_string(h);
-        } else if (k == "rw_dir") {
-            std::string norm, err;
-            if (is_valid_sandbox_mount_dir(v, norm, err)) {
-                push_unique(cfg.rw_dirs, norm);
+    auto sanitize_field = [](std::string s) {
+        s = trim_copy(s);
+        for (char &ch : s) {
+            if (ch == '|' || ch == '\n' || ch == '\r') ch = ' ';
+        }
+        return s;
+    };
+    if (in) {
+        std::string line;
+        while (std::getline(in, line)) {
+            line = trim_copy(line);
+            if (line.empty() || line.front() == '#') continue;
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            std::string k = trim_copy(line.substr(0, eq));
+            std::string v = trim_copy(line.substr(eq + 1));
+            if (k == "allow_network") {
+                cfg.allow_network = (v != "false" && v != "0" && v != "no");
+            } else if (k == "sync_clipboard") {
+                cfg.sync_clipboard = (v != "false" && v != "0" && v != "no");
+            } else if (k == "perf_mode" && is_valid_sandbox_perf_mode(v)) {
+                cfg.perf_mode = v;
+            } else if (k == "resolution") {
+                int w = 0, h = 0;
+                if (is_valid_sandbox_resolution(v, w, h)) cfg.resolution = std::to_string(w) + "x" + std::to_string(h);
+            } else if (k == "rw_dir") {
+                std::string norm, err;
+                if (is_valid_sandbox_mount_dir(v, norm, err)) {
+                    push_unique(cfg.rw_dirs, norm);
+                }
+            } else if (k == "ro_dir") {
+                std::string norm, err;
+                if (is_valid_sandbox_mount_dir(v, norm, err)) {
+                    push_unique(cfg.ro_dirs, norm);
+                }
+            } else if (k == "apps_configured") {
+                cfg.apps_configured = (v == "true" || v == "1");
+            } else if (k == "app") {
+                size_t p1 = v.find('|');
+                size_t p2 = (p1 == std::string::npos) ? std::string::npos : v.find('|', p1 + 1);
+                if (p1 != std::string::npos && p2 != std::string::npos) {
+                    SandboxAppEntry ent;
+                    ent.auto_start = (v.substr(0, p1) == "1" || v.substr(0, p1) == "true");
+                    ent.name = sanitize_field(v.substr(p1 + 1, p2 - p1 - 1));
+                    ent.cmd = sanitize_field(v.substr(p2 + 1));
+                    if (!ent.cmd.empty()) {
+                        if (ent.name.empty()) ent.name = ent.cmd;
+                        cfg.apps.push_back(std::move(ent));
+                    }
+                }
             }
-        } else if (k == "ro_dir") {
-            std::string norm, err;
-            if (is_valid_sandbox_mount_dir(v, norm, err)) {
-                push_unique(cfg.ro_dirs, norm);
+        }
+    }
+    if (!cfg.apps_configured && cfg.apps.empty()) {
+        struct DefaultApp {
+            const char *name;
+            const char *bin;
+            const char *cmd;
+        };
+        static const DefaultApp kDefaults[] = {
+            {"Spinel 终端", "spinel-terminal", "launch:terminal"},
+            {"Spinel 文件管理器", "spinel-files", "launch:files"},
+            {"Google Chrome", "google-chrome-stable", "launch:browser"},
+            {"Chromium 浏览器", "chromium", "chromium"},
+            {"Antigravity", "antigravity", "antigravity"},
+            {"VS Code", "code", "code"},
+        };
+        for (const auto &d : kDefaults) {
+            if (has_executable(d.bin)) {
+                cfg.apps.push_back({d.name, d.cmd, false});
             }
         }
     }
@@ -388,6 +431,13 @@ SandboxConfig load_sandbox_config() {
 
 bool save_sandbox_config(const SandboxConfig &cfg) {
     ensure_private_dir(config_dir_path());
+    auto clean = [](std::string s) {
+        s = trim_copy(s);
+        for (char &ch : s) {
+            if (ch == '|' || ch == '\n' || ch == '\r') ch = ' ';
+        }
+        return s;
+    };
     std::ostringstream oss;
     oss << "# SpinelOS Agent Parallel Sandbox Configuration\n";
     oss << "allow_network=" << (cfg.allow_network ? "true" : "false") << "\n";
@@ -399,6 +449,7 @@ bool save_sandbox_config(const SandboxConfig &cfg) {
         h = 900;
     }
     oss << "resolution=" << w << "x" << h << "\n";
+    oss << "apps_configured=" << (cfg.apps_configured ? "true" : "false") << "\n";
     for (const auto &d : cfg.rw_dirs) {
         std::string norm, err;
         if (is_valid_sandbox_mount_dir(d, norm, err)) {
@@ -413,7 +464,71 @@ bool save_sandbox_config(const SandboxConfig &cfg) {
             }
         }
     }
+    for (const auto &app : cfg.apps) {
+        std::string cname = clean(app.name);
+        std::string ccmd = clean(app.cmd);
+        if (ccmd.empty()) continue;
+        if (cname.empty()) cname = ccmd;
+        oss << "app=" << (app.auto_start ? "1" : "0") << "|" << cname << "|" << ccmd << "\n";
+    }
     return write_text_file(sandbox_config_path(), oss.str());
+}
+
+bool add_sandbox_app(const std::string &name, const std::string &cmd, bool auto_start, std::string &error_out) {
+    std::string ccmd = trim_copy(cmd);
+    std::string cname = trim_copy(name);
+    if (ccmd.empty()) {
+        error_out = "无效的应用命令";
+        return false;
+    }
+    if (cname.empty()) cname = ccmd;
+    SandboxConfig cfg = load_sandbox_config();
+    cfg.apps_configured = true;
+    for (auto &a : cfg.apps) {
+        if (a.cmd == ccmd) {
+            a.name = cname;
+            a.auto_start = auto_start;
+            if (!save_sandbox_config(cfg)) {
+                error_out = "保存沙箱配置失败";
+                return false;
+            }
+            return true;
+        }
+    }
+    cfg.apps.push_back({cname, ccmd, auto_start});
+    if (!save_sandbox_config(cfg)) {
+        error_out = "保存沙箱配置失败";
+        return false;
+    }
+    return true;
+}
+
+bool remove_sandbox_app(const std::string &cmd) {
+    std::string ccmd = trim_copy(cmd);
+    SandboxConfig cfg = load_sandbox_config();
+    cfg.apps_configured = true;
+    size_t before = cfg.apps.size();
+    cfg.apps.erase(std::remove_if(cfg.apps.begin(), cfg.apps.end(),
+                                  [&](const SandboxAppEntry &a) { return a.cmd == ccmd; }),
+                   cfg.apps.end());
+    if (cfg.apps.size() == before) return false;
+    return save_sandbox_config(cfg);
+}
+
+bool set_sandbox_app_autostart(const std::string &cmd, bool auto_start) {
+    std::string ccmd = trim_copy(cmd);
+    SandboxConfig cfg = load_sandbox_config();
+    cfg.apps_configured = true;
+    bool found = false;
+    for (auto &a : cfg.apps) {
+        if (a.cmd == ccmd) {
+            a.auto_start = auto_start;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+    return save_sandbox_config(cfg);
 }
 
 bool add_sandbox_mount_dir(const std::string &path, bool writable, std::string &error_out) {
@@ -667,6 +782,15 @@ std::string sandbox_state_json() {
     for (size_t i = 0; i < cfg.ro_dirs.size(); ++i) {
         if (i) oss << ",";
         oss << "\"" << json_escape(cfg.ro_dirs[i]) << "\"";
+    }
+    oss << "],\"apps\":[";
+    for (size_t i = 0; i < cfg.apps.size(); ++i) {
+        if (i) oss << ",";
+        oss << "{"
+            << "\"name\":\"" << json_escape(cfg.apps[i].name) << "\","
+            << "\"cmd\":\"" << json_escape(cfg.apps[i].cmd) << "\","
+            << "\"auto_start\":" << (cfg.apps[i].auto_start ? "true" : "false")
+            << "}";
     }
     oss << "]}";
     return oss.str();

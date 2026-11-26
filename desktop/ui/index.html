@@ -1026,6 +1026,19 @@
         <div id="sandbox-dir-list" class="disk-list">
           <div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>
         </div>
+        <div class="section-head" style="margin-top: 14px; margin-bottom: 6px;">
+          <div>
+            <strong>可启动应用与默认自启</strong>
+            <div class="muted-hint">配置画中画「+ 应用」快捷菜单，以及开启平行沙箱时自动打开哪些应用</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="sel-sandbox-app-add" class="spinel-select" style="min-width: 180px;"></select>
+            <button class="btn small" id="btn-sandbox-app-add">+ 添加应用</button>
+          </div>
+        </div>
+        <div id="sandbox-app-list" class="disk-list">
+          <div class="disk-empty">暂未配置沙箱应用</div>
+        </div>
         <div id="sandbox-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
       </div>
 

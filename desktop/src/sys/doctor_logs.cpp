@@ -1,6 +1,7 @@
 #include "system_control.hpp"
 #include "sys_internal.hpp"
 #include "common.hpp"
+#include "desktop_apps.hpp"
 #include "native_shell.hpp"
 #include "sandbox_manager.hpp"
 #include "temp_memory.hpp"
@@ -1938,6 +1939,37 @@ void push_sandbox_state(AppState *state) {
     if (!state || !state->settings_view) return;
     eval_js(state->settings_view,
             "window.__spinelSandboxData && window.__spinelSandboxData(" + sandbox_state_json() + ");");
+
+    std::ostringstream cat;
+    cat << "window.__spinelSandboxCatalog && window.__spinelSandboxCatalog([";
+    struct BuiltinOpt {
+        const char *name;
+        const char *cmd;
+    };
+    static const BuiltinOpt kBuiltins[] = {
+        {"Spinel 终端", "launch:terminal"},
+        {"Spinel 文件管理器", "launch:files"},
+        {"默认浏览器", "launch:browser"},
+    };
+    bool first = true;
+    std::vector<std::string> seen;
+    auto push_opt = [&](const std::string &name, const std::string &cmd) {
+        if (name.empty() || cmd.empty()) return;
+        if (std::find(seen.begin(), seen.end(), cmd) != seen.end()) return;
+        seen.push_back(cmd);
+        if (!first) cat << ",";
+        first = false;
+        cat << "{\"name\":\"" << json_escape(name) << "\",\"cmd\":\"" << json_escape(cmd) << "\"}";
+    };
+    for (const auto &b : kBuiltins) push_opt(b.name, b.cmd);
+    for (const auto &app : list_desktop_apps()) {
+        if (app.id.empty()) continue;
+        std::string cmd = "app:launch:" + app.id;
+        std::string label = app.name.empty() ? app.id : app.name;
+        push_opt(label, cmd);
+    }
+    cat << "]);";
+    eval_js(state->settings_view, cat.str());
 }
 
 void set_sandbox_config(AppState *state, const std::string &payload) {
@@ -1991,37 +2023,40 @@ void add_sandbox_dir(AppState *state, const std::string &payload) {
     }
 
     if (path.empty()) {
-        if (!state || !state->settings_win) return;
-        GtkFileDialog *dlg = gtk_file_dialog_new();
-        gtk_file_dialog_set_title(dlg, writable ? "选择允许沙箱读写的目录" : "选择允许沙箱只读访问的目录");
-        GFile *init_folder = g_file_new_for_path(home_dir().c_str());
-        gtk_file_dialog_set_initial_folder(dlg, init_folder);
-        g_object_unref(init_folder);
-        auto *ctx = new SandboxDirPickCtx{state, writable};
-        gtk_file_dialog_select_folder(
-            dlg, state->settings_win, nullptr,
-            +[](GObject *src, GAsyncResult *res, gpointer d) {
-                std::unique_ptr<SandboxDirPickCtx> c(static_cast<SandboxDirPickCtx *>(d));
-                GFile *folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(src), res, nullptr);
-                if (folder) {
-                    char *p = g_file_get_path(folder);
-                    if (p) {
+        std::thread([state, writable]() {
+            std::string bin = has_executable("spinel-files") ? "spinel-files" : "/usr/local/bin/spinel-files";
+            std::string picked;
+            int rc = 1;
+            bool ran = run_argv_capture({bin, "--pick-dir", home_dir()}, picked, rc);
+            std::string chosen = trim_copy(picked);
+
+            struct PickDoneCtx {
+                AppState *state;
+                bool writable;
+                bool ran;
+                int rc;
+                std::string chosen;
+            };
+            auto *ctx = new PickDoneCtx{state, writable, ran, rc, std::move(chosen)};
+            g_idle_add(+[](gpointer d) -> gboolean {
+                std::unique_ptr<PickDoneCtx> c(static_cast<PickDoneCtx *>(d));
+                if (c->state && !c->state->shutting_down.load()) {
+                    if (c->ran && c->rc == 0 && !c->chosen.empty()) {
                         std::string err;
-                        if (add_sandbox_mount_dir(p, c->writable, err)) {
+                        if (add_sandbox_mount_dir(c->chosen, c->writable, err)) {
                             emit_sandbox_feedback(c->state, true,
-                                                  std::string("已加入白名单（") + (c->writable ? "读写" : "只读") +
+                                                  std::string("已通过 Spinel Files 加入白名单（") +
+                                                      (c->writable ? "读写" : "只读") +
                                                       "），下次在沙箱启动应用自动生效。");
                         } else {
                             emit_sandbox_feedback(c->state, false, err);
                         }
                         push_sandbox_state(c->state);
-                        g_free(p);
                     }
-                    g_object_unref(folder);
                 }
-                g_object_unref(src);
-            },
-            ctx);
+                return G_SOURCE_REMOVE;
+            }, ctx);
+        }).detach();
         return;
     }
 
@@ -2057,8 +2092,10 @@ void sandbox_session_action(AppState *state, const std::string &action) {
         std::string msg;
         std::string shell_act;
         if (action == "start") {
+            bool was_running = query_sandbox_status().running;
             ok = start_sandbox_session(err);
             if (ok) {
+                if (!was_running) launch_sandbox_autostart_apps();
                 shell_act = "show";
                 msg = "平行沙箱桌面已启动，已在右下角显示实时画中画悬浮窗。";
             } else {
@@ -2075,7 +2112,10 @@ void sandbox_session_action(AppState *state, const std::string &action) {
         } else if (action == "toggle-pip") {
             if (!query_sandbox_status().running) {
                 ok = start_sandbox_session(err);
-                if (ok) shell_act = "show";
+                if (ok) {
+                    launch_sandbox_autostart_apps();
+                    shell_act = "show";
+                }
             } else {
                 shell_act = "toggle";
             }
@@ -2096,5 +2136,93 @@ void sandbox_session_action(AppState *state, const std::string &action) {
             }
             return G_SOURCE_REMOVE;
         }, u);
+    }).detach();
+}
+
+void add_sandbox_app_ipc(AppState *state, const std::string &payload) {
+    std::string name, cmd;
+    bool auto_start = false;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "name") name = v;
+        else if (k == "cmd") cmd = v;
+        else if (k == "auto_start") auto_start = (v == "true" || v == "1");
+    }
+    std::string err;
+    if (add_sandbox_app(name, cmd, auto_start, err)) {
+        native_shell_sync_sandbox(state, "sync");
+        emit_sandbox_feedback(state, true, "已添加应用「" + (name.empty() ? cmd : name) + "」到沙箱快捷菜单。");
+    } else {
+        emit_sandbox_feedback(state, false, err);
+    }
+    push_sandbox_state(state);
+}
+
+void remove_sandbox_app_ipc(AppState *state, const std::string &payload) {
+    std::string cmd;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim_copy(line.substr(0, eq)) == "cmd") cmd = trim_copy(line.substr(eq + 1));
+    }
+    if (cmd.empty()) return;
+    if (remove_sandbox_app(cmd)) {
+        native_shell_sync_sandbox(state, "sync");
+        emit_sandbox_feedback(state, true, "已从沙箱快捷菜单移除该应用。");
+    }
+    push_sandbox_state(state);
+}
+
+void set_sandbox_app_autostart_ipc(AppState *state, const std::string &payload) {
+    std::string cmd;
+    bool auto_start = false;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "cmd") cmd = v;
+        else if (k == "auto_start") auto_start = (v == "true" || v == "1");
+    }
+    if (set_sandbox_app_autostart(cmd, auto_start)) {
+        native_shell_sync_sandbox(state, "sync");
+        emit_sandbox_feedback(state, true, auto_start ? "已设为启动沙箱时默认打开。" : "已取消默认自启。");
+    }
+    push_sandbox_state(state);
+}
+
+void launch_sandbox_app_ipc(AppState *state, const std::string &payload) {
+    std::string cmd;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim_copy(line.substr(0, eq)) == "cmd") cmd = trim_copy(line.substr(eq + 1));
+    }
+    if (cmd.empty()) return;
+    std::thread([state, cmd]() {
+        std::string err;
+        bool ok = launch_cmd_in_sandbox(cmd, err);
+        struct LaunchRes {
+            AppState *state;
+            bool ok;
+            std::string err;
+        };
+        auto *r = new LaunchRes{state, ok, std::move(err)};
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<LaunchRes> p(static_cast<LaunchRes *>(d));
+            if (p->state && !p->state->shutting_down.load()) {
+                if (p->ok) {
+                    native_shell_sync_sandbox(p->state, "show");
+                    emit_sandbox_feedback(p->state, true, "已在平行沙箱中打开应用。");
+                } else {
+                    emit_sandbox_feedback(p->state, false, p->err);
+                }
+                push_sandbox_state(p->state);
+            }
+            return G_SOURCE_REMOVE;
+        }, r);
     }).detach();
 }

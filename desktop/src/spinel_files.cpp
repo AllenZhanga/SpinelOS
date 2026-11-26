@@ -116,6 +116,10 @@ struct FilesWin {
     GtkWidget *view_stack = nullptr;
     GtkWidget *status_label = nullptr;
 
+    bool pick_dir_mode = false;
+    std::string *pick_dir_out = nullptr;
+    GtkWidget *pick_label = nullptr;
+
     GListStore *store = nullptr;
     GtkMultiSelection *selection = nullptr;
 
@@ -1755,6 +1759,15 @@ void update_status_bar(FilesWin *fw) {
         status << " · Ctrl+A 全选 · Ctrl/Shift 多选 · Ctrl+C/X/V · Delete 回收站";
     }
     gtk_label_set_text(GTK_LABEL(fw->status_label), status.str().c_str());
+    if (fw->pick_dir_mode && fw->pick_label) {
+        std::error_code ec;
+        fs::path cand = fw->current_dir;
+        if (!fw->selected_path.empty() && fs::is_directory(fw->selected_path, ec)) {
+            cand = fw->selected_path;
+        }
+        std::string txt = "将选择文件夹: " + cand.string();
+        gtk_label_set_text(GTK_LABEL(fw->pick_label), txt.c_str());
+    }
 }
 
 void apply_visible_filter(FilesWin *fw) {
@@ -2104,12 +2117,19 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
     return FALSE;
 }
 
-void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs::path &select_path) {
+void build_files_window(GtkApplication *app,
+                        const fs::path &start_dir,
+                        const fs::path &select_path,
+                        bool pick_dir_mode = false,
+                        std::string *pick_dir_out = nullptr) {
     auto *fw = new FilesWin();
     fw->app = app;
+    fw->pick_dir_mode = pick_dir_mode;
+    fw->pick_dir_out = pick_dir_out;
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     fw->win = win;
-    gtk_window_set_default_size(win, 1020, 660);
+    gtk_window_set_default_size(win, pick_dir_mode ? 900 : 1020, pick_dir_mode ? 580 : 660);
+    if (pick_dir_mode) gtk_window_set_title(win, "选择文件夹 — Spinel Files");
     gtk_window_set_icon_name(win, "spinel-files");
     gtk_widget_add_css_class(GTK_WIDGET(win), "sf-win");
 
@@ -2321,6 +2341,46 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     gtk_box_append(GTK_BOX(fw->root), bar);
     gtk_box_append(GTK_BOX(fw->root), body);
     gtk_box_append(GTK_BOX(fw->root), fw->status_label);
+    if (pick_dir_mode) {
+        GtkWidget *pick_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        gtk_widget_add_css_class(pick_bar, "sf-toolbar");
+        gtk_widget_set_margin_top(pick_bar, 2);
+        gtk_widget_set_margin_bottom(pick_bar, 4);
+        gtk_widget_set_margin_start(pick_bar, 6);
+        gtk_widget_set_margin_end(pick_bar, 6);
+
+        fw->pick_label = gtk_label_new(("将选择文件夹: " + start_dir.string()).c_str());
+        gtk_widget_set_hexpand(fw->pick_label, TRUE);
+        gtk_widget_set_halign(fw->pick_label, GTK_ALIGN_START);
+        gtk_label_set_ellipsize(GTK_LABEL(fw->pick_label), PANGO_ELLIPSIZE_MIDDLE);
+
+        GtkWidget *btn_cancel = gtk_button_new_with_label("取消");
+        gtk_widget_add_css_class(btn_cancel, "sf-tool-btn");
+        g_signal_connect(btn_cancel, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *w = static_cast<FilesWin *>(d);
+            if (w && w->win) gtk_window_close(w->win);
+        }), fw);
+
+        GtkWidget *btn_pick = gtk_button_new_with_label("选择此文件夹");
+        gtk_widget_add_css_class(btn_pick, "sf-tool-btn");
+        gtk_widget_add_css_class(btn_pick, "suggested-action");
+        g_signal_connect(btn_pick, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *w = static_cast<FilesWin *>(d);
+            if (!w) return;
+            std::error_code ec;
+            fs::path chosen = w->current_dir;
+            if (!w->selected_path.empty() && fs::is_directory(w->selected_path, ec)) {
+                chosen = w->selected_path;
+            }
+            if (w->pick_dir_out) *w->pick_dir_out = chosen.string();
+            if (w->win) gtk_window_close(w->win);
+        }), fw);
+
+        gtk_box_append(GTK_BOX(pick_bar), fw->pick_label);
+        gtk_box_append(GTK_BOX(pick_bar), btn_cancel);
+        gtk_box_append(GTK_BOX(pick_bar), btn_pick);
+        gtk_box_append(GTK_BOX(fw->root), pick_bar);
+    }
     gtk_window_set_child(win, fw->root);
 
     bind_files_window_theme(win);
@@ -2512,6 +2572,27 @@ int main(int argc, char **argv) {
             show_windows_apps_window(gapp);
         }), nullptr);
         return g_application_run(G_APPLICATION(app), 0, nullptr);
+    }
+
+    if (argc >= 2 && std::string_view(argv[1]) == "--pick-dir") {
+        fs::path start(argc >= 3 && argv[2] && *argv[2] ? argv[2] : home_dir());
+        std::error_code ec;
+        if (!fs::is_directory(start, ec)) start = fs::path(home_dir());
+        struct PickCtx {
+            fs::path start;
+            std::string chosen;
+        } ctx{start, ""};
+        GtkApplication *app = gtk_application_new("org.spinelos.files.picker", G_APPLICATION_NON_UNIQUE);
+        g_signal_connect(app, "activate", G_CALLBACK(+[](GtkApplication *gapp, gpointer d) {
+            auto *c = static_cast<PickCtx *>(d);
+            build_files_window(gapp, c->start, {}, true, &c->chosen);
+        }), &ctx);
+        g_application_run(G_APPLICATION(app), 0, nullptr);
+        g_object_unref(app);
+        if (ctx.chosen.empty()) return 1;
+        std::fprintf(stdout, "%s\n", ctx.chosen.c_str());
+        std::fflush(stdout);
+        return 0;
     }
 
     StartLaunchTarget target = resolve_start_target(argc, argv);

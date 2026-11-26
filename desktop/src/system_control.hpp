@@ -228,3 +228,7 @@ void set_sandbox_config(AppState *state, const std::string &payload);
 void add_sandbox_dir(AppState *state, const std::string &payload);
 void remove_sandbox_dir(AppState *state, const std::string &payload);
 void sandbox_session_action(AppState *state, const std::string &action);
+void add_sandbox_app_ipc(AppState *state, const std::string &payload);
+void remove_sandbox_app_ipc(AppState *state, const std::string &payload);
+void set_sandbox_app_autostart_ipc(AppState *state, const std::string &payload);
+void launch_sandbox_app_ipc(AppState *state, const std::string &payload);

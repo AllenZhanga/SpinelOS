@@ -447,6 +447,15 @@ bool launch_cmd_in_sandbox(const std::string &cmd, std::string &error_out) {
     return launch_in_sandbox(argv, "", error_out);
 }
 
+void launch_sandbox_autostart_apps() {
+    SandboxConfig cfg = load_sandbox_config();
+    std::string err;
+    for (const auto &app : cfg.apps) {
+        if (!app.auto_start || app.cmd.empty()) continue;
+        launch_cmd_in_sandbox(app.cmd, err);
+    }
+}
+
 std::string get_wallpaper_pref() {
     std::string wp = trim_copy(read_first_line(
         (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), "crystal-blue"

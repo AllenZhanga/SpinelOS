@@ -1505,41 +1505,108 @@
       if (typeof enhanceSelect === "function") enhanceSelect(selPerf);
     }
 
-    if (!dirList) return;
-    dirList.innerHTML = "";
-    const entries = [];
-    (Array.isArray(data.rw_dirs) ? data.rw_dirs : []).forEach((p) => entries.push({ path: p, rw: true }));
-    (Array.isArray(data.ro_dirs) ? data.ro_dirs : []).forEach((p) => entries.push({ path: p, rw: false }));
-    if (entries.length === 0) {
-      dirList.innerHTML = '<div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>';
-      return;
+    if (dirList) {
+      dirList.innerHTML = "";
+      const entries = [];
+      (Array.isArray(data.rw_dirs) ? data.rw_dirs : []).forEach((p) => entries.push({ path: p, rw: true }));
+      (Array.isArray(data.ro_dirs) ? data.ro_dirs : []).forEach((p) => entries.push({ path: p, rw: false }));
+      if (entries.length === 0) {
+        dirList.innerHTML = '<div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>';
+      } else {
+        entries.forEach((ent) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div");
+          title.className = "disk-title";
+          title.textContent = ent.path;
+          const sub = document.createElement("div");
+          sub.className = "disk-sub";
+          sub.textContent = ent.rw ? "可读写 (RW) · 沙箱内改动将持久保留到宿主对应目录" : "仅只读 (RO) · 沙箱内不可修改此目录文件";
+          left.append(title, sub);
+          const actions = document.createElement("div");
+          actions.className = "disk-tags";
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = ent.rw ? "可写" : "只读";
+          const rmBtn = document.createElement("button");
+          rmBtn.type = "button";
+          rmBtn.className = "btn small danger";
+          rmBtn.textContent = "移除";
+          rmBtn.addEventListener("click", () => sendCommand(`sandbox:remove-dir\npath=${ent.path}`));
+          actions.append(tag, rmBtn);
+          item.append(left, actions);
+          dirList.appendChild(item);
+        });
+      }
     }
-    entries.forEach((ent) => {
-      const item = document.createElement("div");
-      item.className = "disk-item";
-      const left = document.createElement("div");
-      const title = document.createElement("div");
-      title.className = "disk-title";
-      title.textContent = ent.path;
-      const sub = document.createElement("div");
-      sub.className = "disk-sub";
-      sub.textContent = ent.rw ? "可读写 (RW) · 沙箱内改动将持久保留到宿主对应目录" : "仅只读 (RO) · 沙箱内不可修改此目录文件";
-      left.append(title, sub);
-      const actions = document.createElement("div");
-      actions.className = "disk-tags";
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = ent.rw ? "可写" : "只读";
-      const rmBtn = document.createElement("button");
-      rmBtn.type = "button";
-      rmBtn.className = "btn small danger";
-      rmBtn.textContent = "移除";
-      rmBtn.addEventListener("click", () => sendCommand(`sandbox:remove-dir\npath=${ent.path}`));
-      actions.append(tag, rmBtn);
-      item.append(left, actions);
-      dirList.appendChild(item);
-    });
+
+    const appList = document.getElementById("sandbox-app-list");
+    if (appList) {
+      appList.innerHTML = "";
+      const apps = Array.isArray(data.apps) ? data.apps : [];
+      if (apps.length === 0) {
+        appList.innerHTML = '<div class="disk-empty">暂未配置可启动应用，可在上方选择系统应用添加。</div>';
+      } else {
+        apps.forEach((app) => {
+          const item = document.createElement("div");
+          item.className = "disk-item";
+          const left = document.createElement("div");
+          const title = document.createElement("div");
+          title.className = "disk-title";
+          title.textContent = app.name || app.cmd;
+          const sub = document.createElement("div");
+          sub.className = "disk-sub";
+          sub.textContent = app.cmd;
+          left.append(title, sub);
+
+          const actions = document.createElement("div");
+          actions.className = "disk-tags";
+          const autoLbl = document.createElement("span");
+          autoLbl.className = "muted-hint";
+          autoLbl.style.marginRight = "4px";
+          autoLbl.textContent = "默认自启";
+          const autoSw = document.createElement("button");
+          autoSw.type = "button";
+          autoSw.className = "sp-switch" + (app.auto_start ? " is-on" : "");
+          autoSw.innerHTML = '<span class="sp-switch-thumb"></span>';
+          autoSw.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            sendCommand(`sandbox:app-autostart\ncmd=${app.cmd}\nauto_start=${app.auto_start ? "false" : "true"}`);
+          });
+          const runBtn = document.createElement("button");
+          runBtn.type = "button";
+          runBtn.className = "btn small";
+          runBtn.textContent = "运行";
+          runBtn.addEventListener("click", () => sendCommand(`sandbox:app-launch\ncmd=${app.cmd}`));
+          const rmBtn = document.createElement("button");
+          rmBtn.type = "button";
+          rmBtn.className = "btn small danger";
+          rmBtn.textContent = "移除";
+          rmBtn.addEventListener("click", () => sendCommand(`sandbox:app-remove\ncmd=${app.cmd}`));
+          actions.append(autoLbl, autoSw, runBtn, rmBtn);
+          item.append(left, actions);
+          appList.appendChild(item);
+        });
+      }
+    }
   }
+
+  window.__spinelSandboxCatalog = (items) => {
+    const sel = document.getElementById("sel-sandbox-app-add");
+    if (!sel || !Array.isArray(items)) return;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    items.forEach((it) => {
+      const opt = document.createElement("option");
+      opt.value = it.cmd;
+      opt.textContent = it.name;
+      opt.dataset.appName = it.name;
+      sel.appendChild(opt);
+    });
+    if (prev && items.some((x) => x.cmd === prev)) sel.value = prev;
+    if (typeof enhanceSelect === "function") enhanceSelect(sel);
+  };
 
   window.__spinelSandboxData = renderSandboxState;
   window.__spinelSandboxFeedback = (ok, msg) => showFeedback("sandbox-feedback", msg || "", !ok);
@@ -1575,4 +1642,14 @@
   if (btnAddRw) btnAddRw.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=true"));
   const btnAddRo = document.getElementById("btn-sandbox-add-ro");
   if (btnAddRo) btnAddRo.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=false"));
+  const btnAppAdd = document.getElementById("btn-sandbox-app-add");
+  if (btnAppAdd) {
+    btnAppAdd.addEventListener("click", () => {
+      const sel = document.getElementById("sel-sandbox-app-add");
+      if (!sel || !sel.value) return;
+      const opt = sel.options[sel.selectedIndex];
+      const name = (opt && opt.dataset && opt.dataset.appName) || (opt && opt.textContent) || sel.value;
+      sendCommand(`sandbox:app-add\nname=${name}\ncmd=${sel.value}\nauto_start=false`);
+    });
+  }
 })();

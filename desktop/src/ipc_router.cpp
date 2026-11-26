@@ -676,6 +676,18 @@ bool dispatch_ipc_command(AppState *state,
         {"sandbox:toggle-pip", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             sandbox_session_action(s, "toggle-pip");
         }},
+        {"sandbox:app-add", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            add_sandbox_app_ipc(s, r.legacy_raw);
+        }},
+        {"sandbox:app-remove", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            remove_sandbox_app_ipc(s, r.legacy_raw);
+        }},
+        {"sandbox:app-autostart", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            set_sandbox_app_autostart_ipc(s, r.legacy_raw);
+        }},
+        {"sandbox:app-launch", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            launch_sandbox_app_ipc(s, r.legacy_raw);
+        }},
         {"settings:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},

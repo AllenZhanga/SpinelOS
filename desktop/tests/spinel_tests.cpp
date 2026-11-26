@@ -1006,6 +1006,20 @@ void test_parallel_sandbox() {
     EXPECT(remove_sandbox_mount_dir(norm));
     EXPECT(load_sandbox_config().rw_dirs.empty());
 
+    EXPECT(add_sandbox_app("My Terminal", "launch:terminal", true, err));
+    EXPECT(add_sandbox_app("Browser", "launch:browser", false, err));
+    auto apps = load_sandbox_config().apps;
+    bool found_term = false, found_browser = false;
+    for (const auto &a : apps) {
+        if (a.cmd == "launch:terminal" && a.auto_start) found_term = true;
+        if (a.cmd == "launch:browser" && !a.auto_start) found_browser = true;
+    }
+    EXPECT(found_term && found_browser);
+    EXPECT(set_sandbox_app_autostart("launch:browser", true));
+    EXPECT(remove_sandbox_app("launch:terminal"));
+    EXPECT(load_sandbox_config().apps.size() == 1);
+    EXPECT(load_sandbox_config().apps[0].cmd == "launch:browser" && load_sandbox_config().apps[0].auto_start);
+
     AppState dummy;
     std::string ipc_rep;
     EXPECT(dispatch_ipc_command(&dummy, "{\"id\":99,\"method\":\"sandbox:state-get\"}", {}, &ipc_rep));
