@@ -34,6 +34,7 @@ std::string config_dir_path() {
 
 std::string sandbox_pid_file() { return sandbox_runtime_dir() + "/compositor.pid"; }
 std::string sandbox_dbus_pid_file() { return sandbox_runtime_dir() + "/dbus.pid"; }
+std::string sandbox_shell_pid_file() { return sandbox_runtime_dir() + "/shell.pid"; }
 std::string sandbox_clip_pid_file() { return sandbox_runtime_dir() + "/clip-sync.pid"; }
 std::string sandbox_clip_guard_file() { return sandbox_runtime_dir() + "/clip-last.hash"; }
 
@@ -574,6 +575,7 @@ std::string build_sandbox_rc_xml(const SandboxConfig &cfg) {
     <raiseOnFocus>yes</raiseOnFocus>
   </focus>
   <keyboard>
+    <keybind key="A-space"><action name="Execute" command="spinel-shell --sandbox-launcher"/></keybind>
     <keybind key="A-F4"><action name="Close"/></keybind>
     <keybind key="A-Tab"><action name="NextWindow"/></keybind>
     <keybind key="W-Up"><action name="ToggleMaximize"/></keybind>
@@ -714,6 +716,9 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
     args.push_back("--setenv");
     args.push_back("ELECTRON_OZONE_PLATFORM_HINT");
     args.push_back("wayland");
+    args.push_back("--setenv");
+    args.push_back("SPINEL_SANDBOX_SHELL");
+    args.push_back("1");
     args.push_back("--unsetenv");
     args.push_back("DISPLAY");
     args.push_back("--unsetenv");
@@ -739,6 +744,11 @@ SandboxStatus query_sandbox_status() {
     st.runtime_dir = sandbox_runtime_dir();
     st.home_path = sandbox_home_dir();
     st.home_size_mb = calc_dir_size_mb(st.home_path);
+
+    int spid = read_pid_file(sandbox_shell_pid_file());
+    if (is_pid_alive(spid)) {
+        ::kill(spid, SIGTERM);
+    }
 
     int pid = read_pid_file(sandbox_pid_file());
     std::error_code ec;
@@ -828,6 +838,56 @@ void ensure_sandbox_clipboard_sync(bool enabled) {
     }
 }
 
+void ensure_sandbox_shell_running(const SandboxConfig &cfg,
+                                  const std::string &rt_dir,
+                                  const std::string &fake_home) {
+    int existing = read_pid_file(sandbox_shell_pid_file());
+    if (is_pid_alive(existing)) return;
+    if (!has_executable("bwrap")) return;
+
+    std::string shell_bin = fs::exists("/usr/local/bin/spinel-shell")
+        ? "/usr/local/bin/spinel-shell"
+        : (has_executable("spinel-shell") ? "spinel-shell" : "");
+    if (shell_bin.empty()) return;
+
+    std::vector<std::string> bwrap_args = build_sandbox_bwrap_argv(
+        cfg, rt_dir, fake_home, home_dir(), static_cast<unsigned int>(::getuid()),
+        {shell_bin, "--sandbox"}, "");
+
+    if (has_executable("systemd-run")) {
+        bool host_prio = (cfg.perf_mode != "balanced");
+        std::vector<std::string> wrapped = {
+            "systemd-run", "--user", "--scope",
+            "--slice=spinel-sandbox.slice",
+            std::string("-pCPUWeight=") + (host_prio ? "20" : "50"),
+            std::string("-pIOWeight=") + (host_prio ? "20" : "50"),
+            "--"
+        };
+        wrapped.insert(wrapped.end(), bwrap_args.begin(), bwrap_args.end());
+        bwrap_args.swap(wrapped);
+    }
+
+    std::string log_path = rt_dir + "/shell.log";
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        ::setsid();
+        int log_fd = ::open(log_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+        if (log_fd >= 0) {
+            ::dup2(log_fd, STDOUT_FILENO);
+            ::dup2(log_fd, STDERR_FILENO);
+            if (log_fd > STDERR_FILENO) ::close(log_fd);
+        }
+        std::vector<char *> cargs;
+        for (auto &a : bwrap_args) cargs.push_back(const_cast<char *>(a.c_str()));
+        cargs.push_back(nullptr);
+        ::execvp(cargs[0], cargs.data());
+        _exit(127);
+    }
+    if (pid > 0) {
+        write_text_file(sandbox_shell_pid_file(), std::to_string(pid) + "\n");
+    }
+}
+
 bool start_sandbox_session(std::string &error_out) {
     if (!has_executable("bwrap")) {
         error_out = "未安装 bubblewrap (bwrap)，请执行 ./scripts/dev-deploy.sh --full 安装。";
@@ -842,6 +902,7 @@ bool start_sandbox_session(std::string &error_out) {
     SandboxConfig cfg = load_sandbox_config();
     if (cur.running) {
         ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
+        ensure_sandbox_shell_running(cfg, sandbox_runtime_dir(), sandbox_home_dir());
         return true;
     }
 
@@ -909,6 +970,7 @@ bool start_sandbox_session(std::string &error_out) {
     }
 
     ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
+    ensure_sandbox_shell_running(cfg, rt_dir, fake_home);
     append_app_log("Started SpinelOS parallel sandbox compositor");
     return true;
 }
@@ -916,6 +978,11 @@ bool start_sandbox_session(std::string &error_out) {
 bool stop_sandbox_session(std::string &error_out) {
     (void)error_out;
     stop_sandbox_clipboard_sync();
+
+    int spid = read_pid_file(sandbox_shell_pid_file());
+    if (is_pid_alive(spid)) {
+        ::kill(spid, SIGTERM);
+    }
 
     int pid = read_pid_file(sandbox_pid_file());
     if (is_pid_alive(pid)) {
@@ -937,6 +1004,7 @@ bool stop_sandbox_session(std::string &error_out) {
     }
 
     std::error_code ec;
+    fs::remove(sandbox_shell_pid_file(), ec);
     fs::remove(sandbox_pid_file(), ec);
     fs::remove(sandbox_dbus_pid_file(), ec);
     fs::remove(sandbox_runtime_dir() + "/" + sandbox_socket_name(), ec);

@@ -242,7 +242,15 @@ std::vector<std::string> split_pin_csv(const std::string &text) {
     return out;
 }
 
-std::vector<DockPinSpec> default_dock_pins(bool is_live) {
+std::vector<DockPinSpec> default_dock_pins(bool is_live, bool sandbox_mode) {
+    if (sandbox_mode) {
+        return {
+            {"文件管理", "launch:files", "files", {}, {"spinel-files", "org.spinelos.files", "thunar"}},
+            {"终端", "launch:terminal", "terminal", {}, {"spinel-terminal", "org.spinelos.terminal", "spinel 终端", "ptyxis", "org.gnome.ptyxis", "foot"}},
+            {"浏览器", "launch:browser", "browser", {"google-chrome", "chromium", "firefox"}, {"chromium", "chrome", "firefox"}},
+            {"应用启动器", "launcher:toggle", "app", {}, {}}
+        };
+    }
     std::vector<DockPinSpec> defs = {
         {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}},
         {"应用商店", "store:open", "store", {}, {"spinel os 应用商店", "spinelos 应用商店"}},
@@ -274,9 +282,10 @@ void save_dock_pins(const NativeShellState *ns) {
 void load_dock_pins(NativeShellState *ns) {
     if (!ns) return;
     ns->dock_pins_loaded = true;
+    const bool sb = ns->app_state && ns->app_state->sandbox_shell_mode;
     std::ifstream ifs(dock_pins_path());
     if (!ifs.is_open()) {
-        ns->dock_pins = default_dock_pins(ns->telemetry.is_live);
+        ns->dock_pins = default_dock_pins(ns->telemetry.is_live, sb);
         save_dock_pins(ns);
         return;
     }

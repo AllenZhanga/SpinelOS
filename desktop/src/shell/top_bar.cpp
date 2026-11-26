@@ -377,7 +377,15 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_set_size_request(gem_da, 17, 17);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gem_da), draw_gem_glyph, ns, nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(brand_btn), gem_da);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, {
+    const bool sb = state && state->sandbox_shell_mode;
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(brand_btn), make_topbar_popover_menu(state, sb ? std::vector<TopBarMenuEntry>{
+        {"Spinel 平行沙箱桌面", "launcher:toggle"},
+        {nullptr, ""},
+        {"文件管理", "launch:files"},
+        {"终端", "launch:terminal"},
+        {"浏览器", "launch:browser"},
+        {"搜索应用 (Alt+Space)", "launcher:toggle"}
+    } : std::vector<TopBarMenuEntry>{
         {"关于 Spinel OS", "settings:open:appearance"},
         {nullptr, ""},
         {"系统设置...", "settings:open:display"},
@@ -765,13 +773,28 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_box_append(GTK_BOX(right), ime_btn);
     gtk_box_append(GTK_BOX(right), clip_btn);
     gtk_box_append(GTK_BOX(right), search_btn);
-    gtk_box_append(GTK_BOX(right), make_bar_sep());
+    GtkWidget *sep1 = make_bar_sep();
+    gtk_box_append(GTK_BOX(right), sep1);
     gtk_box_append(GTK_BOX(right), ns->bar_vol_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_net_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_cc_btn);
     gtk_box_append(GTK_BOX(right), ns->bar_bat_box);
     gtk_box_append(GTK_BOX(right), make_bar_sep());
     gtk_box_append(GTK_BOX(right), notif_clock_btn);
+
+    if (sb) {
+        gtk_label_set_text(GTK_LABEL(ns->bar_sandbox_lbl), "平行沙箱");
+        g_object_set_data_full(G_OBJECT(ns->bar_sandbox_btn), "spinel-cmd", g_strdup("launcher:toggle"), g_free);
+        gtk_widget_set_tooltip_text(ns->bar_sandbox_btn, "当前处于隔离平行沙箱桌面（点击搜索应用）");
+        gtk_widget_set_visible(ns->bar_sandbox_btn, TRUE);
+        gtk_widget_set_visible(mem_btn, FALSE);
+        gtk_widget_set_visible(clip_btn, FALSE);
+        gtk_widget_set_visible(sep1, FALSE);
+        gtk_widget_set_visible(ns->bar_vol_btn, FALSE);
+        gtk_widget_set_visible(ns->bar_net_btn, FALSE);
+        gtk_widget_set_visible(ns->bar_cc_btn, FALSE);
+        gtk_widget_set_visible(ns->bar_bat_box, FALSE);
+    }
 
     gtk_box_append(GTK_BOX(root), left);
     gtk_box_append(GTK_BOX(root), right);

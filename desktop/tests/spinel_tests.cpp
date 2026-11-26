@@ -1115,6 +1115,8 @@ void test_parallel_sandbox() {
 
     std::string rc = build_sandbox_rc_xml(loaded);
     EXPECT(rc.find("<labwc_config>") != std::string::npos);
+    EXPECT(rc.find("spinel-shell --sandbox-launcher") != std::string::npos);
+    EXPECT(has_arg(argv_shared, "SPINEL_SANDBOX_SHELL"));
 
     EXPECT(remove_sandbox_mount_dir(norm));
     EXPECT(load_sandbox_config().rw_dirs.empty());
@@ -1136,6 +1138,18 @@ void test_parallel_sandbox() {
     AppState dummy;
     std::string ipc_rep;
     EXPECT(dispatch_ipc_command(&dummy, "{\"id\":99,\"method\":\"sandbox:state-get\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
+
+    AppState sb_state;
+    sb_state.sandbox_shell_mode = true;
+    ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":100,\"method\":\"settings:open:display\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":101,\"method\":\"power:shutdown\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
+    EXPECT(dispatch_ipc_command(&sb_state, "{\"id\":102,\"method\":\"launcher:toggle\"}", {}, &ipc_rep));
     EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
 }
 

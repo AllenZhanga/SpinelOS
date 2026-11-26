@@ -483,6 +483,13 @@ void on_activate(GtkApplication *app, gpointer user_data) {
     ensure_steam_play_preconfig();
     register_shell_actions(app, state);
 
+    if (state->sandbox_shell_mode) {
+        init_native_shell(app, state);
+        init_window_tracker(state);
+        g_timeout_add_seconds(3, on_telemetry_tick, state);
+        return;
+    }
+
     init_native_shell(app, state);
     init_window_tracker(state);
     start_gamepad_hotkey_listener(state);
@@ -614,11 +621,26 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
 
 int main(int argc, char **argv) {
 #if !SPINEL_HAS_WEBKIT
+    auto in_sandbox_env = []() {
+        const char *sb = std::getenv("SPINEL_SANDBOX_SHELL");
+        return sb && std::string(sb) == "1";
+    };
     if (argc > 1 && std::string(argv[1]) == "--clip-hook") {
         return run_clipboard_hook_from_stdin();
     }
+    if (argc > 1 && (std::string(argv[1]) == "--sandbox-launcher" ||
+                     (std::string(argv[1]) == "--launcher" && in_sandbox_env()))) {
+        notify_dbus_action("org.spinelos.shell.sandbox", "/org/spinelos/shell/sandbox", "toggle-launcher", true);
+        return 0;
+    }
     if (argc > 1 && std::string(argv[1]) == "--launcher") {
         notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher", true);
+        return 0;
+    }
+    if (argc > 1 && (std::string(argv[1]) == "--sandbox-switcher" ||
+                     (std::string(argv[1]) == "--switcher" && in_sandbox_env()))) {
+        const char *dir = (argc > 2 && argv[2] && std::string(argv[2]) == "prev") ? "prev" : "next";
+        notify_dbus_action("org.spinelos.shell.sandbox", "/org/spinelos/shell/sandbox", "switcher", true, dir);
         return 0;
     }
     if (argc > 1 && std::string(argv[1]) == "--switcher") {
@@ -629,6 +651,13 @@ int main(int argc, char **argv) {
     if (argc > 2 && std::string(argv[1]) == "--osd") {
         notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "osd", true, argv[2]);
         return 0;
+    }
+    bool sandbox_mode = in_sandbox_env();
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] && std::string(argv[i]) == "--sandbox") {
+            sandbox_mode = true;
+            break;
+        }
     }
 #endif
     ensure_display_env();
@@ -653,7 +682,9 @@ int main(int argc, char **argv) {
 
     sync_process_proxy_env();
 #if !SPINEL_HAS_WEBKIT
-    spawn_argv_detached({"dbus-update-activation-environment", "--systemd", "XDG_CURRENT_DESKTOP=SpinelOS:GNOME"});
+    if (!sandbox_mode) {
+        spawn_argv_detached({"dbus-update-activation-environment", "--systemd", "XDG_CURRENT_DESKTOP=SpinelOS:GNOME"});
+    }
 #endif
 
 #if SPINEL_HAS_WEBKIT
@@ -674,18 +705,24 @@ int main(int argc, char **argv) {
     return status;
 #else
     ThemeSpec startup_theme = get_active_theme();
-    sync_labwc_window_theme(startup_theme.is_light);
-    ensure_fcitx5_defaults(startup_theme.is_light);
+    if (!sandbox_mode) {
+        sync_labwc_window_theme(startup_theme.is_light);
+        ensure_fcitx5_defaults(startup_theme.is_light);
+    }
     ensure_terminal_defaults(startup_theme.is_light);
     sync_notification_theme(startup_theme.is_light);
 
     AppState state;
-    GtkApplication *app = gtk_application_new("org.spinelos.shell", G_APPLICATION_DEFAULT_FLAGS);
+    state.sandbox_shell_mode = sandbox_mode;
+    const char *app_id = sandbox_mode ? "org.spinelos.shell.sandbox" : "org.spinelos.shell";
+    GtkApplication *app = gtk_application_new(app_id, G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &state);
-    int status = g_application_run(G_APPLICATION(app), argc, argv);
+    int status = g_application_run(G_APPLICATION(app), 1, argv);
     state.shutting_down.store(true);
-    stop_clipboard_watcher();
-    stop_gamepad_hotkey_listener();
+    if (!sandbox_mode) {
+        stop_clipboard_watcher();
+        stop_gamepad_hotkey_listener();
+    }
     shutdown_window_tracker();
     shutdown_native_shell(&state);
     g_object_unref(app);

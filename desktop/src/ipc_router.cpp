@@ -292,6 +292,45 @@ bool dispatch_ipc_command(AppState *state,
         return false;
     }
 
+    if (state && state->sandbox_shell_mode) {
+        static const char *kSandboxBlockedExact[] = {
+            "store:open", "store:cancel", "games:open", "games:scan", "games:rescan",
+            "installer:open", "installer:scan-disks", "installer:start", "welcome:open",
+            "welcome:complete", "doctor:open", "doctor:run", "cc:toggle", "cc:close",
+            "power:reboot", "power:shutdown", "system:lock", "system:suspend",
+            "system:idle-lock:on", "system:idle-lock:off", "system:audio-mute-toggle",
+            "system:audio-down", "system:audio-up", "dnd:toggle", "wallpaper:clear-image",
+            "wallpaper:pick-image", "launch:steam", "launch:steam-gamepadui"
+        };
+        static const char *kSandboxBlockedPrefix[] = {
+            "settings:", "store:", "monitor:", "doctor:", "sandbox:", "devices:",
+            "relay:", "power:", "steam:", "theme:", "system:screenshot"
+        };
+        bool blocked = false;
+        for (const char *ex : kSandboxBlockedExact) {
+            if (req.method == ex) {
+                blocked = true;
+                break;
+            }
+        }
+        if (!blocked) {
+            for (const char *pfx : kSandboxBlockedPrefix) {
+                if (req.method.rfind(pfx, 0) == 0) {
+                    blocked = true;
+                    break;
+                }
+            }
+        }
+        if (blocked) {
+            if (reply_json_out) {
+                std::ostringstream rej;
+                rej << "{\"id\":" << req.id_json << ",\"ok\":false,\"error\":\"sandbox_mode_restricted\"}";
+                *reply_json_out = rej.str();
+            }
+            return false;
+        }
+    }
+
     // Exact match handlers (keyed by canonical command name)
     static const std::unordered_map<std::string, HandlerFn> kExactRoutes = {
         {"launch:steam", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {

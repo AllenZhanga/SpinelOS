@@ -221,6 +221,24 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
     } else if (kind == "settings") {
         set_rgb_hex(bg, 0.0, 0xE5E7EB);
         set_rgb_hex(bg, 1.0, 0x9CA3AF);
+    } else if (kind == "browser") {
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x2563EB);
+        set_rgb_hex(bg, 1.0, 0x1D4ED8);
+    } else if (kind == "browser") {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.4);
+        cairo_arc(cr, 32, 32, 14, 0, 2 * M_PI);
+        cairo_stroke(cr);
+        cairo_move_to(cr, 18, 32);
+        cairo_line_to(cr, 46, 32);
+        cairo_stroke(cr);
+        cairo_save(cr);
+        cairo_translate(cr, 32, 32);
+        cairo_scale(cr, 0.46, 1.0);
+        cairo_arc(cr, 0, 0, 14, 0, 2 * M_PI);
+        cairo_restore(cr);
+        cairo_stroke(cr);
     } else if (kind == "installer") {
         set_rgb_hex(bg, 0.0, 0x34D399);
         set_rgb_hex(bg, 1.0, 0x059669);
@@ -354,6 +372,24 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
         cairo_set_line_width(cr, 3.8);
         cairo_move_to(cr, 29, 37);
         cairo_line_to(cr, 43, 37);
+        cairo_stroke(cr);
+    } else if (kind == "browser") {
+        set_rgb_hex(bg, 0.0, 0x38BDF8);
+        set_rgb_hex(bg, 0.55, 0x2563EB);
+        set_rgb_hex(bg, 1.0, 0x1D4ED8);
+    } else if (kind == "browser") {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.94);
+        cairo_set_line_width(cr, 2.4);
+        cairo_arc(cr, 32, 32, 14, 0, 2 * M_PI);
+        cairo_stroke(cr);
+        cairo_move_to(cr, 18, 32);
+        cairo_line_to(cr, 46, 32);
+        cairo_stroke(cr);
+        cairo_save(cr);
+        cairo_translate(cr, 32, 32);
+        cairo_scale(cr, 0.46, 1.0);
+        cairo_arc(cr, 0, 0, 14, 0, 2 * M_PI);
+        cairo_restore(cr);
         cairo_stroke(cr);
     } else if (kind == "installer") {
         cairo_rounded_rect(cr, 15, 16, 34, 32, 8);
@@ -1038,19 +1074,26 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     ns->telemetry = collect_telemetry();
     ns->desktop_apps = list_desktop_apps();
 
+    bool sb_mode = state->sandbox_shell_mode;
     shell_internal::build_native_desktop(app, ns);
     shell_internal::build_native_top_bar(app, ns);
     shell_internal::build_native_dock(app, ns);
-    shell_internal::build_native_control_center(app, ns);
+    if (!sb_mode) {
+        shell_internal::build_native_control_center(app, ns);
+    }
     shell_internal::build_native_launcher(app, ns);
     shell_internal::build_native_switcher(app, ns);
-    shell_internal::build_osd_window(app, ns);
-    init_sandbox_pip(ns);
-    init_sni_tray(+[](void *d) {
-        shell_internal::sync_top_bar_tray(static_cast<NativeShellState *>(d));
-    }, ns);
+    if (!sb_mode) {
+        shell_internal::build_osd_window(app, ns);
+        init_sandbox_pip(ns);
+        init_sni_tray(+[](void *d) {
+            shell_internal::sync_top_bar_tray(static_cast<NativeShellState *>(d));
+        }, ns);
+    }
     shell_internal::sync_top_bar_workspaces(ns);
-    shell_internal::sync_top_bar_tray(ns);
+    if (!sb_mode) {
+        shell_internal::sync_top_bar_tray(ns);
+    }
     shell_internal::sync_monitor_wallpapers(app, ns);
     if (GdkDisplay *disp = gdk_display_get_default()) {
         if (GListModel *mons = gdk_display_get_monitors(disp)) {
@@ -1063,10 +1106,14 @@ void init_native_shell(GtkApplication *app, AppState *state) {
                 }), ns);
         }
     }
-    shell_internal::show_desktop_startup_splash(app, ns);
+    if (!sb_mode) {
+        shell_internal::show_desktop_startup_splash(app, ns);
+    }
 
     native_shell_sync_telemetry(state);
-    native_shell_sync_perf(state);
+    if (!sb_mode) {
+        native_shell_sync_perf(state);
+    }
 }
 
 void shutdown_native_shell(AppState *state) {
@@ -1146,6 +1193,9 @@ void native_shell_sync_telemetry(AppState *state) {
     if (ns->bar_ime_lbl && has_executable("fcitx5-remote")) {
         std::string ime = trim_copy(run_cmd_capture("fcitx5-remote 2>/dev/null"));
         gtk_label_set_text(GTK_LABEL(ns->bar_ime_lbl), ime == "2" ? "中" : "EN");
+    }
+    if (state->sandbox_shell_mode) {
+        return;
     }
     {
         MediaSnapshot media = collect_media_state();

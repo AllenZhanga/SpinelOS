@@ -67,6 +67,7 @@ struct AppState {
 
     std::atomic<bool> bt_busy{false};
     std::atomic<bool> wifi_busy{false};
+    bool sandbox_shell_mode = false;
 };
 
 #if SPINEL_HAS_WEBKIT

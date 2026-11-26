@@ -220,7 +220,15 @@ void build_desktop_popover(NativeShellState *ns) {
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     struct MenuItem { const char *label; const char *cmd; };
-    const MenuItem entries[] = {
+    const bool sb = ns && ns->app_state && ns->app_state->sandbox_shell_mode;
+    const std::vector<MenuItem> entries = sb ? std::vector<MenuItem>{
+        {"新建文件夹", "desktop:new-folder"},
+        {"在文件管理中打开桌面", "desktop:open-folder"},
+        {"打开终端", "launch:terminal"},
+        {nullptr, nullptr},
+        {"搜索应用 (Alt+Space)", "launcher:toggle"},
+        {"刷新桌面", "telemetry:refresh"}
+    } : std::vector<MenuItem>{
         {"新建文件夹", "desktop:new-folder"},
         {"在文件管理中打开桌面", "desktop:open-folder"},
         {"打开终端", "launch:terminal"},
@@ -359,38 +367,48 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
     auto push_sc = [&](std::string lbl, std::string cmd, std::string kind, std::string ico) {
         items.push_back({std::move(lbl), std::move(cmd), std::move(kind), std::move(ico), "", false, false, false});
     };
-    push_sc("游戏中心", "games:open", "games", "");
-    push_sc("应用商店", "store:open", "store", "");
-    push_sc("Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"}));
-    push_sc("主机大屏", "launch:steam-gamepadui", "gamepad", "");
-    push_sc("文件管理", "launch:files", "files", "");
-    push_sc("终端", "launch:terminal", "terminal", "");
-    push_sc("系统设置", "settings:open:display", "settings", "");
-    if (ns->telemetry.is_live) {
-        push_sc("安装 Spinel OS", "installer:open", "installer", "");
-    }
+    const bool sb = ns->app_state && ns->app_state->sandbox_shell_mode;
+    if (sb) {
+        push_sc("文件管理", "launch:files", "files", "");
+        push_sc("终端", "launch:terminal", "terminal", "");
+        if (has_executable("google-chrome-stable") || has_executable("chromium") || has_executable("firefox")) {
+            push_sc("浏览器", "launch:browser", "browser",
+                    find_app_icon_path(ns->desktop_apps, {"google-chrome", "chromium", "firefox"}));
+        }
+    } else {
+        push_sc("游戏中心", "games:open", "games", "");
+        push_sc("应用商店", "store:open", "store", "");
+        push_sc("Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"}));
+        push_sc("主机大屏", "launch:steam-gamepadui", "gamepad", "");
+        push_sc("文件管理", "launch:files", "files", "");
+        push_sc("终端", "launch:terminal", "terminal", "");
+        push_sc("系统设置", "settings:open:display", "settings", "");
+        if (ns->telemetry.is_live) {
+            push_sc("安装 Spinel OS", "installer:open", "installer", "");
+        }
 
-    static const char *kFeaturedStoreIds[] = {
-        "google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl",
-        "lutris", "protonup-qt", "gravitymark", "discord", "com.obsproject.studio"
-    };
-    for (const auto &app : ns->desktop_apps) {
-        std::string lid = to_lower_copy(app.id);
-        for (const char *fid : kFeaturedStoreIds) {
-            if (lid == fid) {
-                push_sc(app.name, "app:launch:" + app.id, match_app_kind(app.id), app.icon_path);
-                break;
+        static const char *kFeaturedStoreIds[] = {
+            "google-chrome", "com.google.chrome", "chromium", "firefox", "heroic", "com.heroicgameslauncher.hgl",
+            "lutris", "protonup-qt", "gravitymark", "discord", "com.obsproject.studio"
+        };
+        for (const auto &app : ns->desktop_apps) {
+            std::string lid = to_lower_copy(app.id);
+            for (const char *fid : kFeaturedStoreIds) {
+                if (lid == fid) {
+                    push_sc(app.name, "app:launch:" + app.id, match_app_kind(app.id), app.icon_path);
+                    break;
+                }
             }
         }
-    }
 
-    auto steam_games = list_steam_games();
-    int added_games = 0;
-    for (const auto &g : steam_games) {
-        if (added_games >= 6) break;
-        push_sc(g.name, "steam:launch:" + g.appid, "steam",
-                !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}));
-        ++added_games;
+        auto steam_games = list_steam_games();
+        int added_games = 0;
+        for (const auto &g : steam_games) {
+            if (added_games >= 6) break;
+            push_sc(g.name, "steam:launch:" + g.appid, "steam",
+                    !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}));
+            ++added_games;
+        }
     }
 
     std::error_code ec;

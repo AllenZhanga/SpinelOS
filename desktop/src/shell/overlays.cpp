@@ -179,9 +179,18 @@ void rebuild_launcher_index(NativeShellState *ns) {
     if (!ns) return;
     ns->launcher_entries.clear();
     ns->desktop_apps = list_desktop_apps();
+    const bool sb = ns->app_state && ns->app_state->sandbox_shell_mode;
     bool steam_installed = has_executable("steam");
 
-    ns->launcher_entries = {
+    if (sb) {
+        ns->launcher_entries = {
+            {"Spinel 终端", "原生多标签 Wayland 终端", "terminal ptyxis shell console bash", "launch:terminal", "", "terminal"},
+            {"文件管理 (Spinel Files)", "轻量原生文件管理、目录浏览、解压与压缩", "files manager folder spinel-files", "launch:files", "", "files"},
+            {"浏览器", "启动沙箱内隔离浏览器 (Chromium / Chrome / Firefox)", "browser chrome chromium firefox web", "launch:browser",
+             find_app_icon_path(ns->desktop_apps, {"google-chrome", "chromium", "firefox"}), "browser"}
+        };
+    } else {
+        ns->launcher_entries = {
         {"Spinel 终端", "原生多标签 Wayland 终端 (Super+Enter)", "terminal ptyxis shell console bash", "launch:terminal", "", "terminal"},
         {"应用商店", "一键安装 Steam / 浏览器 / 游戏与系统更新", "store app market pacman", "store:open", "", "store"},
         {"游戏与启动中心", "浏览 Steam 游戏库、启动大屏模式与调节游戏性能", "games library launcher center", "games:open", "", "games"},
@@ -215,11 +224,13 @@ void rebuild_launcher_index(NativeShellState *ns) {
             "安装 Spinel OS 到硬盘", "启动系统图形安装向导", "installer disk setup live", "installer:open", "", "installer"
         });
     }
+    } // end if (!sb)
 
     for (const auto &app : ns->desktop_apps) {
         std::string lid = to_lower_copy(app.id);
         if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal" ||
             lid == "spinel-files" || lid == "org.spinelos.files") continue;
+        if (sb && lid.rfind("org.spinelos.", 0) == 0 && lid != "org.spinelos.windowsapps") continue;
         const bool wine = app.id.starts_with("wine:");
         const bool windows_manager = lid == "org.spinelos.windowsapps";
         ns->launcher_entries.push_back({
@@ -233,15 +244,17 @@ void rebuild_launcher_index(NativeShellState *ns) {
         });
     }
 
-    for (const auto &g : list_steam_games()) {
-        ns->launcher_entries.push_back({
-            g.name,
-            "Steam 本地游戏",
-            "steam game " + g.appid,
-            "steam:launch:" + g.appid,
-            !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}),
-            "steam"
-        });
+    if (!sb) {
+        for (const auto &g : list_steam_games()) {
+            ns->launcher_entries.push_back({
+                g.name,
+                "Steam 本地游戏",
+                "steam game " + g.appid,
+                "steam:launch:" + g.appid,
+                !g.cover_path.empty() ? g.cover_path : find_app_icon_path(ns->desktop_apps, {"steam"}),
+                "steam"
+            });
+        }
     }
 }
 
