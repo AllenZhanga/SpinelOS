@@ -16,7 +16,8 @@ sudo chmod 700 /var/lib/spinel-relay
 sudo install -Dm644 "${SCRIPT_DIR}/spinel-relay.service" /etc/systemd/system/spinel-relay.service
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now spinel-relay
+sudo systemctl enable spinel-relay
+sudo systemctl restart spinel-relay
 
 if command -v ufw >/dev/null 2>&1; then
   sudo ufw allow 7443/tcp comment 'Spinel Relay TLS' || true
