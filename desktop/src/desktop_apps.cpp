@@ -4,14 +4,20 @@
 #include "system_control.hpp"
 
 #include <gtk/gtk.h>
+#include <dirent.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -396,4 +402,242 @@ void set_wallpaper_pref(AppState *state, const std::string &theme_id) {
     fs::path wp_file = fs::path(home_dir()) / ".config/spinelos/wallpaper.conf";
     write_text_file(wp_file.string(), theme_id + "\n");
     push_wallpaper_pref(state);
+}
+
+namespace {
+
+std::string to_lower_str(std::string s) {
+    for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+std::string basename_only(const std::string &s) {
+    auto pos = s.rfind('/');
+    return (pos == std::string::npos) ? s : s.substr(pos + 1);
+}
+
+bool is_all_digits(const std::string &s) {
+    if (s.empty()) return false;
+    for (unsigned char c : s) {
+        if (!std::isdigit(c)) return false;
+    }
+    return true;
+}
+
+std::vector<pid_t> find_user_pids_matching(const std::vector<std::string> &target_names_lower,
+                                           const std::string &steam_appid_match = "") {
+    std::vector<pid_t> pids;
+    uid_t self_uid = getuid();
+    pid_t self_pid = getpid();
+
+    DIR *dir = opendir("/proc");
+    if (!dir) return pids;
+    while (dirent *ent = readdir(dir)) {
+        if (!is_all_digits(ent->d_name)) continue;
+        pid_t pid = static_cast<pid_t>(std::atoi(ent->d_name));
+        if (pid <= 1 || pid == self_pid) continue;
+
+        std::string pdir = std::string("/proc/") + ent->d_name;
+        struct stat st{};
+        if (stat(pdir.c_str(), &st) != 0 || st.st_uid != self_uid) continue;
+
+        std::string comm = to_lower_str(trim_copy(read_first_line(pdir + "/comm", "")));
+        if (is_protected_system_process(comm)) continue;
+
+        std::string cmd0_base;
+        std::string cmdline_joined;
+        {
+            std::ifstream cfs(pdir + "/cmdline", std::ios::binary);
+            std::string raw((std::istreambuf_iterator<char>(cfs)), std::istreambuf_iterator<char>());
+            if (!raw.empty()) {
+                auto nul0 = raw.find('\0');
+                std::string arg0 = (nul0 == std::string::npos) ? raw : raw.substr(0, nul0);
+                cmd0_base = to_lower_str(basename_only(arg0));
+                for (char &ch : raw) {
+                    if (ch == '\0') ch = ' ';
+                }
+                cmdline_joined = raw;
+            }
+        }
+        if (is_protected_system_process(cmd0_base)) continue;
+
+        if (!steam_appid_match.empty()) {
+            bool hit = cmdline_joined.find("AppId=" + steam_appid_match) != std::string::npos;
+            if (!hit) {
+                std::ifstream efs(pdir + "/environ", std::ios::binary);
+                std::string env_raw((std::istreambuf_iterator<char>(efs)), std::istreambuf_iterator<char>());
+                for (char &ch : env_raw) {
+                    if (ch == '\0') ch = '\n';
+                }
+                hit = env_raw.find("STEAM_COMPAT_APP_ID=" + steam_appid_match) != std::string::npos ||
+                      env_raw.find("SteamAppId=" + steam_appid_match) != std::string::npos;
+            }
+            if (hit) pids.push_back(pid);
+            continue;
+        }
+
+        for (const auto &cand : target_names_lower) {
+            if (cand.empty()) continue;
+            if (comm == cand || cmd0_base == cand ||
+                (cand.size() >= 15 && comm == cand.substr(0, 15))) {
+                pids.push_back(pid);
+                break;
+            }
+        }
+    }
+    closedir(dir);
+    return pids;
+}
+
+void terminate_pids_gracefully(const std::vector<pid_t> &pids, int wait_ms = 1200) {
+    if (pids.empty()) return;
+    for (pid_t p : pids) kill(p, SIGTERM);
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+    for (pid_t p : pids) {
+        if (kill(p, 0) == 0) kill(p, SIGKILL);
+    }
+}
+
+}  // namespace
+
+bool is_protected_system_process(const std::string &proc_name) {
+    std::string l = to_lower_str(basename_only(trim_copy(proc_name)));
+    if (l.empty()) return true;
+    static const char *kProtected[] = {
+        "spinel-shell", "labwc", "xwayland", "systemd", "dbus-daemon", "dbus-broker",
+        "pipewire", "pipewire-pulse", "wireplumber", "fcitx5", "mako", "wl-clip-persist",
+        "swayidle", "swaylock", "sshd", "sshd-session", "networkmanager", "bluetoothd",
+        "bash", "zsh", "sh", "login", "agetty", "polkitd",
+        "polkit-gnome-authentication-agent-1"
+    };
+    for (const char *p : kProtected) {
+        if (l == p) return true;
+    }
+    if (l.rfind("xdg-desktop-portal", 0) == 0) return true;
+    return false;
+}
+
+std::vector<std::string> derive_app_quit_process_names(const std::string &app_id,
+                                                       const std::string &title,
+                                                       const std::string &exec_hint) {
+    std::vector<std::string> names;
+    auto push_unique = [&](const std::string &raw) {
+        std::string n = to_lower_str(basename_only(trim_copy(raw)));
+        if (n.empty() || is_protected_system_process(n)) return;
+        if (std::find(names.begin(), names.end(), n) == names.end()) {
+            names.push_back(std::move(n));
+        }
+    };
+
+    if (!exec_hint.empty()) {
+        for (const auto &tok : split_exec_args(exec_hint)) {
+            std::string b = to_lower_str(basename_only(tok));
+            if (b == "env" || b.find('=') != std::string::npos || (!b.empty() && b.front() == '-')) {
+                continue;
+            }
+            push_unique(b);
+            break;
+        }
+    }
+
+    std::string hay = to_lower_str(app_id + " " + title);
+    struct FamilyMap {
+        const char *needle;
+        const char *bins[4];
+    };
+    static const FamilyMap kFamilies[] = {
+        {"steam", {"steam", "steamwebhelper", "steam-runtime-s", "srt-bwrap"}},
+        {"google-chrome", {"chrome", "google-chrome", "google-chrome-stable", nullptr}},
+        {"chromium", {"chromium", nullptr, nullptr, nullptr}},
+        {"firefox", {"firefox", "firefox-bin", nullptr, nullptr}},
+        {"discord", {"discord", "discordcanary", nullptr, nullptr}},
+        {"obsproject", {"obs", nullptr, nullptr, nullptr}},
+        {"telegram", {"telegram-desktop", "telegram", nullptr, nullptr}},
+        {"wechat", {"wechat", nullptr, nullptr, nullptr}},
+        {"heroic", {"heroic", nullptr, nullptr, nullptr}},
+        {"lutris", {"lutris", nullptr, nullptr, nullptr}},
+        {"qbittorrent", {"qbittorrent", nullptr, nullptr, nullptr}},
+        {"libreoffice", {"soffice.bin", "oosplash", "libreoffice", nullptr}},
+        {"soffice", {"soffice.bin", "oosplash", nullptr, nullptr}},
+        {"code", {"code", "code-oss", nullptr, nullptr}},
+        {"obsidian", {"obsidian", nullptr, nullptr, nullptr}},
+        {"papers", {"papers", nullptr, nullptr, nullptr}},
+        {"evince", {"evince", nullptr, nullptr, nullptr}},
+        {"amberol", {"amberol", nullptr, nullptr, nullptr}},
+        {"mpv", {"mpv", nullptr, nullptr, nullptr}},
+        {"vlc", {"vlc", nullptr, nullptr, nullptr}},
+        {"kdenlive", {"kdenlive", nullptr, nullptr, nullptr}},
+        {"gimp", {"gimp", nullptr, nullptr, nullptr}},
+        {"spinel-files", {"spinel-files", nullptr, nullptr, nullptr}},
+        {"spinel-terminal", {"spinel-terminal", nullptr, nullptr, nullptr}},
+    };
+    for (const auto &fam : kFamilies) {
+        if (hay.find(fam.needle) != std::string::npos) {
+            for (const char *b : fam.bins) {
+                if (b) push_unique(b);
+            }
+        }
+    }
+
+    std::string laid = to_lower_str(trim_copy(app_id));
+    if (!laid.empty()) {
+        auto dot = laid.rfind('.');
+        std::string tail = (dot == std::string::npos) ? laid : laid.substr(dot + 1);
+        push_unique(laid);
+        push_unique(tail);
+    }
+    return names;
+}
+
+bool quit_app_processes(const std::string &app_id, const std::string &title) {
+    std::string laid = to_lower_str(trim_copy(app_id));
+    if (laid == "spinel-webui" || laid == "org.spinelos.webui") {
+        return true;  // Individual WebUI window already closed cleanly; keeps other WebUI tabs safe
+    }
+
+    if (laid.rfind("steam_app_", 0) == 0) {
+        std::string game_id = laid.substr(10);
+        if (is_all_digits(game_id)) {
+            std::thread([game_id]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                auto pids = find_user_pids_matching({}, game_id);
+                terminate_pids_gracefully(pids, 1200);
+            }).detach();
+            return true;
+        }
+    }
+
+    std::string hay = laid + " " + to_lower_str(title);
+    if (laid == "steam" || (hay.find("steam") != std::string::npos && hay.find("steam_app_") == std::string::npos)) {
+        std::thread([]() {
+            if (has_executable("steam")) {
+                spawn_argv_detached({"steam", "-shutdown"});
+                std::this_thread::sleep_for(std::chrono::milliseconds(1600));
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            }
+            auto pids = find_user_pids_matching({"steam", "steamwebhelper", "steam-runtime-s", "steam-launch-wr", "srt-bwrap"});
+            terminate_pids_gracefully(pids, 900);
+        }).detach();
+        return true;
+    }
+
+    std::string exec_hint;
+    for (const auto &a : scan_all_apps()) {
+        std::string aid_l = to_lower_str(a.id);
+        if (!laid.empty() && (aid_l == laid || aid_l.find(laid) != std::string::npos)) {
+            exec_hint = a.exec;
+            break;
+        }
+    }
+
+    auto names = derive_app_quit_process_names(app_id, title, exec_hint);
+    if (names.empty()) return false;
+
+    std::thread([names]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+        auto pids = find_user_pids_matching(names);
+        terminate_pids_gracefully(pids, 1100);
+    }).detach();
+    return true;
 }

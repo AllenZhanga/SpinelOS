@@ -314,10 +314,7 @@
 
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
     const list = (ss.apps || []).filter((app) => {
-      const catMatch = storeCategory === "all" ||
-        app.category === storeCategory ||
-        (storeCategory === "游戏平台" && (app.category === "游戏平台" || app.category === "游戏工具")) ||
-        (storeCategory === "社交与影音" && (app.category === "社交语音" || app.category === "直播录屏" || app.category === "影音播放"));
+      const catMatch = storeCategory === "all" || app.category === storeCategory;
       if (!catMatch) return false;
       if (!query) return true;
       return `${app.name} ${app.pkg} ${app.summary} ${app.category}`.toLowerCase().includes(query);
@@ -337,7 +334,7 @@
       head.className = "store-card-head";
       const iconWrap = document.createElement("div");
       iconWrap.className = "store-card-icon";
-      fillIconContainer(iconWrap, findAppIconUri([app.id, app.pkg, app.name]), matchAppKind(`${app.id} ${app.pkg}`), app.name);
+      fillIconContainer(iconWrap, findAppIconUri([app.id, app.pkg, app.name]), matchAppKind(`${app.id} ${app.pkg} ${app.name}`), app.name);
 
       const info = document.createElement("div");
       info.className = "store-card-info";
@@ -358,19 +355,71 @@
 
       const foot = document.createElement("div");
       foot.className = "store-card-foot";
+      const metaRow = document.createElement("div");
+      metaRow.className = "store-card-meta-row";
       const pkgLabel = document.createElement("span");
       pkgLabel.className = "store-card-pkg";
-      pkgLabel.textContent = app.pkg;
+      pkgLabel.title = app.pkg;
+      pkgLabel.textContent = app.backend === "link" ? app.pkg.replace(/^https:\/\//, "") : app.pkg;
+      metaRow.appendChild(pkgLabel);
+
+      if (app.service_unit && app.installed) {
+        const svcPill = document.createElement("span");
+        svcPill.className = `store-svc-pill${app.service_active ? " running" : ""}`;
+        svcPill.textContent = app.service_active ? "运行中" : "已停止";
+        metaRow.appendChild(svcPill);
+      }
 
       const actions = document.createElement("div");
       actions.className = "footer-actions";
       const isActiveTarget = ss.busy && (ss.active_id === app.id || ss.active_id === app.pkg);
 
-      if (app.installed) {
+      if (app.backend === "link") {
+        const linkBtn = document.createElement("button");
+        linkBtn.className = "btn primary small";
+        linkBtn.textContent = "打开官网";
+        linkBtn.setAttribute("data-cmd", `store:launch:${app.id}`);
+        actions.appendChild(linkBtn);
+        if (app.webapp_capable) {
+          const pinBtn = document.createElement("button");
+          pinBtn.className = "btn small";
+          pinBtn.textContent = app.webapp_pinned ? "移除快捷方式" : "固定桌面应用";
+          pinBtn.disabled = ss.busy;
+          pinBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            requestStoreOp(app.webapp_pinned ? "webapp-unpin" : "webapp-pin", {
+              id: app.id,
+              name: app.name,
+              backend: app.backend,
+              pkg: app.pkg
+            });
+          });
+          actions.appendChild(pinBtn);
+        }
+      } else if (app.installed) {
         const launchBtn = document.createElement("button");
         launchBtn.className = "btn primary small";
         launchBtn.textContent = "打开";
         launchBtn.setAttribute("data-cmd", `store:launch:${app.id}`);
+        actions.appendChild(launchBtn);
+
+        if (app.service_unit) {
+          const svcBtn = document.createElement("button");
+          svcBtn.className = app.service_active ? "btn small" : "btn accent small";
+          svcBtn.textContent = app.service_active ? "关闭服务" : "开启服务";
+          svcBtn.disabled = ss.busy;
+          svcBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            requestStoreOp(app.service_active ? "svc-stop" : "svc-start", {
+              id: app.id,
+              name: app.name,
+              backend: app.backend,
+              pkg: app.service_unit
+            });
+          });
+          actions.appendChild(svcBtn);
+        }
+
         const rmBtn = document.createElement("button");
         rmBtn.className = "btn small danger";
         if (isActiveTarget && ss.active_action === "remove") {
@@ -391,7 +440,7 @@
             requestStoreOp("remove", { id: app.id, name: app.name, backend: app.backend, pkg: app.pkg });
           });
         }
-        actions.append(launchBtn, rmBtn);
+        actions.appendChild(rmBtn);
       } else {
         const instBtn = document.createElement("button");
         if (isActiveTarget) {
@@ -417,7 +466,7 @@
         actions.append(instBtn);
       }
 
-      foot.append(pkgLabel, actions);
+      foot.append(metaRow, actions);
       card.append(head, foot);
       grid.appendChild(card);
     });
@@ -443,7 +492,17 @@
     const logTitle = document.getElementById("store-log-title");
     if (logWrap) logWrap.classList.remove("hidden");
     if (logBox) logBox.textContent = "";
-    const verbMap = { install: "正在下载安装", remove: "正在卸载", "sys-update": "正在执行", "mirror-test": "正在执行", "keyring-fix": "正在执行" };
+    const verbMap = {
+      install: "正在下载安装",
+      remove: "正在卸载",
+      "svc-start": "正在启动服务",
+      "svc-stop": "正在停止服务",
+      "webapp-pin": "正在固定快捷方式",
+      "webapp-unpin": "正在移除快捷方式",
+      "sys-update": "正在执行",
+      "mirror-test": "正在执行",
+      "keyring-fix": "正在执行"
+    };
     if (logTitle) logTitle.textContent = `${verbMap[action] || "正在执行"}: ${op.name || op.pkg}`;
     setStoreProgress(action === "install" || action === "sys-update", 2, `${verbMap[action] || "正在执行"} ${op.name || op.pkg}...`);
     state.storeState.busy = true;
@@ -461,7 +520,12 @@
 
   function requestStoreOp(action, op) {
     if (state.storeState.busy) return;
-    if ((op.backend === "pacman" || op.backend === "native") && !state.storeState.sudo_nopass) {
+    const isUserOnlyOp =
+      action === "webapp-pin" ||
+      action === "webapp-unpin" ||
+      ((action === "svc-start" || action === "svc-stop") && op.id === "vllm");
+    const needsSudo = (op.backend === "pacman" || op.backend === "native") && !isUserOnlyOp;
+    if (needsSudo && !state.storeState.sudo_nopass) {
       state.pendingStoreOp = { action, op };
       const box = document.getElementById("store-pass-box");
       const title = document.getElementById("store-pass-title");

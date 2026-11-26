@@ -398,6 +398,7 @@ if id -u "${USERNAME}" >/dev/null 2>&1; then
 else
   useradd -m -G wheel,video,audio,input,render -s /bin/bash "${USERNAME}"
 fi
+systemctl enable cups.service >/dev/null 2>&1 || true
 EOF
 
 printf "root:%s\n%s:%s\n" "$TARGET_PASSWORD" "$USERNAME" "$TARGET_PASSWORD" | arch-chroot /mnt chpasswd

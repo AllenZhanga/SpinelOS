@@ -107,7 +107,8 @@ if [ "$MODE" = "full" ]; then
   sudo pacman -Syu --noconfirm --needed \
     flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
-    spice-vdagent file-roller 7zip gvfs mousepad ristretto wlr-randr wl-clipboard wl-clip-persist os-prober \
+    spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
+    wlr-randr wl-clipboard wl-clip-persist os-prober \
     polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
     fcitx5 fcitx5-rime fcitx5-gtk
   fc-cache -f >/dev/null 2>&1 || true
@@ -121,6 +122,7 @@ if [ "$MODE" = "full" ]; then
     sudo systemctl enable --now spice-vdagentd.service 2>/dev/null || true
   fi
   sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
+  sudo systemctl enable --now cups.service 2>/dev/null || true
 
   sudo mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/polkit-1/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/grub/themes/spinelos /boot/grub/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
   sudo cp -a /tmp/spinel-dev/labwc/. /etc/xdg/labwc/

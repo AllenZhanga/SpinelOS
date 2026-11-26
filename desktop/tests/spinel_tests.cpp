@@ -1,3 +1,4 @@
+#include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "ipc_router.hpp"
@@ -645,6 +646,61 @@ void test_ipc_router() {
     EXPECT(convert_argb32_be_to_cairo_argb32(be_px, 2, 1, 8, reinterpret_cast<uint8_t *>(out_px)));
     EXPECT(out_px[0] == ((128u << 24) | (128u << 16) | (0u << 8) | 32u));
     EXPECT(out_px[1] == ((255u << 24) | (10u << 16) | (20u << 8) | 30u));
+
+    // Dock full app quit IPC & Store service/AI helpers
+    static uint64_t quit_wid = 0;
+    mock_actions.window_quit = +[](uint64_t wid) { quit_wid = wid; };
+    EXPECT(dispatch_ipc_command(&dummy, "window:quit:42", mock_actions, &reply));
+    EXPECT(quit_wid == 42);
+
+    static std::string last_store_action;
+    static std::string last_store_payload;
+    mock_actions.store_action = +[](AppState *, const std::string &act, const std::string &pl) {
+        last_store_action = act;
+        last_store_payload = pl;
+    };
+    EXPECT(dispatch_ipc_command(&dummy, "store:svc-start\nid=ollama\npkg=ollama", mock_actions, &reply));
+    EXPECT(last_store_action == "svc-start" && last_store_payload.find("id=ollama") != std::string::npos);
+    EXPECT(dispatch_ipc_command(&dummy, "store:webapp-pin\nid=chatgpt", mock_actions, &reply));
+    EXPECT(last_store_action == "webapp-pin");
+}
+
+void test_dock_quit_and_store_helpers() {
+    EXPECT(is_protected_system_process("spinel-shell"));
+    EXPECT(is_protected_system_process("labwc"));
+    EXPECT(is_protected_system_process("Xwayland"));
+    EXPECT(is_protected_system_process("pipewire"));
+    EXPECT(!is_protected_system_process("steam"));
+    EXPECT(!is_protected_system_process("steamwebhelper"));
+
+    const auto steam_names = derive_app_quit_process_names("steam", "Steam", "");
+    EXPECT(!steam_names.empty());
+    bool has_steam = false, has_webhelper = false;
+    for (const auto &n : steam_names) {
+        if (n == "steam") has_steam = true;
+        if (n == "steamwebhelper") has_webhelper = true;
+    }
+    EXPECT(has_steam && has_webhelper);
+
+    const auto chrome_names = derive_app_quit_process_names("google-chrome", "Google Chrome", "");
+    EXPECT(!chrome_names.empty());
+
+    EXPECT(select_ollama_pacman_pkg(true, false) == "ollama-cuda");
+    EXPECT(select_ollama_pacman_pkg(false, true) == "ollama-rocm");
+    EXPECT(select_ollama_pacman_pkg(false, false) == "ollama");
+
+    EXPECT(is_valid_store_service_unit("ollama"));
+    EXPECT(is_valid_store_service_unit("vllm"));
+    EXPECT(is_valid_store_service_unit("docker"));
+    EXPECT(is_valid_store_service_unit("cups"));
+    EXPECT(!is_valid_store_service_unit("systemd-journald"));
+    EXPECT(is_user_systemd_service_unit("vllm"));
+    EXPECT(!is_user_systemd_service_unit("ollama"));
+
+    EXPECT(is_valid_https_url("https://chatgpt.com"));
+    EXPECT(is_valid_https_url("https://antigravity.google"));
+    EXPECT(!is_valid_https_url("http://example.com"));
+    EXPECT(!is_valid_https_url("https://evil.com/\"rm -rf\""));
 }
 
 }  // namespace
@@ -658,6 +714,7 @@ int main() {
     test_steam_library();
     test_system_control_configs();
     test_ipc_router();
+    test_dock_quit_and_store_helpers();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

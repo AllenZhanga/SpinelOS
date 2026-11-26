@@ -1,5 +1,6 @@
 #include "window_tracker.hpp"
 #include "common.hpp"
+#include "desktop_apps.hpp"
 #include "native_shell.hpp"
 #include "ext-workspace-v1-client-protocol.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
@@ -525,6 +526,15 @@ void close_tracked_window(uint64_t id) {
     if (!w || !w->handle || !g_ctx.display) return;
     zwlr_foreign_toplevel_handle_v1_close(w->handle);
     wl_display_flush(g_ctx.display);
+}
+
+bool quit_tracked_window_app(uint64_t id) {
+    TrackedWindow *w = find_window_by_id(id);
+    if (!w) return false;
+    std::string aid = w->app_id;
+    std::string ttl = w->title;
+    close_tracked_window(id);
+    return quit_app_processes(aid, ttl);
 }
 
 std::string format_workspace_badge_label(int index_0based, const std::string &ws_name) {

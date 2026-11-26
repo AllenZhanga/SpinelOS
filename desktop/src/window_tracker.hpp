@@ -34,6 +34,7 @@ void push_windows_to_ui(AppState *state);
 void toggle_or_activate_window(uint64_t id);
 void activate_tracked_window(uint64_t id);
 void close_tracked_window(uint64_t id);
+bool quit_tracked_window_app(uint64_t id);
 
 std::vector<TrackedWorkspaceInfo> list_tracked_workspaces();
 bool activate_tracked_workspace(int index_0based);

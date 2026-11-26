@@ -398,6 +398,18 @@ bool dispatch_ipc_command(AppState *state,
         {"store:keyring-fix", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             if (a.store_action) a.store_action(s, "keyring-fix", r.legacy_raw);
         }},
+        {"store:svc-start", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "svc-start", r.legacy_raw);
+        }},
+        {"store:svc-stop", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "svc-stop", r.legacy_raw);
+        }},
+        {"store:webapp-pin", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "webapp-pin", r.legacy_raw);
+        }},
+        {"store:webapp-unpin", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "webapp-unpin", r.legacy_raw);
+        }},
         {"store:cancel", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             if (a.store_cancel) a.store_cancel(s);
         }},
@@ -773,6 +785,10 @@ bool dispatch_ipc_command(AppState *state,
         {"window:close:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
             uint64_t wid = std::strtoull(arg_or_param(r, "window:close:", {"id", "wid"}).c_str(), nullptr, 10);
             if (wid > 0 && a.window_close) a.window_close(wid);
+        }},
+        {"window:quit:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
+            uint64_t wid = std::strtoull(arg_or_param(r, "window:quit:", {"id", "wid"}).c_str(), nullptr, 10);
+            if (wid > 0 && a.window_quit) a.window_quit(wid);
         }},
         {"wallpaper:set:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             std::string wp = arg_or_param(r, "wallpaper:set:", {"id", "theme"});

@@ -613,11 +613,18 @@ void show_dock_context_menu(NativeShellState *ns, int idx, double x) {
 
     if (item->running && item->win_id > 0) {
         gtk_box_append(GTK_BOX(ns->dock_popover_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-        GtkWidget *b_close = make_dock_menu_btn("关闭应用程序");
+        GtkWidget *b_close = make_dock_menu_btn("关闭当前窗口");
         std::string close_cmd = "window:close:" + std::to_string(item->win_id);
         g_object_set_data_full(G_OBJECT(b_close), "spinel-cmd", g_strdup(close_cmd.c_str()), g_free);
         g_signal_connect(b_close, "clicked", G_CALLBACK(on_dock_popover_cmd), ns);
         gtk_box_append(GTK_BOX(ns->dock_popover_box), b_close);
+
+        GtkWidget *b_quit = make_dock_menu_btn("完全退出应用");
+        gtk_widget_add_css_class(b_quit, "danger-hover");
+        std::string quit_cmd = "window:quit:" + std::to_string(item->win_id);
+        g_object_set_data_full(G_OBJECT(b_quit), "spinel-cmd", g_strdup(quit_cmd.c_str()), g_free);
+        g_signal_connect(b_quit, "clicked", G_CALLBACK(on_dock_popover_cmd), ns);
+        gtk_box_append(GTK_BOX(ns->dock_popover_box), b_quit);
     }
 
     int w = gtk_widget_get_width(ns->dock_da);

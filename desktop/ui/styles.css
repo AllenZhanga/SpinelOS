@@ -1594,6 +1594,34 @@ body.low-fx .lg-orb {
   font-size: 11px;
   color: var(--muted);
   font-family: ui-monospace, "JetBrains Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+.store-svc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--muted);
+}
+
+.store-svc-pill.running {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.store-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .store-log-card {

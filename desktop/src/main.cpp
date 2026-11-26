@@ -587,6 +587,7 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     actions.push_windows = push_windows_to_ui;
     actions.window_toggle = toggle_or_activate_window;
     actions.window_close = close_tracked_window;
+    actions.window_quit = +[](uint64_t wid) { quit_tracked_window_app(wid); };
     actions.workspace_switch = +[](int idx1) { activate_tracked_workspace(idx1 - 1); };
     actions.workspace_step = +[](int delta) { step_tracked_workspace(delta); };
 #endif

@@ -65,13 +65,17 @@ exfatprogs
 snapper
 reflector
 
-# Desktop Apps (App Store + Built-in File Manager, Archive Manager, Editor, Viewer)
+# Desktop Apps (App Store + Built-in File Manager, Archive Manager, Editor, Viewer, PDF, Printing)
 flatpak
 file-roller
 7zip
 gvfs
 mousepad
 ristretto
+papers
+cups
+cups-pdf
+system-config-printer
 
 # Proton & Open-Source Gaming Utilities (Steam itself is installed on-demand via App Store for clean redistribution)
 gamescope

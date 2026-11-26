@@ -103,6 +103,8 @@ ln -sf /usr/lib/systemd/system/bluetooth.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
 ln -sf /usr/lib/systemd/system/power-profiles-daemon.service \
   "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/power-profiles-daemon.service"
+ln -sf /usr/lib/systemd/system/cups.service \
+  "${PROFILE_DIR}/airootfs/etc/systemd/system/multi-user.target.wants/cups.service"
 
 # Remove releng's systemd-networkd/iwd defaults so NetworkManager exclusively manages all NICs/Wi-Fi
 rm -f "${PROFILE_DIR}/airootfs/etc/systemd/network"/*.network \
