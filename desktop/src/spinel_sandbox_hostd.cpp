@@ -31,6 +31,7 @@ namespace fs = std::filesystem;
 namespace {
 
 std::atomic<bool> g_stop_hostd{false};
+std::atomic<uint64_t> g_session_epoch{0};
 
 uint32_t now_msec() {
     return static_cast<uint32_t>(
@@ -233,6 +234,7 @@ void init_host_keymap(HostWayland &hw) {
 
 void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     if (!tun) return;
+    const uint64_t my_epoch = g_session_epoch.fetch_add(1) + 1;
     std::string err;
     if (!start_sandbox_session(err)) {
         append_app_log("[RelayHostd] cannot start sandbox: " + err);
@@ -270,7 +272,7 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     std::thread rx([&]() {
         uint8_t mtype = 0;
         std::vector<uint8_t> data;
-        while (!g_stop_hostd.load() && !sess_done.load() && tun->is_open()) {
+        while (!g_stop_hostd.load() && !sess_done.load() && g_session_epoch.load() == my_epoch && tun->is_open()) {
             if (!tun->recv_msg(mtype, data, 300)) continue;
             switch (mtype) {
                 case sandbox_stream::MSG_MOUSE_MOVE:
@@ -364,6 +366,9 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
                         launch_in_sandbox({bin}, "", lerr);
                     }
                     break;
+                case sandbox_stream::MSG_BYE:
+                    sess_done.store(true);
+                    break;
                 default:
                     break;
             }
@@ -375,7 +380,7 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     sandbox_stream::TileEncoderState enc;
     std::vector<uint8_t> pkt;
     bool logged_first_frame = false;
-    while (!g_stop_hostd.load() && !sess_done.load() && tun->is_open()) {
+    while (!g_stop_hostd.load() && !sess_done.load() && g_session_epoch.load() == my_epoch && tun->is_open()) {
         if (!query_sandbox_status().running) break;
 
         {
@@ -386,20 +391,33 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
             if (!hw.cur_frame) break;
             zwlr_screencopy_frame_v1_add_listener(hw.cur_frame, &kHostFrameListener, &hw);
             wl_display_flush(hw.dpy);
-            int fd = wl_display_get_fd(hw.dpy);
-            while (!hw.frame_done && !g_stop_hostd.load() && !sess_done.load()) {
-                struct pollfd pfd{fd, POLLIN, 0};
-                if (::poll(&pfd, 1, 200) > 0) {
-                    if (wl_display_dispatch(hw.dpy) < 0) {
-                        sess_done.store(true);
-                        break;
-                    }
+        }
+
+        int fd = wl_display_get_fd(hw.dpy);
+        auto cap_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        while (!hw.frame_done && !g_stop_hostd.load() && !sess_done.load() && g_session_epoch.load() == my_epoch) {
+            if (std::chrono::steady_clock::now() >= cap_deadline) break;
+            struct pollfd pfd{fd, POLLIN, 0};
+            if (::poll(&pfd, 1, 50) > 0) {
+                std::lock_guard<std::mutex> lk(wl_mu);
+                if (wl_display_dispatch(hw.dpy) < 0) {
+                    sess_done.store(true);
+                    break;
                 }
+                wl_display_flush(hw.dpy);
+            } else {
+                std::lock_guard<std::mutex> lk(wl_mu);
+                wl_display_dispatch_pending(hw.dpy);
+                wl_display_flush(hw.dpy);
             }
+        }
+        {
+            std::lock_guard<std::mutex> lk(wl_mu);
             if (hw.cur_frame) {
                 zwlr_screencopy_frame_v1_destroy(hw.cur_frame);
                 hw.cur_frame = nullptr;
             }
+            wl_display_flush(hw.dpy);
         }
 
         if (hw.frame_ok && !hw.bgra.empty()) {

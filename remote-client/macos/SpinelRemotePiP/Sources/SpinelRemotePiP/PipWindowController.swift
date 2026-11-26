@@ -537,6 +537,7 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
         stopToken.stop()
         let tun = tunnel
         DispatchQueue.global(qos: .userInitiated).async {
+            _ = tun.sendMsg(type: .bye, payload: Data())
             tun.close()
         }
         window?.close()
@@ -548,6 +549,7 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
         stopToken.stop()
         let tun = tunnel
         DispatchQueue.global(qos: .userInitiated).async {
+            _ = tun.sendMsg(type: .bye, payload: Data())
             tun.close()
         }
         onClosed()

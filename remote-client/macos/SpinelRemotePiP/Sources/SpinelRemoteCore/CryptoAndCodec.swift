@@ -12,6 +12,7 @@ public enum SandboxMsgType: UInt8, Sendable {
     case clipText = 7
     case launchApp = 8
     case keyframeReq = 9
+    case bye = 10
 }
 
 public enum SpinelCrypto {
