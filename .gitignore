@@ -4,5 +4,7 @@
 out/
 build/
 desktop/build/
+.build/
+.swiftpm/
 *.iso
 *.log
