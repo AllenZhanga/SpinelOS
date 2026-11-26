@@ -1,4 +1,5 @@
 #include "shell_internal.hpp"
+#include "shell/sandbox_pip.hpp"
 #include "common.hpp"
 #include "steam_library.hpp"
 
@@ -419,14 +420,17 @@ void set_launcher_visible(NativeShellState *ns, bool visible) {
     }
 }
 
-void activate_selected_launcher_row(NativeShellState *ns, GtkListBoxRow *row = nullptr) {
+void activate_selected_launcher_row(NativeShellState *ns, GtkListBoxRow *row = nullptr, bool in_sandbox = false) {
     if (!ns || !ns->launcher_list) return;
     if (!row) row = gtk_list_box_get_selected_row(GTK_LIST_BOX(ns->launcher_list));
     if (!row) return;
     const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(row), "launcher-cmd"));
     std::string cmd_copy = cmd ? cmd : "";
     set_launcher_visible(ns, false);
-    if (!cmd_copy.empty()) trigger_cmd(ns->app_state, cmd_copy);
+    if (!cmd_copy.empty()) {
+        if (in_sandbox) trigger_cmd(ns->app_state, "sandbox:launch:" + cmd_copy);
+        else trigger_cmd(ns->app_state, cmd_copy);
+    }
 }
 
 void draw_startup_splash_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
@@ -741,6 +745,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
 
     GtkWidget *foot_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_set_homogeneous(GTK_BOX(foot_row), TRUE);
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "平行沙箱", "spinel-cc-chip-btn", "sandbox:toggle-pip"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "游戏中心", "spinel-cc-chip-btn", "games:open"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "应用商店", "spinel-cc-chip-btn", "store:open"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "系统设置", "spinel-cc-chip-btn", "settings:open:display"));
@@ -1061,7 +1066,13 @@ void apply_native_css(NativeShellState *ns) {
         "}\n"
         ".spinel-switcher-hint {\n"
         "  font-size: 11px; color: " + std::string(cc_sub_fg) + "; margin-top: 4px;\n"
-        "}\n";
+        "}\n"
+        ".spinel-bar-sandbox-pill {\n"
+        "  background-color: " + std::string(cc_chip_bg) + ";\n"
+        "  border-radius: 999px;\n"
+        "  padding: 1px 8px;\n"
+        "}\n" +
+        sandbox_pip_css(ns);
 
     GdkDisplay *display = gdk_display_get_default();
     if (!display) return;
@@ -1180,10 +1191,14 @@ void build_native_launcher(GtkApplication *app, NativeShellState *ns) {
 
     GtkEventController *key_ctl = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(key_ctl, GTK_PHASE_CAPTURE);
-    g_signal_connect(key_ctl, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer d) -> gboolean {
+    g_signal_connect(key_ctl, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType mods, gpointer d) -> gboolean {
         auto *n = static_cast<NativeShellState *>(d);
         if (keyval == GDK_KEY_Escape) {
             set_launcher_visible(n, false);
+            return TRUE;
+        }
+        if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) && (mods & GDK_SHIFT_MASK)) {
+            activate_selected_launcher_row(n, nullptr, true);
             return TRUE;
         }
         int step = 0;

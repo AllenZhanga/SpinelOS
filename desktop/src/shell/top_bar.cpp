@@ -740,8 +740,27 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     ns->bar_tray_sep = make_bar_sep();
     gtk_widget_set_visible(ns->bar_tray_sep, FALSE);
 
+    GtkWidget *sandbox_btn = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(sandbox_btn), FALSE);
+    gtk_widget_add_css_class(sandbox_btn, "spinel-bar-icon-btn");
+    gtk_widget_add_css_class(sandbox_btn, "spinel-bar-sandbox-pill");
+    gtk_widget_set_tooltip_text(sandbox_btn, "平行沙箱桌面（点击显示 / 收起画中画）");
+    GtkWidget *sb_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *sb_dot = gtk_label_new("●");
+    gtk_widget_add_css_class(sb_dot, "spinel-sandbox-dot");
+    ns->bar_sandbox_lbl = gtk_label_new("沙箱");
+    gtk_widget_add_css_class(ns->bar_sandbox_lbl, "spinel-bar-ime");
+    gtk_box_append(GTK_BOX(sb_row), sb_dot);
+    gtk_box_append(GTK_BOX(sb_row), ns->bar_sandbox_lbl);
+    gtk_button_set_child(GTK_BUTTON(sandbox_btn), sb_row);
+    g_object_set_data_full(G_OBJECT(sandbox_btn), "spinel-cmd", g_strdup("sandbox:toggle-pip"), g_free);
+    g_signal_connect(sandbox_btn, "clicked", G_CALLBACK(on_cmd_button_clicked), ns->app_state);
+    gtk_widget_set_visible(sandbox_btn, FALSE);
+    ns->bar_sandbox_btn = sandbox_btn;
+
     gtk_box_append(GTK_BOX(right), ns->bar_tray_box);
     gtk_box_append(GTK_BOX(right), ns->bar_tray_sep);
+    gtk_box_append(GTK_BOX(right), ns->bar_sandbox_btn);
     gtk_box_append(GTK_BOX(right), mem_btn);
     gtk_box_append(GTK_BOX(right), ime_btn);
     gtk_box_append(GTK_BOX(right), clip_btn);

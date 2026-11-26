@@ -2,6 +2,7 @@
 #include "sys_internal.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "sandbox_manager.hpp"
 #include "temp_memory.hpp"
 
 #include <algorithm>
@@ -1021,6 +1022,7 @@ void push_perms_state(AppState *state) {
     }
     js << "]});";
     eval_js(state->settings_view, js.str());
+    push_sandbox_state(state);
 }
 
 void apply_flatpak_perm(AppState *state, const std::string &payload) {
@@ -1912,4 +1914,170 @@ void delete_system_snapshot(AppState *state, const std::string &payload) {
         }
         push_snapshots_state(state);
     }).detach();
+}
+
+/* ---------------- Agent Parallel Sandbox Settings & IPC ---------------- */
+
+namespace {
+
+void emit_sandbox_feedback(AppState *state, bool ok, const std::string &msg) {
+    if (!state || !state->settings_view) return;
+    eval_js(state->settings_view,
+            "window.__spinelSandboxFeedback && window.__spinelSandboxFeedback(" +
+                std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+}
+
+struct SandboxDirPickCtx {
+    AppState *state = nullptr;
+    bool writable = true;
+};
+
+}  // namespace
+
+void push_sandbox_state(AppState *state) {
+    if (!state || !state->settings_view) return;
+    eval_js(state->settings_view,
+            "window.__spinelSandboxData && window.__spinelSandboxData(" + sandbox_state_json() + ");");
+}
+
+void set_sandbox_config(AppState *state, const std::string &payload) {
+    SandboxConfig cfg = load_sandbox_config();
+    bool clip_changed = false;
+    bool net_changed = false;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "allow_network") {
+            bool nxt = (v != "false" && v != "0" && v != "no");
+            net_changed = (nxt != cfg.allow_network);
+            cfg.allow_network = nxt;
+        } else if (k == "sync_clipboard") {
+            bool nxt = (v != "false" && v != "0" && v != "no");
+            clip_changed = (nxt != cfg.sync_clipboard);
+            cfg.sync_clipboard = nxt;
+        } else if (k == "perf_mode" && is_valid_sandbox_perf_mode(v)) {
+            cfg.perf_mode = v;
+        }
+    }
+    if (!save_sandbox_config(cfg)) {
+        emit_sandbox_feedback(state, false, "保存平行沙箱配置失败。");
+        push_sandbox_state(state);
+        return;
+    }
+    if (clip_changed) {
+        ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
+    }
+    native_shell_sync_sandbox(state, "sync");
+    if (net_changed && query_sandbox_status().running) {
+        emit_sandbox_feedback(state, true, "已更新网络开关，新启动的沙箱应用将立即应用此策略（可重启沙箱使全部应用生效）。");
+    } else {
+        emit_sandbox_feedback(state, true, "平行沙箱配置已保存。");
+    }
+    push_sandbox_state(state);
+}
+
+void add_sandbox_dir(AppState *state, const std::string &payload) {
+    std::string path;
+    bool writable = true;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "path") path = v;
+        else if (k == "writable") writable = (v != "false" && v != "0");
+    }
+
+    if (path.empty()) {
+        if (!state || !state->settings_win) return;
+        GtkFileDialog *dlg = gtk_file_dialog_new();
+        gtk_file_dialog_set_title(dlg, writable ? "选择允许沙箱读写的目录" : "选择允许沙箱只读访问的目录");
+        GFile *init_folder = g_file_new_for_path(home_dir().c_str());
+        gtk_file_dialog_set_initial_folder(dlg, init_folder);
+        g_object_unref(init_folder);
+        auto *ctx = new SandboxDirPickCtx{state, writable};
+        gtk_file_dialog_select_folder(
+            dlg, state->settings_win, nullptr,
+            +[](GObject *src, GAsyncResult *res, gpointer d) {
+                std::unique_ptr<SandboxDirPickCtx> c(static_cast<SandboxDirPickCtx *>(d));
+                GFile *folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(src), res, nullptr);
+                if (folder) {
+                    char *p = g_file_get_path(folder);
+                    if (p) {
+                        std::string err;
+                        if (add_sandbox_mount_dir(p, c->writable, err)) {
+                            emit_sandbox_feedback(c->state, true,
+                                                  std::string("已加入白名单（") + (c->writable ? "读写" : "只读") +
+                                                      "），下次在沙箱启动应用自动生效。");
+                        } else {
+                            emit_sandbox_feedback(c->state, false, err);
+                        }
+                        push_sandbox_state(c->state);
+                        g_free(p);
+                    }
+                    g_object_unref(folder);
+                }
+                g_object_unref(src);
+            },
+            ctx);
+        return;
+    }
+
+    std::string err;
+    if (add_sandbox_mount_dir(path, writable, err)) {
+        emit_sandbox_feedback(state, true, "已更新沙箱白名单目录。");
+    } else {
+        emit_sandbox_feedback(state, false, err);
+    }
+    push_sandbox_state(state);
+}
+
+void remove_sandbox_dir(AppState *state, const std::string &payload) {
+    std::string path;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim_copy(line.substr(0, eq)) == "path") path = trim_copy(line.substr(eq + 1));
+    }
+    if (path.empty()) return;
+    if (remove_sandbox_mount_dir(path)) {
+        emit_sandbox_feedback(state, true, "已从沙箱白名单移除该目录。");
+    } else {
+        emit_sandbox_feedback(state, false, "未在白名单中找到该目录。");
+    }
+    push_sandbox_state(state);
+}
+
+void sandbox_session_action(AppState *state, const std::string &action) {
+    std::string err;
+    bool ok = true;
+    std::string msg;
+    if (action == "start") {
+        ok = start_sandbox_session(err);
+        if (ok) {
+            native_shell_sync_sandbox(state, "show");
+            msg = "平行沙箱桌面已启动，已在右下角显示实时画中画悬浮窗。";
+        } else {
+            msg = err;
+        }
+    } else if (action == "stop") {
+        stop_sandbox_session(err);
+        native_shell_sync_sandbox(state, "sync");
+        msg = "已停止平行沙箱桌面，白名单目录文件已安全保留。";
+    } else if (action == "reset") {
+        ok = reset_sandbox_home(err);
+        native_shell_sync_sandbox(state, "sync");
+        msg = ok ? "已清空沙箱临时环境并恢复出厂干净状态（白名单目录不受影响）。" : err;
+    } else if (action == "toggle-pip") {
+        if (!query_sandbox_status().running) {
+            ok = start_sandbox_session(err);
+            if (ok) native_shell_sync_sandbox(state, "show");
+        } else {
+            native_shell_sync_sandbox(state, "toggle");
+        }
+    }
+    if (!msg.empty()) emit_sandbox_feedback(state, ok, msg);
+    push_sandbox_state(state);
 }

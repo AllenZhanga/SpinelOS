@@ -76,6 +76,7 @@ if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
   sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
+  sudo install -Dm755 /tmp/spinel-dev/spinel-sandbox /usr/local/bin/spinel-sandbox
   if [ -f /tmp/spinel-dev/spinel-files.svg ]; then
     sudo install -Dm644 /tmp/spinel-dev/spinel-files.svg /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
   fi
@@ -109,7 +110,7 @@ sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, Plymouth splash, labwc/terminal config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+    flatpak bubblewrap vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
     spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
     wlr-randr wl-clipboard wl-clip-persist os-prober \
@@ -310,6 +311,7 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-webui" "${DEV_HOST}:/tmp/spinel-dev/spinel-webui"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-sandbox" "${DEV_HOST}:/tmp/spinel-dev/spinel-sandbox"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" \

@@ -1476,4 +1476,103 @@
 
   UI.hooks.switchSettingsTab = switchSettingsTab;
   UI.hooks.switchMonitorTab = switchMonitorTab;
+
+  /* ---------------- Agent Parallel Sandbox ---------------- */
+  let lastSandboxState = null;
+
+  function renderSandboxState(data) {
+    if (!data) return;
+    lastSandboxState = data;
+    const chip = document.getElementById("sandbox-status-chip");
+    const homeInfo = document.getElementById("sandbox-home-info");
+    const swNet = document.getElementById("sw-sandbox-net");
+    const swClip = document.getElementById("sw-sandbox-clip");
+    const selPerf = document.getElementById("sel-sandbox-perf");
+    const dirList = document.getElementById("sandbox-dir-list");
+
+    if (chip) {
+      if (!data.bwrap_installed) chip.textContent = "未安装 bubblewrap";
+      else if (data.running) chip.textContent = data.allow_network ? "运行中 · 共享网络" : "运行中 · 离线隔离";
+      else chip.textContent = "已停止（按需自启）";
+    }
+    if (homeInfo) {
+      homeInfo.textContent = `沙箱临时主目录: ${data.home_path || "--"} · 已占 ${data.home_size_mb || 0} MB`;
+    }
+    if (swNet) swNet.classList.toggle("is-on", Boolean(data.allow_network));
+    if (swClip) swClip.classList.toggle("is-on", Boolean(data.sync_clipboard));
+    if (selPerf && data.perf_mode) {
+      selPerf.value = data.perf_mode;
+      if (typeof enhanceSelect === "function") enhanceSelect(selPerf);
+    }
+
+    if (!dirList) return;
+    dirList.innerHTML = "";
+    const entries = [];
+    (Array.isArray(data.rw_dirs) ? data.rw_dirs : []).forEach((p) => entries.push({ path: p, rw: true }));
+    (Array.isArray(data.ro_dirs) ? data.ro_dirs : []).forEach((p) => entries.push({ path: p, rw: false }));
+    if (entries.length === 0) {
+      dirList.innerHTML = '<div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>';
+      return;
+    }
+    entries.forEach((ent) => {
+      const item = document.createElement("div");
+      item.className = "disk-item";
+      const left = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "disk-title";
+      title.textContent = ent.path;
+      const sub = document.createElement("div");
+      sub.className = "disk-sub";
+      sub.textContent = ent.rw ? "可读写 (RW) · 沙箱内改动将持久保留到宿主对应目录" : "仅只读 (RO) · 沙箱内不可修改此目录文件";
+      left.append(title, sub);
+      const actions = document.createElement("div");
+      actions.className = "disk-tags";
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = ent.rw ? "可写" : "只读";
+      const rmBtn = document.createElement("button");
+      rmBtn.type = "button";
+      rmBtn.className = "btn small danger";
+      rmBtn.textContent = "移除";
+      rmBtn.addEventListener("click", () => sendCommand(`sandbox:remove-dir\npath=${ent.path}`));
+      actions.append(tag, rmBtn);
+      item.append(left, actions);
+      dirList.appendChild(item);
+    });
+  }
+
+  window.__spinelSandboxData = renderSandboxState;
+  window.__spinelSandboxFeedback = (ok, msg) => showFeedback("sandbox-feedback", msg || "", !ok);
+
+  const btnSbStart = document.getElementById("btn-sandbox-start");
+  if (btnSbStart) btnSbStart.addEventListener("click", () => sendCommand("sandbox:start"));
+  const btnSbStop = document.getElementById("btn-sandbox-stop");
+  if (btnSbStop) btnSbStop.addEventListener("click", () => sendCommand("sandbox:stop"));
+  const btnSbReset = document.getElementById("btn-sandbox-reset");
+  if (btnSbReset) btnSbReset.addEventListener("click", () => sendCommand("sandbox:reset"));
+
+  const swSbNet = document.getElementById("sw-sandbox-net");
+  if (swSbNet) {
+    swSbNet.addEventListener("click", () => {
+      const next = !(lastSandboxState && lastSandboxState.allow_network);
+      sendCommand(`sandbox:config-set\nallow_network=${next ? "true" : "false"}`);
+    });
+  }
+  const swSbClip = document.getElementById("sw-sandbox-clip");
+  if (swSbClip) {
+    swSbClip.addEventListener("click", () => {
+      const next = !(lastSandboxState && lastSandboxState.sync_clipboard);
+      sendCommand(`sandbox:config-set\nsync_clipboard=${next ? "true" : "false"}`);
+    });
+  }
+  const selSbPerf = document.getElementById("sel-sandbox-perf");
+  if (selSbPerf) {
+    selSbPerf.addEventListener("change", () => {
+      sendCommand(`sandbox:config-set\nperf_mode=${selSbPerf.value}`);
+    });
+  }
+  const btnAddRw = document.getElementById("btn-sandbox-add-rw");
+  if (btnAddRw) btnAddRw.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=true"));
+  const btnAddRo = document.getElementById("btn-sandbox-add-ro");
+  if (btnAddRo) btnAddRo.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=false"));
 })();

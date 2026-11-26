@@ -4,6 +4,7 @@
 #include "file_associations.hpp"
 #include "ipc_router.hpp"
 #include "native_shell.hpp"
+#include "sandbox_manager.hpp"
 #include "shell/sni_tray.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
@@ -37,6 +38,7 @@ void native_shell_sync_perf(AppState *) {}
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
 void native_shell_toggle_launcher(AppState *) {}
+void native_shell_sync_sandbox(AppState *, const std::string &) {}
 void native_shell_show_osd(AppState *, const std::string &, int, bool) {}
 void handle_shell_command(AppState *, const std::string &) {}
 
@@ -964,6 +966,52 @@ void test_temp_memory_cleanup() {
     fs::remove_all(root);
 }
 
+void test_parallel_sandbox() {
+    std::string norm, err;
+    EXPECT(!is_valid_sandbox_mount_dir("/", norm, err));
+    EXPECT(!is_valid_sandbox_mount_dir(home_dir(), norm, err));
+    EXPECT(!is_valid_sandbox_mount_dir("relative/path", norm, err));
+
+    const fs::path ws = fs::path(home_dir()) / "ai-workspace";
+    fs::create_directories(ws);
+    EXPECT(is_valid_sandbox_mount_dir(ws.string() + "/", norm, err));
+    EXPECT(norm == fs::weakly_canonical(ws).string());
+
+    EXPECT(add_sandbox_mount_dir(ws.string(), true, err));
+    SandboxConfig loaded = load_sandbox_config();
+    EXPECT(loaded.allow_network);
+    EXPECT(loaded.sync_clipboard);
+    EXPECT(loaded.perf_mode == "host-priority");
+    EXPECT(loaded.rw_dirs.size() == 1);
+    EXPECT(loaded.rw_dirs[0] == norm);
+
+    const std::string fake_home = sandbox_home_dir();
+    const std::string rt_dir = sandbox_runtime_dir();
+    auto argv_shared = build_sandbox_bwrap_argv(loaded, rt_dir, fake_home, home_dir(), 1000, {"spinel-terminal"}, norm);
+    auto has_arg = [&](const std::vector<std::string> &v, const std::string &a) {
+        return std::find(v.begin(), v.end(), a) != v.end();
+    };
+    EXPECT(!has_arg(argv_shared, "--unshare-net"));
+    EXPECT(has_arg(argv_shared, "/run/user/1000"));
+    EXPECT(has_arg(argv_shared, fake_home));
+    EXPECT(has_arg(argv_shared, norm));
+
+    loaded.allow_network = false;
+    auto argv_offline = build_sandbox_bwrap_argv(loaded, rt_dir, fake_home, home_dir(), 1000, {"chromium"});
+    EXPECT(has_arg(argv_offline, "--unshare-net"));
+
+    std::string rc = build_sandbox_rc_xml(loaded);
+    EXPECT(rc.find("<labwc_config>") != std::string::npos);
+
+    EXPECT(remove_sandbox_mount_dir(norm));
+    EXPECT(load_sandbox_config().rw_dirs.empty());
+
+    AppState dummy;
+    std::string ipc_rep;
+    EXPECT(dispatch_ipc_command(&dummy, "{\"id\":99,\"method\":\"sandbox:state-get\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -981,6 +1029,7 @@ int main() {
     test_ipc_router();
     test_dock_quit_and_store_helpers();
     test_temp_memory_cleanup();
+    test_parallel_sandbox();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

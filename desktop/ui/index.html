@@ -977,6 +977,61 @@
       <div class="inst-section">
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
+            <h3>Agent 平行沙箱桌面（内核级全隔离）</h3>
+            <p class="muted-hint">为 AI Agent 或不可信软件提供独立隐藏主目录与虚拟显示器，仅持久保存下方白名单目录；共享本机网络与剪贴板。</p>
+          </div>
+          <span class="badge" id="sandbox-status-chip">检测中</span>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px;">
+          <button class="btn small primary" id="btn-sandbox-start">启动 / 打开画中画</button>
+          <button class="btn small" id="btn-sandbox-stop">停止沙箱</button>
+          <button class="btn small danger" id="btn-sandbox-reset">重置临时环境</button>
+        </div>
+        <div class="status-grid" style="margin-bottom: 10px;">
+          <div class="status-row">
+            <div>
+              <strong>共享本机网络</strong>
+              <div class="muted-hint">开启后可联网并直连本地 Ollama / 系统代理；关闭则完全断网隔离</div>
+            </div>
+            <button type="button" class="sp-switch is-on" id="sw-sandbox-net" aria-label="共享本机网络"><span class="sp-switch-thumb"></span></button>
+          </div>
+          <div class="status-row">
+            <div>
+              <strong>剪贴板双向同步</strong>
+              <div class="muted-hint">开启后宿主桌面与平行桌面可互相复制粘贴文本（随时可关闭）</div>
+            </div>
+            <button type="button" class="sp-switch is-on" id="sw-sandbox-clip" aria-label="剪贴板双向同步"><span class="sp-switch-thumb"></span></button>
+          </div>
+          <div class="status-row">
+            <div>
+              <strong>算力配额模式</strong>
+              <div class="muted-hint">限制平行桌面最大 CPU / 内存优先级，防止 AI 任务卡死宿主机</div>
+            </div>
+            <select id="sel-sandbox-perf" class="spinel-select" style="min-width: 140px;">
+              <option value="host-priority">宿主优先（推荐）</option>
+              <option value="balanced">均衡分配</option>
+            </select>
+          </div>
+        </div>
+        <div class="section-head" style="margin-bottom: 6px;">
+          <div>
+            <strong>持久保留目录白名单</strong>
+            <div class="muted-hint" id="sandbox-home-info">沙箱临时主目录: --</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn small" id="btn-sandbox-add-rw">+ 添加可写目录</button>
+            <button class="btn small ghost" id="btn-sandbox-add-ro">+ 添加只读目录</button>
+          </div>
+        </div>
+        <div id="sandbox-dir-list" class="disk-list">
+          <div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>
+        </div>
+        <div id="sandbox-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
             <h3>已记住的弹窗授权记录</h3>
             <p class="muted-hint">如果不小心点了“始终拒绝/允许”录屏或摄像头，可以在这里撤销，让软件下次重新弹出询问框。</p>
           </div>

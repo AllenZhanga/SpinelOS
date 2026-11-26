@@ -1,5 +1,6 @@
 #include "shell_internal.hpp"
 #include "shell/sni_tray.hpp"
+#include "shell/sandbox_pip.hpp"
 #include "common.hpp"
 
 #include <pango/pangocairo.h>
@@ -1042,6 +1043,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     shell_internal::build_native_launcher(app, ns);
     shell_internal::build_native_switcher(app, ns);
     shell_internal::build_osd_window(app, ns);
+    init_sandbox_pip(ns);
     init_sni_tray(+[](void *d) {
         shell_internal::sync_top_bar_tray(static_cast<NativeShellState *>(d));
     }, ns);
@@ -1068,6 +1070,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
 void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
+    shutdown_sandbox_pip(ns);
     shutdown_sni_tray();
     shell_internal::close_startup_splash(ns);
     if (ns->osd_timer) g_source_remove(ns->osd_timer);
@@ -1320,6 +1323,12 @@ void native_shell_sync_theme(AppState *state) {
         shell_internal::queue_draw_tree(GTK_WIDGET(ns->cc_win));
         gtk_widget_queue_draw(GTK_WIDGET(ns->cc_win));
     }
+    sandbox_pip_on_theme_changed(ns);
+}
+
+void native_shell_sync_sandbox(AppState *state, const std::string &action) {
+    if (!state || !state->native) return;
+    sandbox_pip_sync_action(state->native, action);
 }
 
 void native_shell_sync_wallpaper(AppState *state) {

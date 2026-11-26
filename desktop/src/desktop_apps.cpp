@@ -1,6 +1,7 @@
 #include "desktop_apps.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "sandbox_manager.hpp"
 #include "system_control.hpp"
 #include "wine_launcher.hpp"
 
@@ -347,20 +348,8 @@ void launch_desktop_app_id(const std::string &desktop_id) {
                 if (!process && error) append_app_log("[Wine] " + std::string(error->message));
                 return;
             }
-            auto args = split_exec_args(app.exec);
-            if (args.empty()) return;
-            if (app.terminal) {
-                if (has_executable("spinel-terminal")) {
-                    args.insert(args.begin(), "--");
-                    args.insert(args.begin(), "spinel-terminal");
-                } else if (has_executable("ptyxis")) {
-                    args.insert(args.begin(), "--");
-                    args.insert(args.begin(), "ptyxis");
-                } else {
-                    args.insert(args.begin(), "-e");
-                    args.insert(args.begin(), "foot");
-                }
-            }
+            std::vector<std::string> args;
+            if (!resolve_desktop_app_argv(desktop_id, args) || args.empty()) return;
             // Launch browsers through unified Wayland + system-proxy helper
             std::string bin_l = args[0];
             for (char &ch : bin_l) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -395,6 +384,67 @@ void launch_desktop_app_id(const std::string &desktop_id) {
             return;
         }
     }
+}
+
+bool resolve_desktop_app_argv(const std::string &desktop_id, std::vector<std::string> &out_argv) {
+    out_argv.clear();
+    if (desktop_id.empty()) return false;
+    for (const auto &app : scan_all_apps()) {
+        if (app.id != desktop_id) continue;
+        if (app.wine_shortcut) return false;
+        auto args = split_exec_args(app.exec);
+        if (args.empty()) return false;
+        if (app.terminal) {
+            if (has_executable("spinel-terminal")) {
+                args.insert(args.begin(), "--");
+                args.insert(args.begin(), "spinel-terminal");
+            } else if (has_executable("ptyxis")) {
+                args.insert(args.begin(), "--");
+                args.insert(args.begin(), "ptyxis");
+            } else {
+                args.insert(args.begin(), "-e");
+                args.insert(args.begin(), "foot");
+            }
+        }
+        out_argv = std::move(args);
+        return true;
+    }
+    return false;
+}
+
+bool launch_cmd_in_sandbox(const std::string &cmd, std::string &error_out) {
+    std::string c = trim_copy(cmd);
+    if (c.empty()) {
+        error_out = "无效的应用命令";
+        return false;
+    }
+    std::vector<std::string> argv;
+    if (c == "launch:terminal") {
+        argv = {has_executable("spinel-terminal") ? "spinel-terminal" : (has_executable("ptyxis") ? "ptyxis" : "foot")};
+    } else if (c == "launch:files") {
+        argv = {"spinel-files"};
+    } else if (c == "launch:browser") {
+        if (has_executable("google-chrome-stable")) argv = {"google-chrome-stable"};
+        else if (has_executable("chromium")) argv = {"chromium"};
+        else if (has_executable("firefox")) argv = {"firefox"};
+        else {
+            error_out = "未找到可用浏览器";
+            return false;
+        }
+    } else if (c.rfind("app:launch:", 0) == 0) {
+        std::string id = c.substr(11);
+        if (!resolve_desktop_app_argv(id, argv) || argv.empty()) {
+            error_out = "该应用暂不支持或未找到可执行入口";
+            return false;
+        }
+    } else if (c.rfind("settings:", 0) == 0 || c.rfind("store:", 0) == 0 || c.rfind("games:", 0) == 0 ||
+               c.rfind("monitor:", 0) == 0 || c.rfind("logs:", 0) == 0) {
+        error_out = "系统设置类窗口无需放入沙箱运行";
+        return false;
+    } else {
+        argv = {c};
+    }
+    return launch_in_sandbox(argv, "", error_out);
 }
 
 std::string get_wallpaper_pref() {

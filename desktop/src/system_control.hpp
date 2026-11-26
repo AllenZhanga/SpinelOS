@@ -221,3 +221,10 @@ void push_snapshots_state(AppState *state);
 void create_system_snapshot(AppState *state, const std::string &payload);
 void rollback_system_snapshot(AppState *state, const std::string &payload);
 void delete_system_snapshot(AppState *state, const std::string &payload);
+
+// Agent Parallel Sandbox desktop controls
+void push_sandbox_state(AppState *state);
+void set_sandbox_config(AppState *state, const std::string &payload);
+void add_sandbox_dir(AppState *state, const std::string &payload);
+void remove_sandbox_dir(AppState *state, const std::string &payload);
+void sandbox_session_action(AppState *state, const std::string &action);

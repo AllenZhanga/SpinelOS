@@ -466,6 +466,13 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
     }), state);
     g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(osd_act));
     g_object_unref(osd_act);
+    GSimpleAction *sandbox_act = g_simple_action_new("sync-sandbox", G_VARIANT_TYPE_STRING);
+    g_signal_connect(sandbox_act, "activate", G_CALLBACK(+[](GSimpleAction *, GVariant *param, gpointer d) {
+        const char *act = param ? g_variant_get_string(param, nullptr) : nullptr;
+        native_shell_sync_sandbox(static_cast<AppState *>(d), (act && *act) ? act : "sync");
+    }), state);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sandbox_act));
+    g_object_unref(sandbox_act);
 }
 
 void on_activate(GtkApplication *app, gpointer user_data) {
@@ -514,6 +521,10 @@ void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
 void native_shell_toggle_launcher(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "toggle-launcher"); }
+void native_shell_sync_sandbox(AppState *, const std::string &action) {
+    notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-sandbox", false,
+                       action.empty() ? "sync" : action.c_str());
+}
 void native_shell_step_switcher(AppState *, bool prev) {
     notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "switcher", false, prev ? "prev" : "next");
 }

@@ -308,6 +308,7 @@ if [[ -f "$SFS_PATH" ]]; then
   [[ -x /usr/local/bin/spinel-webui ]] && cp -f /usr/local/bin/spinel-webui /mnt/usr/local/bin/spinel-webui
   [[ -x /usr/local/bin/spinel-terminal ]] && cp -f /usr/local/bin/spinel-terminal /mnt/usr/local/bin/spinel-terminal
   [[ -x /usr/local/bin/spinel-files ]] && cp -f /usr/local/bin/spinel-files /mnt/usr/local/bin/spinel-files
+  [[ -x /usr/local/bin/spinel-sandbox ]] && cp -f /usr/local/bin/spinel-sandbox /mnt/usr/local/bin/spinel-sandbox
   [[ -x /usr/local/bin/spinel-wine ]] && cp -f /usr/local/bin/spinel-wine /mnt/usr/local/bin/spinel-wine
   for asset in /etc/xdg/mimeapps.list \
     /usr/share/applications/org.spinelos.WindowsApps.desktop \

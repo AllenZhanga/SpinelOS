@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "native_shell.hpp"
+#include "sandbox_manager.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
 #include "theme_manager.hpp"
@@ -650,6 +651,30 @@ bool dispatch_ipc_command(AppState *state,
         {"perms:portal-reset", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             reset_portal_perm(s, r.legacy_raw);
         }},
+        {"sandbox:state-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_sandbox_state(s);
+        }},
+        {"sandbox:config-set", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            set_sandbox_config(s, r.legacy_raw);
+        }},
+        {"sandbox:add-dir", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            add_sandbox_dir(s, r.legacy_raw);
+        }},
+        {"sandbox:remove-dir", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            remove_sandbox_dir(s, r.legacy_raw);
+        }},
+        {"sandbox:start", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            sandbox_session_action(s, "start");
+        }},
+        {"sandbox:stop", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            sandbox_session_action(s, "stop");
+        }},
+        {"sandbox:reset", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            sandbox_session_action(s, "reset");
+        }},
+        {"sandbox:toggle-pip", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            sandbox_session_action(s, "toggle-pip");
+        }},
         {"settings:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},
@@ -706,6 +731,14 @@ bool dispatch_ipc_command(AppState *state,
         {"app:launch:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             native_shell_set_cc_visible(s, false);
             launch_desktop_app_id(arg_or_param(r, "app:launch:", {"id", "app"}));
+        }},
+        {"sandbox:launch:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            native_shell_set_cc_visible(s, false);
+            std::string target_cmd = arg_or_param(r, "sandbox:launch:", {"cmd", "id"});
+            std::string err;
+            if (launch_cmd_in_sandbox(target_cmd, err)) {
+                native_shell_sync_sandbox(s, "show");
+            }
         }},
         {"store:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);

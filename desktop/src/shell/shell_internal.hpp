@@ -90,6 +90,8 @@ struct NativeShellState {
     GtkWidget *bar_ws_box = nullptr;
     GtkWidget *bar_tray_box = nullptr;
     GtkWidget *bar_tray_sep = nullptr;
+    GtkWidget *bar_sandbox_btn = nullptr;
+    GtkWidget *bar_sandbox_lbl = nullptr;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_ime_lbl = nullptr;
     GtkWidget *bar_vol_btn = nullptr;
@@ -242,6 +244,7 @@ struct NativeShellState {
     // Cached states
     ThemeSpec theme;
     GtkCssProvider *css_provider = nullptr;
+    struct SandboxPipState *sandbox_pip = nullptr;
     TelemetrySnapshot telemetry;
     std::vector<DesktopAppInfo> desktop_apps;
     std::map<std::string, cairo_surface_t *> surface_cache;

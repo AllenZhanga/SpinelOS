@@ -717,6 +717,16 @@ void show_dock_context_menu(NativeShellState *ns, int idx, double x) {
         gtk_box_append(GTK_BOX(ns->dock_popover_box), b_open);
     }
 
+    if (!launch_cmd.empty() && launch_cmd.rfind("window:", 0) != 0 &&
+        launch_cmd.rfind("settings:", 0) != 0 && launch_cmd.rfind("store:", 0) != 0 &&
+        launch_cmd.rfind("games:", 0) != 0 && launch_cmd.rfind("monitor:", 0) != 0) {
+        GtkWidget *b_sb = make_dock_menu_btn("在平行沙箱中运行");
+        std::string sb_cmd = "sandbox:launch:" + launch_cmd;
+        g_object_set_data_full(G_OBJECT(b_sb), "spinel-cmd", g_strdup(sb_cmd.c_str()), g_free);
+        g_signal_connect(b_sb, "clicked", G_CALLBACK(on_dock_popover_cmd), ns);
+        gtk_box_append(GTK_BOX(ns->dock_popover_box), b_sb);
+    }
+
     gtk_box_append(GTK_BOX(ns->dock_popover_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     if (item->pinned) {
         GtkWidget *b_unpin = make_dock_menu_btn("从程序坞中移除");
