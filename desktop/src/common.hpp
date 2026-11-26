@@ -27,6 +27,7 @@ void spawn_argv_detached(const std::vector<std::string> &args,
                          const std::vector<std::pair<std::string, std::string>> &env_overrides = {});
 void spawn_argv_logged(const std::vector<std::string> &args,
                        const std::string &tag,
-                       const std::vector<std::pair<std::string, std::string>> &env_overrides = {});
+                       const std::vector<std::pair<std::string, std::string>> &env_overrides = {},
+                       const std::string &working_dir = {});
 bool is_live_iso_env();
 std::vector<std::string> split_lines(const std::string &text);

@@ -17,12 +17,15 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -354,6 +357,109 @@ void test_desktop_apps() {
     }
     EXPECT(saw_demo);
     EXPECT(!saw_hidden);
+
+    const fs::path portable = fs::path(home_dir()) / "Mono Cloud & 中文.AppImage";
+    const fs::path shortcut = app_dir / "spinel-portable-demo.desktop";
+    EXPECT(write_text_file(shortcut.string(), "[Desktop Entry]\nType=Application\nName=Portable Demo\nExec=\"" +
+                           portable.string() + "\" --sample %U\n"));
+
+    std::vector<std::string> argv;
+    std::string error;
+    EXPECT(!resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT(argv.empty() && error.find("找不到可执行文件") != std::string::npos);
+    EXPECT(error.find(portable.string()) != std::string::npos);
+    EXPECT(find_local_app_shortcut("spinel-portable-demo").reveal_path == portable.parent_path().string());
+
+    EXPECT(write_text_file(portable.string(), "#!/bin/sh\nexit 0\n"));
+    fs::permissions(portable, fs::perms::owner_read | fs::perms::owner_write);
+    EXPECT(!resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT(argv.empty() && error.find("执行权限") != std::string::npos);
+
+    fs::permissions(portable, fs::perms::owner_all);
+    EXPECT(resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT((argv == std::vector<std::string>{portable.string(), "--sample"} && error.empty()));
+    EXPECT(find_local_app_shortcut("spinel-portable-demo").reveal_path == portable.string());
+    EXPECT(find_local_app_shortcut("../spinel-portable-demo").shortcut_path.empty());
+
+    EXPECT(write_text_file(shortcut.string(), "[Desktop Entry]\nType=Application\nName=Portable Demo\nExec=env TEST_FLAG=one \"" +
+                           portable.string() + "\" %U\n"));
+    EXPECT(resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT((argv == std::vector<std::string>{"env", "TEST_FLAG=one", portable.string()}));
+    const fs::path moved = portable.parent_path() / "saved-portable";
+    fs::rename(portable, moved);
+    EXPECT(!resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT(argv.empty() && error.find(portable.string()) != std::string::npos);
+    fs::rename(moved, portable);
+
+    const fs::path bin = fs::path(home_dir()) / "shortcut-test-bin";
+    fs::create_directories(bin);
+    const auto mock = [&](const std::string &name, const std::string &script) {
+        const auto p = bin / name;
+        EXPECT(write_text_file(p.string(), "#!/bin/sh\n" + script));
+        fs::permissions(p, fs::perms::owner_all);
+        return p;
+    };
+    const char *path_env = std::getenv("PATH");
+    const bool had_path = path_env != nullptr;
+    const std::string old_path = path_env ? path_env : "";
+    setenv("PATH", (bin.string() + ":" + old_path).c_str(), 1);
+    mock("spinel-files", "printf '%s\\n' \"$1\" > \"$HOME/location-capture\"\n");
+    mock("spinel-terminal", "printf '%s\\n' \"$@\" > \"$HOME/terminal-capture\"\n");
+    mock("notify-send", "printf '%s\\n' \"$@\" > \"$HOME/launch-error-capture\"\n");
+    const fs::path browser = mock("chrome-test", "printf '%s\\n' \"$TEST_FLAG\" \"$PWD\" \"$@\" > \"$HOME/browser-capture\"\n");
+    const auto capture = [](const std::string &name, const std::string &last) {
+        const auto path = fs::path(home_dir()) / name;
+        for (int i = 0; i < 100; ++i) {
+            std::ifstream file(path);
+            const std::string value{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+            if (value.ends_with(last + "\n")) return value;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return std::string{};
+    };
+    EXPECT(execute_launchpad_app_action("spinel-portable-demo", false, error));
+    EXPECT(capture("location-capture", portable.string()) == portable.string() + "\n");
+    EXPECT(execute_launchpad_app_action("spinel-portable-demo", true, error));
+    EXPECT(error.find("已将快捷方式移到回收站") != std::string::npos);
+    EXPECT(!fs::exists(shortcut) && fs::exists(portable));
+    EXPECT(!execute_launchpad_app_action("spinel-portable-demo", false, error));
+    EXPECT(error.find("找不到应用所在目录") != std::string::npos);
+
+    const auto terminal_file = fs::path(home_dir()) / "shortcut-terminal.desktop";
+    EXPECT(write_text_file(terminal_file.string(), "[Desktop Entry]\nType=Application\nName=Terminal Test\n"
+                           "Terminal=true\nIcon=terminal-test\nExec=\"" + portable.string() + "\" %i %c %k %% %f\n"));
+    launch_desktop_app_file(terminal_file.string());
+    EXPECT(capture("terminal-capture", "%") == "--\n" + portable.string() + "\n--icon\nterminal-test\nTerminal Test\n" +
+           terminal_file.string() + "\n%\n");
+
+    const auto browser_file = fs::path(home_dir()) / "shortcut-browser.desktop";
+    EXPECT(write_text_file(browser_file.string(), "[Desktop Entry]\nType=Application\nName=Browser Test\nPath=" + bin.string() +
+                           "\nExec=env \"PATH=" + bin.string() + "\" TEST_FLAG=one chrome-test %U\n"));
+    launch_desktop_app_file(browser_file.string());
+    const auto browser_capture = capture("browser-capture", "--wayland-text-input-version=3");
+    EXPECT(browser_capture.starts_with("one\n" + bin.string() + "\n"));
+    EXPECT(browser_capture.find("--ozone-platform=wayland\n--enable-wayland-ime\n") != std::string::npos);
+
+    fs::remove(browser);
+    launch_desktop_app_file(browser_file.string());
+    const auto launch_error = capture("launch-error-capture", "应用可能已移动或卸载，请重新安装或更新快捷方式。");
+    EXPECT(launch_error.find("无法启动「Browser Test」") != std::string::npos);
+    EXPECT(launch_error.find("找不到可执行文件：chrome-test") != std::string::npos);
+
+    mock("gamemoderun", "export TEST_GAMEMODE=on\nexec \"$@\"\n");
+    mock("mangohud", "export TEST_MANGOHUD=on\nexec \"$@\"\n");
+    const auto game = mock("perf-test", "printf '%s\\n' \"$TEST_GAMEMODE\" \"$TEST_MANGOHUD\" ok > \"$HOME/game-capture\"\n");
+    const auto game_file = fs::path(home_dir()) / "shortcut-game.desktop";
+    EXPECT(write_text_file(game_file.string(), "[Desktop Entry]\nType=Application\nName=Game Test\nCategories=Game;\nExec=\"" +
+                           game.string() + "\"\n"));
+    launch_desktop_app_file(game_file.string());
+    EXPECT(capture("game-capture", "ok") == "on\non\nok\n");
+
+    if (had_path) setenv("PATH", old_path.c_str(), 1);
+    else unsetenv("PATH");
+
+    EXPECT(!resolve_desktop_app_argv("spinel-portable-demo", argv, error));
+    EXPECT(argv.empty() && error.find("找不到应用快捷方式") != std::string::npos);
 }
 
 void test_wine_app_catalog() {
@@ -683,6 +789,11 @@ void test_ipc_router() {
     EXPECT(dispatch_ipc_command(&dummy, "store:open:steam", mock_actions, &reply));
     EXPECT(last_store_focus == "steam");
     EXPECT(reply.empty());  // Legacy string without id produces no reply envelope
+
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":7,"method":"app.open-location","params":{"id":"Mono Cloud"}})", mock_actions, &reply));
+    EXPECT(reply.find("\"id\":7") != std::string::npos && reply.find("\"ok\":true") != std::string::npos);
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":8,"method":"app.remove-shortcut","params":{"id":"Mono Cloud"}})", mock_actions, &reply));
+    EXPECT(reply.find("\"id\":8") != std::string::npos && reply.find("\"ok\":true") != std::string::npos);
 
     reply.clear();
     EXPECT(!dispatch_ipc_command(&dummy, R"({"id":9,"method":"nonexistent.op"})", mock_actions, &reply));

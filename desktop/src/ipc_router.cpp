@@ -378,6 +378,12 @@ bool dispatch_ipc_command(AppState *state,
             native_shell_set_cc_visible(s, false);
             if (a.open_games) a.open_games(s);
         }},
+        {"app:open-location", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            handle_launchpad_app_action(s, r.param("id"), false);
+        }},
+        {"app:remove-shortcut", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            handle_launchpad_app_action(s, r.param("id"), true);
+        }},
         {"store:open", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
             if (a.open_store) a.open_store(s, r.param("focus", r.param("id")));
@@ -785,6 +791,7 @@ bool dispatch_ipc_command(AppState *state,
                     }, s);
                 } else {
                     append_app_log("[Sandbox] launch failed (" + target_cmd + "): " + err);
+                    notify_app_launch_failure("平行沙箱中的应用", err);
                 }
             }).detach();
         }},

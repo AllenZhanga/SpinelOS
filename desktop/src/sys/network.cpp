@@ -355,9 +355,10 @@ std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs() {
     };
 }
 
-void launch_browser_command(std::vector<std::string> args, const std::string &tag) {
-    if (args.empty()) return;
-    std::string bin_lower = args[0];
+void launch_browser_command(std::vector<std::string> args, const std::string &tag,
+                            const std::string &working_dir, std::size_t program_index) {
+    if (program_index >= args.size()) return;
+    std::string bin_lower = fs::path(args[program_index]).filename().string();
     for (char &ch : bin_lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     bool is_chromium_like = bin_lower.find("chromium") != std::string::npos ||
                             bin_lower.find("chrome") != std::string::npos ||
@@ -390,7 +391,7 @@ void launch_browser_command(std::vector<std::string> args, const std::string &ta
         }
     }
 
-    spawn_argv_logged(args, tag, envs);
+    spawn_argv_logged(args, tag, envs, working_dir);
 }
 
 void sync_process_proxy_env() {

@@ -5,8 +5,9 @@
 #include "system_control.hpp"
 #include "wine_launcher.hpp"
 
-#include <gtk/gtk.h>
 #include <dirent.h>
+#include <gio/gdesktopappinfo.h>
+#include <gtk/gtk.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -35,7 +37,12 @@ struct DesktopApp {
     std::string icon_path;
     std::string icon_uri;
     std::string category;
+    fs::path desktop_file;
+    std::string working_dir;
+    std::string try_exec;
+    bool dbus_activatable = false;
     bool terminal = false;
+    bool user_shortcut = false;
     std::optional<WineShortcut> wine_shortcut;
 };
 
@@ -123,32 +130,125 @@ std::string resolve_icon_path(const std::string &icon_raw) {
     return "";
 }
 
-std::vector<std::string> split_exec_args(const std::string &exec_line) {
+std::vector<std::string> split_exec_args(const std::string &exec, const DesktopApp *app = nullptr) {
+    int count = 0;
+    g_auto(GStrv) tokens = nullptr;
+    if (!g_shell_parse_argv(exec.c_str(), &count, &tokens, nullptr)) return {};
     std::vector<std::string> args;
-    std::string cur;
-    bool in_single = false;
-    bool in_double = false;
-    for (size_t i = 0; i < exec_line.size(); ++i) {
-        char c = exec_line[i];
-        if (c == '\'' && !in_double) {
-            in_single = !in_single;
-        } else if (c == '"' && !in_single) {
-            in_double = !in_double;
-        } else if (std::isspace(static_cast<unsigned char>(c)) && !in_single && !in_double) {
-            if (!cur.empty()) {
-                if (!(cur.size() == 2 && cur[0] == '%') && cur.rfind("@@", 0) != 0) {
-                    args.push_back(std::move(cur));
-                }
-                cur.clear();
+    for (int i = 0; i < count; ++i) {
+        const std::string_view token(tokens[i]);
+        // This launch has no input files or URIs. Strip Flatpak forwarding markers too.
+        if (token.starts_with("@@")) continue;
+        if (token == "%i") {
+            if (app && !app->icon_name.empty()) {
+                args.emplace_back("--icon");
+                args.push_back(app->icon_name);
             }
-        } else {
-            cur += c;
+            continue;
+        }
+        if (app && token == "%c") args.push_back(app->name);
+        else if (app && token == "%k") args.push_back(app->desktop_file.string());
+        else if (token.size() != 2 || token.front() != '%' || token == "%%") {
+            std::string arg(token);
+            for (auto pos = arg.find("%%"); pos != std::string::npos; pos = arg.find("%%", pos + 1)) {
+                arg.erase(pos, 1);
+            }
+            args.push_back(std::move(arg));
         }
     }
-    if (!cur.empty() && !(cur.size() == 2 && cur[0] == '%') && cur.rfind("@@", 0) != 0) {
-        args.push_back(std::move(cur));
-    }
     return args;
+}
+
+struct ExecTarget {
+    size_t index = 0;
+    std::optional<std::string_view> search_path;
+};
+
+ExecTarget desktop_exec_target(const std::vector<std::string> &args) {
+    if (fs::path(args.front()).filename() != "env") return {};
+    ExecTarget target;
+    size_t index = 1;
+    if (index < args.size() && args[index] == "--") ++index;
+    for (; index < args.size(); ++index) {
+        const std::string_view arg = args[index];
+        if (arg.starts_with('-')) return {}; // Options such as -S have their own parsing rules.
+        if (arg.find('=') == std::string_view::npos) break;
+        if (arg.starts_with("PATH=")) target.search_path = arg.substr(5);
+    }
+    if (index == args.size()) return {};
+    target.index = index;
+    return target;
+}
+
+fs::path find_launch_program(const std::string &program, const std::string &cwd,
+                             std::optional<std::string_view> search_path) {
+    auto executable = [](const fs::path &path) {
+        return g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR) && access(path.c_str(), X_OK) == 0;
+    };
+    if (program.find('/') != std::string::npos) {
+        const fs::path direct = fs::path(cwd) / program;
+        return executable(direct) ? direct : fs::path{};
+    }
+    if (!search_path && cwd.empty()) {
+        g_autofree char *resolved = g_find_program_in_path(program.c_str());
+        return resolved ? fs::path(resolved) : fs::path{};
+    }
+    const char *path_env = std::getenv("PATH");
+    std::string_view path = search_path.value_or(path_env ? path_env : "/bin:/usr/bin");
+    for (;;) {
+        const auto separator = path.find(':');
+        const fs::path candidate = fs::path(cwd) / path.substr(0, separator) / program;
+        if (executable(candidate)) return candidate;
+        if (separator == std::string_view::npos) break;
+        path.remove_prefix(separator + 1);
+    }
+    return {};
+}
+
+bool validate_launch_program(const std::string &program, const std::string &cwd,
+                             std::optional<std::string_view> search_path, std::string &error) {
+    if (!find_launch_program(program, cwd, search_path).empty()) return true;
+    g_autofree char *display_name = g_filename_display_name(program.c_str());
+    if (program.find('/') != std::string::npos && g_file_test((fs::path(cwd) / program).c_str(), G_FILE_TEST_EXISTS)) {
+        error = "无法执行文件：" + std::string(display_name) + "\n请检查文件类型和执行权限。";
+    } else {
+        error = "找不到可执行文件：" + std::string(display_name) + "\n应用可能已移动或卸载，请重新安装或更新快捷方式。";
+    }
+    return false;
+}
+
+bool build_desktop_app_argv(const DesktopApp &app, std::vector<std::string> &out_argv, std::string &error,
+                            size_t *program_index = nullptr) {
+    out_argv.clear();
+    error.clear();
+    if (app.wine_shortcut) {
+        error = "此 Windows 快捷方式需要通过 Wine 启动。";
+        return false;
+    }
+    auto args = split_exec_args(app.exec, &app);
+    if (args.empty() || args.front().empty()) {
+        error = "快捷方式没有有效的启动命令。";
+        return false;
+    }
+    const auto target = desktop_exec_target(args);
+    if (!app.working_dir.empty() && !g_file_test(app.working_dir.c_str(), G_FILE_TEST_IS_DIR)) {
+        error = "找不到工作目录：" + app.working_dir;
+        return false;
+    }
+    if (!app.try_exec.empty() && !validate_launch_program(app.try_exec, app.working_dir, std::nullopt, error)) return false;
+    if (!validate_launch_program(args.front(), app.working_dir, std::nullopt, error)) return false;
+    if (target.index && !validate_launch_program(args[target.index], app.working_dir, target.search_path, error)) return false;
+    const size_t command_size = args.size();
+    if (app.terminal) {
+        if (has_executable("spinel-terminal")) {
+            if (app.working_dir.empty()) args.insert(args.begin(), {"spinel-terminal", "--"});
+            else args.insert(args.begin(), {"spinel-terminal", "-d", app.working_dir, "--"});
+        } else if (has_executable("ptyxis")) args.insert(args.begin(), {"ptyxis", "--"});
+        else args.insert(args.begin(), {"foot", "-e"});
+    }
+    if (program_index) *program_index = target.index + args.size() - command_size;
+    out_argv = std::move(args);
+    return true;
 }
 
 bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
@@ -192,7 +292,7 @@ bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
     return hidden_ids.count(id) > 0;
 }
 
-bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
+bool parse_desktop_file(const fs::path &path, DesktopApp &app, bool for_catalog = true) {
     std::ifstream ifs(path);
     if (!ifs.is_open()) return false;
 
@@ -225,20 +325,23 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
         else if (k == "Name") name_en = v;
         else if (k == "Name[zh_CN]") name_zh = v;
         else if (k == "Exec") app.exec = v;
+        else if (k == "Path") app.working_dir = v;
+        else if (k == "TryExec") app.try_exec = v;
+        else if (k == "DBusActivatable") app.dbus_activatable = (v == "true");
         else if (k == "Icon") app.icon_name = v;
         else if (k == "Categories") app.category = v;
         else if (k == "Terminal") app.terminal = (v == "true");
         else if (k == "OnlyShowIn") only_show_in = v;
     }
 
-    if (type != "Application" || no_display || hidden || app.exec.empty()) return false;
-    if (!only_show_in.empty() && only_show_in.find("GNOME") == std::string::npos &&
-        only_show_in.find("SpinelOS") == std::string::npos) {
+    if (type != "Application" || hidden || (app.exec.empty() && (for_catalog || !app.dbus_activatable))) return false;
+    if (for_catalog && (no_display || (!only_show_in.empty() && only_show_in.find("GNOME") == std::string::npos &&
+        only_show_in.find("SpinelOS") == std::string::npos))) {
         return false;
     }
 
     app.id = path.stem().string();
-    if (is_hidden_utility_app(app.id, app.terminal)) return false;
+    if (for_catalog && is_hidden_utility_app(app.id, app.terminal)) return false;
 
     if (app.id == "thunar") app.name = "文件管理";
     else if (app.id == "foot" || app.id == "ptyxis" || app.id == "org.gnome.Ptyxis" || app.id == "app.devsuite.Ptyxis") {
@@ -248,21 +351,64 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app) {
     else app.name = !name_zh.empty() ? name_zh : name_en;
 
     if (app.name.empty()) app.name = app.id;
-    app.icon_path = resolve_icon_path(app.icon_name);
-    app.icon_uri = app.icon_path.empty() ? "" : ("file://" + app.icon_path);
+    app.desktop_file = path;
+    if (for_catalog) {
+        app.icon_path = resolve_icon_path(app.icon_name);
+        app.icon_uri = app.icon_path.empty() ? "" : ("file://" + app.icon_path);
+    }
     return true;
 }
 
+std::vector<fs::path> user_application_dirs() {
+    const fs::path xdg_dir = fs::path(g_get_user_data_dir()) / "applications";
+    const fs::path home_dir_path = fs::path(home_dir()) / ".local/share/applications";
+    if (xdg_dir == home_dir_path) return {xdg_dir};
+    return {xdg_dir, home_dir_path};
+}
+
+bool is_owned_shortcut(const fs::path &path) {
+    struct stat info {};
+    return lstat(path.c_str(), &info) == 0 && info.st_uid == getuid() &&
+           (S_ISREG(info.st_mode) || S_ISLNK(info.st_mode));
+}
+
+std::string reveal_app_path(const DesktopApp &app) {
+    if (app.wine_shortcut) return app.wine_shortcut->link.string();
+    const auto argv = split_exec_args(app.exec, &app);
+    if (!argv.empty()) {
+        const auto target = desktop_exec_target(argv);
+        const fs::path program = argv[target.index];
+        const fs::path name = program.filename();
+        if (name == "env" || name == "sh" || name == "bash" || name == "xdg-open" || name == "flatpak") {
+            return app.desktop_file.string();
+        }
+        std::error_code ec;
+        if (program.has_parent_path()) {
+            const auto path = fs::absolute(fs::path(app.working_dir) / program, ec);
+            if (!ec) {
+                if (fs::is_regular_file(path, ec)) return path.string();
+                if (fs::is_directory(path.parent_path(), ec)) return path.parent_path().string();
+            }
+        } else {
+            const auto resolved = find_launch_program(program.string(), app.working_dir, target.search_path);
+            if (!resolved.empty()) {
+                const auto path = fs::absolute(resolved, ec);
+                if (!ec) return path.string();
+            }
+        }
+    }
+    return app.desktop_file.string();
+}
+
 std::vector<DesktopApp> scan_all_apps() {
-    std::vector<fs::path> dirs = {
-        fs::path(home_dir()) / ".local/share/applications",
+    const auto user_dirs = user_application_dirs();
+    auto dirs = user_dirs;
+    dirs.insert(dirs.end(), {
         fs::path(home_dir()) / ".local/share/flatpak/exports/share/applications",
         fs::path("/var/lib/flatpak/exports/share/applications"),
         fs::path("/usr/local/share/applications"),
         fs::path("/usr/share/applications")
-    };
-    const fs::path user_applications = fs::path(g_get_user_data_dir()) / "applications";
-    if (user_applications != dirs.front()) dirs.insert(dirs.begin(), user_applications);
+    });
 
     std::map<std::string, DesktopApp> by_id;
     std::error_code ec;
@@ -272,6 +418,7 @@ std::vector<DesktopApp> scan_all_apps() {
             if (!entry.is_regular_file(ec) || entry.path().extension() != ".desktop") continue;
             DesktopApp app;
             if (parse_desktop_file(entry.path(), app)) {
+                app.user_shortcut = std::ranges::find(user_dirs, d) != user_dirs.end() && is_owned_shortcut(entry.path());
                 by_id.try_emplace(app.id, std::move(app));
             }
         }
@@ -325,7 +472,8 @@ void push_desktop_apps(AppState *state) {
            << "\"name\":\"" << json_escape(apps[i].name) << "\","
            << "\"icon\":\"" << json_escape(apps[i].icon_name) << "\","
            << "\"icon_uri\":\"" << json_escape(apps[i].icon_uri) << "\","
-           << "\"category\":\"" << json_escape(apps[i].category) << "\""
+           << "\"category\":\"" << json_escape(apps[i].category) << "\","
+           << "\"user_shortcut\":" << (apps[i].user_shortcut ? "true" : "false")
            << "}";
     }
     js << "]);";
@@ -338,77 +486,163 @@ void push_desktop_apps(AppState *state) {
     native_shell_sync_windows(state);
 }
 
+void notify_app_launch_failure(const std::string &name, const std::string &detail) {
+    const std::string title = name.empty() ? "无法启动应用" : "无法启动「" + name + "」";
+    append_app_log("[App] " + title + "：" + detail);
+    g_autofree char *body = g_markup_escape_text(detail.c_str(), -1);
+    spawn_argv_detached({"notify-send", "--app-name=SpinelOS", "--icon=dialog-error", "--", title, body});
+}
+
+LocalAppShortcut find_local_app_shortcut(const std::string &id) {
+    if (id.empty() || id == "." || id == ".." || id.find('/') != std::string::npos || id.find('\0') != std::string::npos) return {};
+    for (const auto &dir : user_application_dirs()) {
+        const auto path = dir / (id + ".desktop");
+        std::error_code ec;
+        DesktopApp entry;
+        if (!fs::is_regular_file(path, ec) || !parse_desktop_file(path, entry)) continue;
+        if (!is_owned_shortcut(path)) return {};
+        return {path.string(), reveal_app_path(entry)};
+    }
+    return {};
+}
+
+bool trash_local_app_shortcut(const std::string &id, std::string &error) {
+    error.clear();
+    const auto shortcut = find_local_app_shortcut(id);
+    if (shortcut.shortcut_path.empty()) {
+        error = "找不到可移除的本地快捷方式。";
+        return false;
+    }
+    g_autoptr(GFile) file = g_file_new_for_path(shortcut.shortcut_path.c_str());
+    g_autoptr(GError) failure = nullptr;
+    if (g_file_trash(file, nullptr, &failure)) return true;
+    error = failure ? failure->message : "无法移到回收站。";
+    return false;
+}
+
+bool execute_launchpad_app_action(const std::string &id, bool remove_shortcut, std::string &feedback) {
+    feedback.clear();
+    if (remove_shortcut) {
+        if (!trash_local_app_shortcut(id, feedback)) return false;
+        feedback = "已将快捷方式移到回收站。";
+        return true;
+    }
+    const auto apps = scan_all_apps();
+    const auto app = std::ranges::find(apps, id, &DesktopApp::id);
+    const std::string path = app == apps.end() ? "" : reveal_app_path(*app);
+    if (path.empty()) {
+        feedback = "找不到应用所在目录。";
+        return false;
+    }
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GSubprocess) process = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
+                                                     "spinel-files", path.c_str(), nullptr);
+    if (process) return true;
+    feedback = error ? error->message : "无法打开文件管理器。";
+    return false;
+}
+
+void handle_launchpad_app_action(AppState *state, const std::string &id, bool remove_shortcut) {
+    if (!state || !state->games_view || id.empty()) return;
+    std::string feedback;
+    const bool ok = execute_launchpad_app_action(id, remove_shortcut, feedback);
+    if (ok && remove_shortcut) push_desktop_apps(state);
+    if (feedback.empty()) return;
+    eval_js(state->games_view, "window.__spinelLaunchpadFeedback?.(" + std::string(ok ? "true" : "false") +
+                               ",\"" + json_escape(feedback) + "\");");
+}
+
+namespace {
+
+void launch_desktop_entry(const DesktopApp &app) {
+    if (app.wine_shortcut) {
+        g_autoptr(GError) error = nullptr;
+        g_autoptr(GSubprocess) process = launch_wine_shortcut(*app.wine_shortcut, &error);
+        if (!process) notify_app_launch_failure(app.name, error ? error->message : "无法启动 Wine 快捷方式。");
+        return;
+    }
+    std::vector<std::string> args;
+    std::string error;
+    size_t program_index = 0;
+    if (!build_desktop_app_argv(app, args, error, &program_index)) {
+        notify_app_launch_failure(app.name, error);
+        return;
+    }
+    const auto lower = [](std::string text) {
+        for (char &ch : text) ch = g_ascii_tolower(ch);
+        return text;
+    };
+    const std::string bin = lower(fs::path(args[program_index]).filename().string());
+    const std::string tag = "App:" + app.id;
+    if (bin.find("chromium") != std::string::npos || bin.find("chrome") != std::string::npos ||
+        bin.find("firefox") != std::string::npos || bin.find("brave") != std::string::npos ||
+        bin.find("msedge") != std::string::npos) {
+        launch_browser_command(std::move(args), tag, app.working_dir, program_index);
+        return;
+    }
+    const std::string category = lower(app.category + " " + app.id + " " + bin);
+    const bool is_game_or_bench =
+        (category.find("game") != std::string::npos || category.find("benchmark") != std::string::npos ||
+         category.find("gravitymark") != std::string::npos || category.find("glmark2") != std::string::npos ||
+         category.find("vkcube") != std::string::npos || category.find("heroic") != std::string::npos ||
+         category.find("lutris") != std::string::npos) && category.find("steam") == std::string::npos;
+    if (is_game_or_bench) {
+        PerfConfig perf = load_perf_config();
+        sync_mangohud_config(perf);
+        if (perf.mangohud != "off" && has_executable("mangohud") && bin.find("mangohud") == std::string::npos) {
+            args.insert(args.begin(), "mangohud");
+        }
+        if (perf.gamemode && has_executable("gamemoderun") && bin.find("gamemoderun") == std::string::npos) {
+            args.insert(args.begin(), "gamemoderun");
+        }
+    }
+    spawn_argv_logged(args, tag, {}, app.working_dir);
+}
+
+} // namespace
+
+void launch_desktop_app_file(const std::string &path) {
+    DesktopApp entry;
+    std::error_code ec;
+    if (fs::is_regular_file(path, ec) && parse_desktop_file(path, entry, false) &&
+        !entry.dbus_activatable) {
+        launch_desktop_entry(entry);
+        return;
+    }
+    g_autoptr(GDesktopAppInfo) info = g_desktop_app_info_new_from_filename(path.c_str());
+    if (!info) {
+        g_autofree char *filename = g_filename_display_basename(path.c_str());
+        notify_app_launch_failure(entry.name.empty() ? filename : entry.name, "快捷方式已不存在或无法读取：" + path);
+        return;
+    }
+
+    GAppInfo *app = G_APP_INFO(info);
+    GdkDisplay *display = gdk_display_get_default();
+    g_autoptr(GdkAppLaunchContext) context = display ? gdk_display_get_app_launch_context(display) : nullptr;
+    g_autoptr(GError) error = nullptr;
+    if (!g_app_info_launch(app, nullptr, context ? G_APP_LAUNCH_CONTEXT(context) : nullptr, &error)) {
+        notify_app_launch_failure(g_app_info_get_name(app), error ? error->message : "请检查应用是否仍然安装。");
+    }
+}
+
 void launch_desktop_app_id(const std::string &desktop_id) {
     if (desktop_id.empty()) return;
     for (const auto &app : scan_all_apps()) {
         if (app.id == desktop_id) {
-            if (app.wine_shortcut) {
-                g_autoptr(GError) error = nullptr;
-                g_autoptr(GSubprocess) process = launch_wine_shortcut(*app.wine_shortcut, &error);
-                if (!process && error) append_app_log("[Wine] " + std::string(error->message));
-                return;
-            }
-            std::vector<std::string> args;
-            if (!resolve_desktop_app_argv(desktop_id, args) || args.empty()) return;
-            // Launch browsers through unified Wayland + system-proxy helper
-            std::string bin_l = args[0];
-            for (char &ch : bin_l) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (bin_l.find("chromium") != std::string::npos || bin_l.find("chrome") != std::string::npos ||
-                bin_l.find("firefox") != std::string::npos || bin_l.find("brave") != std::string::npos ||
-                bin_l.find("msedge") != std::string::npos) {
-                launch_browser_command(std::move(args), "App:" + app.id);
-                return;
-            }
-            std::string cat_l = app.category + " " + app.id + " " + bin_l;
-            for (char &ch : cat_l) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            bool is_game_or_bench =
-                (cat_l.find("game") != std::string::npos ||
-                 cat_l.find("benchmark") != std::string::npos ||
-                 cat_l.find("gravitymark") != std::string::npos ||
-                 cat_l.find("glmark2") != std::string::npos ||
-                 cat_l.find("vkcube") != std::string::npos ||
-                 cat_l.find("heroic") != std::string::npos ||
-                 cat_l.find("lutris") != std::string::npos) &&
-                cat_l.find("steam") == std::string::npos;
-            if (is_game_or_bench) {
-                PerfConfig perf = load_perf_config();
-                sync_mangohud_config(perf);
-                if (perf.mangohud != "off" && has_executable("mangohud") && bin_l.find("mangohud") == std::string::npos) {
-                    args.insert(args.begin(), "mangohud");
-                }
-                if (perf.gamemode && has_executable("gamemoderun") && bin_l.find("gamemoderun") == std::string::npos) {
-                    args.insert(args.begin(), "gamemoderun");
-                }
-            }
-            spawn_argv_logged(args, "App:" + app.id);
+            launch_desktop_entry(app);
             return;
         }
     }
+    notify_app_launch_failure(desktop_id, "找不到应用快捷方式。应用可能已移动或卸载。");
 }
 
-bool resolve_desktop_app_argv(const std::string &desktop_id, std::vector<std::string> &out_argv) {
+bool resolve_desktop_app_argv(const std::string &desktop_id, std::vector<std::string> &out_argv, std::string &error) {
     out_argv.clear();
-    if (desktop_id.empty()) return false;
     for (const auto &app : scan_all_apps()) {
         if (app.id != desktop_id) continue;
-        if (app.wine_shortcut) return false;
-        auto args = split_exec_args(app.exec);
-        if (args.empty()) return false;
-        if (app.terminal) {
-            if (has_executable("spinel-terminal")) {
-                args.insert(args.begin(), "--");
-                args.insert(args.begin(), "spinel-terminal");
-            } else if (has_executable("ptyxis")) {
-                args.insert(args.begin(), "--");
-                args.insert(args.begin(), "ptyxis");
-            } else {
-                args.insert(args.begin(), "-e");
-                args.insert(args.begin(), "foot");
-            }
-        }
-        out_argv = std::move(args);
-        return true;
+        return build_desktop_app_argv(app, out_argv, error);
     }
+    error = "找不到应用快捷方式。应用可能已移动或卸载。";
     return false;
 }
 
@@ -433,10 +667,7 @@ bool launch_cmd_in_sandbox(const std::string &cmd, std::string &error_out) {
         }
     } else if (c.rfind("app:launch:", 0) == 0) {
         std::string id = c.substr(11);
-        if (!resolve_desktop_app_argv(id, argv) || argv.empty()) {
-            error_out = "该应用暂不支持或未找到可执行入口";
-            return false;
-        }
+        if (!resolve_desktop_app_argv(id, argv, error_out)) return false;
     } else if (c.rfind("settings:", 0) == 0 || c.rfind("store:", 0) == 0 || c.rfind("games:", 0) == 0 ||
                c.rfind("monitor:", 0) == 0 || c.rfind("logs:", 0) == 0) {
         error_out = "系统设置类窗口无需放入沙箱运行";

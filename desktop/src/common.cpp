@@ -344,7 +344,8 @@ void spawn_argv_detached(const std::vector<std::string> &args,
 
 void spawn_argv_logged(const std::vector<std::string> &args,
                        const std::string &tag,
-                       const std::vector<std::pair<std::string, std::string>> &env_overrides) {
+                       const std::vector<std::pair<std::string, std::string>> &env_overrides,
+                       const std::string &working_dir) {
     if (args.empty()) return;
     ensure_display_env();
 
@@ -393,6 +394,10 @@ void spawn_argv_logged(const std::vector<std::string> &args,
     for (const auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
     argv.push_back(nullptr);
 
+    if (!working_dir.empty() && chdir(working_dir.c_str()) != 0) {
+        dprintf(STDERR_FILENO, "[%s] chdir(%s) failed\n", tag.c_str(), working_dir.c_str());
+        _exit(126);
+    }
     execvp(args[0].c_str(), argv.data());
     dprintf(STDERR_FILENO, "[%s] execvp(%s) failed\n", tag.c_str(), args[0].c_str());
     _exit(127);

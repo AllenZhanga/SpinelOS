@@ -441,7 +441,9 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
         native_shell_sync_perf(static_cast<AppState *>(d));
     }));
     add_act("sync-desktop", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
-        native_shell_sync_desktop(static_cast<AppState *>(d));
+        auto *state = static_cast<AppState *>(d);
+        native_shell_sync_desktop(state);
+        native_shell_sync_windows(state);
     }));
     add_act("sync-telemetry", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         push_all_telemetry(static_cast<AppState *>(d));

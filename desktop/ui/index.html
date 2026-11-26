@@ -264,10 +264,11 @@
       <section class="library-section glass">
         <div class="section-head">
           <div class="lib-title-wrap">
-            <h3>全部桌面应用程序</h3>
+            <h3 id="launchpad-heading" tabindex="-1">全部桌面应用程序</h3>
           </div>
           <button class="btn small primary" data-cmd="store:open">前往应用商店下载</button>
         </div>
+        <div id="launchpad-feedback" class="feedback-banner hidden" role="status"></div>
         <div id="launchpad-app-grid" class="launchpad-grid"></div>
       </section>
     </div>
@@ -325,6 +326,11 @@
       </div>
     </div>
   </section>
+
+  <div id="launchpad-context-menu" class="ctx-menu glass hidden" role="menu" aria-label="应用操作">
+    <button type="button" role="menuitem" id="launchpad-open-location">打开所在目录</button>
+    <button type="button" role="menuitem" id="launchpad-remove-shortcut">移除快捷方式</button>
+  </div>
 
   <!-- 5. System Settings Window (?mode=settings) -->
   <section id="app-settings" class="app-window settings-shell hidden">

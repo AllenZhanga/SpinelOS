@@ -374,6 +374,17 @@ html, body {
   margin: 4px 0;
 }
 
+#launchpad-context-menu {
+  background: var(--input-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+#launchpad-context-menu button:focus-visible {
+  background: var(--surface-hover);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* ==================== 3. macOS Floating Bottom Dock ==================== */
 #dock-shell {
   width: 100%;

@@ -817,14 +817,83 @@
     sendCommand(`dock:resize:${width}`);
   }
 
+  const launchpadMenu = mode === "games" ? document.getElementById("launchpad-context-menu") : null;
+  const launchpadOpenLocation = document.getElementById("launchpad-open-location");
+  const launchpadRemoveShortcut = document.getElementById("launchpad-remove-shortcut");
+  let launchpadMenuApp = null;
+  let launchpadMenuAnchor = null;
+
+  function closeLaunchpadMenu(restoreFocus = false) {
+    if (!launchpadMenuApp) return;
+    launchpadMenu.classList.add("hidden");
+    if (restoreFocus) launchpadMenuAnchor.focus({ preventScroll: true });
+    launchpadMenuApp = null;
+    launchpadMenuAnchor = null;
+  }
+
+  function openLaunchpadMenu(ev, app) {
+    ev.preventDefault();
+    launchpadMenuAnchor = ev.currentTarget;
+    launchpadMenuApp = app;
+    launchpadRemoveShortcut.classList.toggle("hidden", !app.user_shortcut);
+    launchpadMenu.classList.remove("hidden");
+    const menu = launchpadMenu.getBoundingClientRect();
+    const anchor = launchpadMenuAnchor.getBoundingClientRect();
+    const x = ev.clientX || anchor.left;
+    const y = ev.clientY || anchor.bottom;
+    launchpadMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.width - 8))}px`;
+    launchpadMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.height - 8))}px`;
+    launchpadOpenLocation.focus({ preventScroll: true });
+  }
+
+  function sendLaunchpadAction(method) {
+    if (!launchpadMenuApp) return;
+    const id = launchpadMenuApp.id;
+    closeLaunchpadMenu(true);
+    showFeedback("launchpad-feedback", "");
+    sendCommand({ method, params: { id } });
+  }
+
+  if (launchpadMenu) {
+    launchpadOpenLocation.addEventListener("click", () => sendLaunchpadAction("app.open-location"));
+    launchpadRemoveShortcut.addEventListener("click", () => sendLaunchpadAction("app.remove-shortcut"));
+    launchpadMenu.addEventListener("keydown", (ev) => {
+      if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && !launchpadRemoveShortcut.classList.contains("hidden")) {
+        ev.preventDefault();
+        (document.activeElement === launchpadOpenLocation ? launchpadRemoveShortcut : launchpadOpenLocation).focus();
+      }
+    });
+    document.addEventListener("pointerdown", (ev) => {
+      if (!launchpadMenu.contains(ev.target)) closeLaunchpadMenu();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeLaunchpadMenu(true);
+    });
+    document.querySelector("#app-games .app-scroll")?.addEventListener("scroll", () => closeLaunchpadMenu());
+    window.addEventListener("blur", () => closeLaunchpadMenu());
+    window.__spinelLaunchpadFeedback = (ok, message) => showFeedback("launchpad-feedback", message, !ok);
+  }
+
   function renderLaunchpadApps() {
     const grid = document.getElementById("launchpad-app-grid");
     if (!grid) return;
+    const focused = launchpadMenuAnchor || document.activeElement;
+    const focusIndex = Array.from(grid.children).indexOf(focused);
+    const focusId = focusIndex >= 0 ? focused.dataset.appId : null;
+    closeLaunchpadMenu();
     grid.innerHTML = "";
     state.desktopApps.forEach((app) => {
       const btn = document.createElement("button");
       btn.className = "launchpad-item";
+      btn.dataset.appId = app.id;
       btn.setAttribute("data-cmd", `app:launch:${app.id}`);
+      if (launchpadMenu) {
+        btn.setAttribute("aria-haspopup", "menu");
+        btn.addEventListener("contextmenu", (ev) => openLaunchpadMenu(ev, app));
+        btn.addEventListener("keydown", (ev) => {
+          if (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) openLaunchpadMenu(ev, app);
+        });
+      }
       const kind = matchAppKind(`${app.id} ${app.name}`);
       if (app.icon_uri && kind !== "files" && kind !== "terminal") {
         const img = document.createElement("img");
@@ -842,6 +911,12 @@
       btn.appendChild(label);
       grid.appendChild(btn);
     });
+    if (focusIndex >= 0) {
+      const replacement = Array.from(grid.children).find((button) => button.dataset.appId === focusId)
+        || grid.children[Math.min(focusIndex, grid.children.length - 1)]
+        || document.getElementById("launchpad-heading");
+      replacement?.focus({ preventScroll: true });
+    }
   }
 
   window.__spinelWindows = (list) => {

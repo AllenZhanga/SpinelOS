@@ -107,8 +107,8 @@ void open_desktop_entry(const std::string &path, bool is_dir, bool is_exec, bool
     if (path.empty()) return;
     if (is_dir) {
         spawn_argv_detached({"spinel-files", path});
-    } else if (is_desktop_file && has_executable("gio")) {
-        spawn_argv_detached({"gio", "launch", path});
+    } else if (is_desktop_file) {
+        launch_desktop_app_file(path);
     } else if (is_exec && ::access(path.c_str(), X_OK) == 0) {
         spawn_argv_detached({path});
     } else if (has_executable("xdg-open")) {

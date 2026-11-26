@@ -710,6 +710,8 @@ void trigger_cmd(AppState *state, const std::string &cmd) {
         std::string bin = cmd.substr(10);
         if (!bin.empty() && has_executable(bin)) {
             spawn_argv_detached({bin});
+        } else if (!bin.empty()) {
+            notify_app_launch_failure(bin, "找不到可执行文件。应用可能已移动或卸载。");
         }
         return;
     }
