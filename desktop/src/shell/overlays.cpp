@@ -17,12 +17,12 @@ GtkWidget *make_cc_circle_icon(BarGlyph kind, const char *circle_cls) {
     GtkWidget *wrap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(wrap, "spinel-cc-circle");
     if (circle_cls) gtk_widget_add_css_class(wrap, circle_cls);
-    gtk_widget_set_size_request(wrap, 28, 28);
+    gtk_widget_set_size_request(wrap, 30, 30);
     gtk_widget_set_halign(wrap, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(wrap, GTK_ALIGN_CENTER);
 
     GtkWidget *da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(da, 14, 14);
+    gtk_widget_set_size_request(da, 16, 16);
     gtk_widget_set_hexpand(da, TRUE);
     gtk_widget_set_vexpand(da, TRUE);
     gtk_widget_set_halign(da, GTK_ALIGN_CENTER);
@@ -41,9 +41,13 @@ GtkWidget *make_cc_pill(AppState *state,
                         const char *cmd,
                         bool has_chevron,
                         GtkWidget **out_circle,
-                        GtkWidget **out_sub) {
+                        GtkWidget **out_sub,
+                        GtkWidget **out_dot = nullptr) {
     GtkWidget *btn = make_cmd_button(state, nullptr, "spinel-cc-pill", cmd);
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 9);
+    gtk_widget_set_hexpand(btn, TRUE);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_hexpand(row, TRUE);
+    gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
 
     GtkWidget *circle = make_cc_circle_icon(glyph, circle_cls);
     if (out_circle) *out_circle = circle;
@@ -54,21 +58,42 @@ GtkWidget *make_cc_pill(AppState *state,
     GtkWidget *t = gtk_label_new(title);
     gtk_widget_add_css_class(t, "spinel-cc-title");
     gtk_widget_set_halign(t, GTK_ALIGN_START);
+    gtk_label_set_ellipsize(GTK_LABEL(t), PANGO_ELLIPSIZE_END);
     GtkWidget *s = gtk_label_new(sub_init);
     gtk_widget_add_css_class(s, "spinel-cc-sub");
     gtk_widget_set_halign(s, GTK_ALIGN_START);
     gtk_label_set_ellipsize(GTK_LABEL(s), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(s), 14);
     if (out_sub) *out_sub = s;
     gtk_box_append(GTK_BOX(col), t);
     gtk_box_append(GTK_BOX(col), s);
 
-    gtk_box_append(GTK_BOX(row), circle);
-    gtk_box_append(GTK_BOX(row), col);
+    // Uniform fixed-width trailing slot so all rows align identically
+    GtkWidget *trail = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request(trail, 18, 18);
+    gtk_widget_set_halign(trail, GTK_ALIGN_END);
+    gtk_widget_set_valign(trail, GTK_ALIGN_CENTER);
     if (has_chevron) {
         GtkWidget *chev = gtk_label_new("›");
         gtk_widget_add_css_class(chev, "spinel-cc-chev");
-        gtk_box_append(GTK_BOX(row), chev);
+        gtk_widget_set_hexpand(chev, TRUE);
+        gtk_widget_set_halign(chev, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(chev, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(trail), chev);
+    } else if (out_dot) {
+        GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_add_css_class(dot, "spinel-cc-dot");
+        gtk_widget_set_size_request(dot, 8, 8);
+        gtk_widget_set_hexpand(dot, TRUE);
+        gtk_widget_set_halign(dot, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
+        *out_dot = dot;
+        gtk_box_append(GTK_BOX(trail), dot);
     }
+
+    gtk_box_append(GTK_BOX(row), circle);
+    gtk_box_append(GTK_BOX(row), col);
+    gtk_box_append(GTK_BOX(row), trail);
     gtk_button_set_child(GTK_BUTTON(btn), row);
     return btn;
 }
@@ -584,6 +609,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
 
     GtkWindow *bd = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(bd, "SpinelControlCenterBackdrop");
+    gtk_window_set_decorated(bd, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(bd), "spinel-transparent");
     gtk_layer_init_for_window(bd);
     gtk_layer_set_namespace(bd, "spinel-cc-backdrop");
@@ -615,16 +641,17 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
 
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelControlCenter");
+    gtk_window_set_decorated(win, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_window_set_default_size(win, 344, -1);
+    gtk_window_set_default_size(win, -1, -1);
 
     gtk_layer_init_for_window(win);
     gtk_layer_set_namespace(win, "spinel-controlcenter");
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 36);
-    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 12);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_TOP, 28);
+    gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_RIGHT, 0);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
     g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
         auto *n = static_cast<NativeShellState *>(d);
@@ -648,6 +675,11 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
 
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(root, "spinel-cc-panel");
+    gtk_widget_set_size_request(root, 356, -1);
+    gtk_widget_set_margin_top(root, 8);
+    gtk_widget_set_margin_bottom(root, 40);
+    gtk_widget_set_margin_start(root, 34);
+    gtk_widget_set_margin_end(root, 18);
 
     GtkWidget *top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_set_homogeneous(GTK_BOX(top_row), TRUE);
@@ -656,10 +688,10 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(conn_card, "spinel-cc-card");
     gtk_widget_add_css_class(conn_card, "spinel-cc-group");
     gtk_widget_set_hexpand(conn_card, TRUE);
-    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, nullptr, &ns->cc_net_val));
-    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, nullptr, nullptr));
-    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val));
-    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Dnd, "active-indigo", "勿扰模式", "已关闭", "dnd:toggle", false, &ns->cc_dnd_circle, &ns->cc_dnd_val));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Wifi, "active-blue", "网络", "检测中", "settings:open:wifi", true, &ns->cc_net_circle, &ns->cc_net_val));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Bluetooth, "active-blue", "蓝牙", "设备与手柄", "settings:open:bt", true, &ns->cc_bt_circle, &ns->cc_bt_val));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Gamepad, "active-blue", "GameMode", "已开启", "perf:toggle-gamemode", false, &ns->cc_gm_circle, &ns->cc_gm_val, &ns->cc_gm_dot));
+    gtk_box_append(GTK_BOX(conn_card), make_cc_pill(state, BarGlyph::Dnd, "active-indigo", "勿扰模式", "已关闭", "dnd:toggle", false, &ns->cc_dnd_circle, &ns->cc_dnd_val, &ns->cc_dnd_dot));
 
     GtkWidget *right_col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_hexpand(right_col, TRUE);
@@ -882,7 +914,7 @@ void apply_native_css(NativeShellState *ns) {
         "  border: 1px solid " + t.cc_border + ";\n"
         "  border-radius: 18px;\n"
         "  padding: 12px;\n"
-        "  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);\n"
+        "  box-shadow: " + std::string(launcher_shadow) + ";\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-cc-card, .spinel-cc-card-btn {\n"
@@ -900,8 +932,10 @@ void apply_native_css(NativeShellState *ns) {
         "  background-image: none;\n"
         "  border: none;\n"
         "  box-shadow: none;\n"
-        "  border-radius: 8px;\n"
-        "  padding: 5px 6px;\n"
+        "  border-radius: 9px;\n"
+        "  padding: 5px 8px;\n"
+        "  min-height: 40px;\n"
+        "  margin: 1px 0;\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-cc-pill:hover, .spinel-cc-card-btn:hover { background-color: " + std::string(hover_bg) + "; }\n"
@@ -915,9 +949,16 @@ void apply_native_css(NativeShellState *ns) {
         "  background-color: " + t.cc_accent + ";\n"
         "  color: #ffffff;\n"
         "}\n"
+        ".spinel-cc-dot {\n"
+        "  border-radius: 999px;\n"
+        "  background-color: " + std::string(trough_bg) + ";\n"
+        "}\n"
+        ".spinel-cc-dot.active-dot {\n"
+        "  background-color: " + t.cc_accent + ";\n"
+        "}\n"
         ".spinel-cc-title { font-size: 12px; font-weight: 600; color: " + t.bar_fg + "; }\n"
         ".spinel-cc-sub { font-size: 10.5px; color: " + std::string(cc_sub_fg) + "; }\n"
-        ".spinel-cc-chev { font-size: 14px; color: " + std::string(cc_sub_fg) + "; }\n"
+        ".spinel-cc-chev { font-size: 14px; font-weight: 600; color: " + std::string(cc_sub_fg) + "; }\n"
         ".spinel-cc-badge {\n"
         "  font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;\n"
         "  background-color: " + std::string(cc_chip_bg) + "; color: " + t.bar_fg + ";\n"

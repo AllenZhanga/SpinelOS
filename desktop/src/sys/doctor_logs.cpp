@@ -1565,3 +1565,289 @@ void stop_clipboard_watcher() {
         g_clip_watcher_pid = -1;
     }
 }
+
+/* ==================== Btrfs Snapper Snapshots ==================== */
+
+namespace {
+
+std::vector<std::string> split_csv_row(const std::string &line) {
+    std::vector<std::string> fields;
+    std::string cur;
+    bool in_quotes = false;
+    for (size_t i = 0; i < line.size(); ++i) {
+        char c = line[i];
+        if (c == '"') {
+            if (in_quotes && i + 1 < line.size() && line[i + 1] == '"') {
+                cur.push_back('"');
+                ++i;
+            } else {
+                in_quotes = !in_quotes;
+            }
+        } else if (c == ',' && !in_quotes) {
+            fields.push_back(trim_copy(cur));
+            cur.clear();
+        } else if (c != '\r') {
+            cur.push_back(c);
+        }
+    }
+    fields.push_back(trim_copy(cur));
+    return fields;
+}
+
+bool check_snap_sudo_nopass() {
+    std::string out;
+    int rc = 1;
+    return run_argv_capture({"sudo", "-n", "true"}, out, rc) && rc == 0;
+}
+
+void emit_snapshots_feedback(AppState *state, bool ok, const std::string &msg, bool reboot_required = false) {
+    append_app_log(std::string("[Snapper] ") + (ok ? "" : "[ERR] ") + msg);
+    std::ostringstream js;
+    js << "window.__spinelSnapshotsFeedback && window.__spinelSnapshotsFeedback("
+       << (ok ? "true" : "false") << ",\"" << json_escape(msg) << "\","
+       << (reboot_required ? "true" : "false") << ");";
+    post_js_to_main(state, js.str(), false);
+}
+
+bool run_snapper_sudo_cmd(const std::vector<std::string> &args,
+                          const std::string &password,
+                          std::string &out,
+                          int &rc) {
+    bool nopass = check_snap_sudo_nopass();
+    if (!nopass && password.empty()) {
+        out = "需要当前用户管理员密码（sudo）才能操作 Btrfs 系统快照。";
+        rc = 2;
+        return false;
+    }
+    std::vector<std::string> cmd = nopass
+        ? std::vector<std::string>{"sudo", "-n"}
+        : std::vector<std::string>{"sudo", "-S", "-p", ""};
+    cmd.insert(cmd.end(), args.begin(), args.end());
+    return run_argv_stdin_capture(cmd, nopass ? "" : password, out, rc) && rc == 0;
+}
+
+std::string sanitize_snapper_desc(const std::string &raw) {
+    std::string s = trim_copy(raw);
+    std::string clean;
+    clean.reserve(std::min<size_t>(s.size(), 80));
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7f || c == '"' || c == '`' || c == '$') continue;
+        clean.push_back(static_cast<char>(c));
+        if (clean.size() >= 80) break;
+    }
+    return trim_copy(clean);
+}
+
+}  // namespace
+
+bool is_valid_snapshot_id(const std::string &s, int &out_id) {
+    std::string t = trim_copy(s);
+    if (t.empty() || t.size() > 10) return false;
+    for (unsigned char c : t) {
+        if (!std::isdigit(c)) return false;
+    }
+    long long v = std::atoll(t.c_str());
+    if (v <= 0 || v > 100000000) return false;
+    out_id = static_cast<int>(v);
+    return true;
+}
+
+bool is_valid_snapper_desc(const std::string &desc) {
+    std::string clean = sanitize_snapper_desc(desc);
+    return !clean.empty();
+}
+
+std::vector<SnapperSnapshotInfo> parse_snapper_csv(const std::string &csv) {
+    std::vector<SnapperSnapshotInfo> items;
+    bool header_seen = false;
+    for (const auto &raw_line : split_lines(csv)) {
+        std::string line = trim_copy(raw_line);
+        if (line.empty()) continue;
+        auto cols = split_csv_row(line);
+        if (cols.empty()) continue;
+        if (!header_seen && (cols[0] == "number" || cols[0] == "#")) {
+            header_seen = true;
+            continue;
+        }
+        std::string num_str = cols[0];
+        bool is_cur = (num_str.find('*') != std::string::npos);
+        std::string digits;
+        for (unsigned char c : num_str) {
+            if (std::isdigit(c)) digits.push_back(static_cast<char>(c));
+        }
+        if (digits.empty()) continue;
+        int id = std::atoi(digits.c_str());
+        if (id == 0) continue;  // Snapper internal snapshot #0 represents live subvolume baseline
+
+        SnapperSnapshotInfo info;
+        info.id = id;
+        info.is_current = is_cur;
+        if (cols.size() > 1) info.type = cols[1];
+        if (cols.size() > 2) info.date = cols[2];
+        if (cols.size() > 3) info.user = cols[3];
+        if (cols.size() > 4) info.cleanup = cols[4];
+        if (cols.size() > 5) info.description = cols[5];
+        items.push_back(std::move(info));
+    }
+    std::reverse(items.begin(), items.end());
+    return items;
+}
+
+void push_snapshots_state(AppState *state) {
+    if (!state) return;
+    std::thread([state]() {
+        std::string root_fs = "unknown";
+        std::string f_out;
+        int f_rc = 1;
+        if (run_argv_capture({"findmnt", "-n", "-o", "FSTYPE", "/"}, f_out, f_rc) && f_rc == 0) {
+            std::string trimmed = trim_copy(f_out);
+            if (!trimmed.empty()) root_fs = trimmed;
+        }
+        bool live_iso = is_live_iso_env();
+        bool snapper_bin = has_executable("snapper");
+        std::error_code ec;
+        bool config_ready = fs::exists("/etc/snapper/configs/root", ec);
+        bool sudo_nopass = check_snap_sudo_nopass();
+
+        std::vector<SnapperSnapshotInfo> snaps;
+        if (!live_iso && root_fs == "btrfs" && snapper_bin) {
+            std::string csv_out;
+            int s_rc = 1;
+            const std::vector<std::string> cmd = {
+                "snapper", "-c", "root", "--csvout", "list", "--columns", "number,type,date,user,cleanup,description"
+            };
+            bool ok = run_argv_capture(cmd, csv_out, s_rc) && s_rc == 0;
+            if (!ok && sudo_nopass) {
+                std::vector<std::string> scmd = {"sudo", "-n"};
+                scmd.insert(scmd.end(), cmd.begin(), cmd.end());
+                ok = run_argv_capture(scmd, csv_out, s_rc) && s_rc == 0;
+            }
+            if (ok) {
+                config_ready = true;
+                snaps = parse_snapper_csv(csv_out);
+            }
+        }
+
+        std::ostringstream js;
+        js << "window.__spinelSnapshotsData && window.__spinelSnapshotsData({"
+           << "\"root_fs\":\"" << json_escape(root_fs) << "\","
+           << "\"is_live\":" << (live_iso ? "true" : "false") << ","
+           << "\"snapper_installed\":" << (snapper_bin ? "true" : "false") << ","
+           << "\"config_ready\":" << (config_ready ? "true" : "false") << ","
+           << "\"sudo_nopass\":" << (sudo_nopass ? "true" : "false") << ","
+           << "\"snapshots\":[";
+        for (size_t i = 0; i < snaps.size(); ++i) {
+            if (i > 0) js << ",";
+            const auto &s = snaps[i];
+            js << "{"
+               << "\"id\":" << s.id << ","
+               << "\"type\":\"" << json_escape(s.type) << "\","
+               << "\"date\":\"" << json_escape(s.date) << "\","
+               << "\"user\":\"" << json_escape(s.user) << "\","
+               << "\"cleanup\":\"" << json_escape(s.cleanup) << "\","
+               << "\"description\":\"" << json_escape(s.description) << "\","
+               << "\"is_current\":" << (s.is_current ? "true" : "false")
+               << "}";
+        }
+        js << "]});";
+
+        post_js_to_main(state, js.str(), false);
+    }).detach();
+}
+
+void create_system_snapshot(AppState *state, const std::string &payload) {
+    std::string desc = "SpinelOS 手动还原点";
+    std::string password;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "desc") desc = v;
+        else if (k == "password") password = v;
+    }
+    std::string clean_desc = sanitize_snapper_desc(desc);
+    if (clean_desc.empty()) clean_desc = "SpinelOS 手动还原点";
+
+    std::thread([state, clean_desc, password]() {
+        if (!has_executable("snapper")) {
+            emit_snapshots_feedback(state, false, "系统未安装 snapper。");
+            return;
+        }
+        std::string out;
+        int rc = 1;
+        bool ok = run_snapper_sudo_cmd(
+            {"snapper", "-c", "root", "create", "--cleanup-algorithm", "number", "--description", clean_desc},
+            password, out, rc);
+        if (!ok) {
+            emit_snapshots_feedback(state, false, "创建系统快照失败: " + trim_copy(out));
+        } else {
+            emit_snapshots_feedback(state, true, "已成功创建 Btrfs 系统快照：「" + clean_desc + "」");
+        }
+        push_snapshots_state(state);
+    }).detach();
+}
+
+void rollback_system_snapshot(AppState *state, const std::string &payload) {
+    std::string id_raw;
+    std::string password;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "id") id_raw = v;
+        else if (k == "password") password = v;
+    }
+    int snap_id = 0;
+    if (!is_valid_snapshot_id(id_raw, snap_id)) {
+        emit_snapshots_feedback(state, false, "无效的快照编号。");
+        return;
+    }
+
+    std::thread([state, snap_id, password]() {
+        std::string out;
+        int rc = 1;
+        std::string id_s = std::to_string(snap_id);
+        bool ok = run_snapper_sudo_cmd({"snapper", "-c", "root", "rollback", id_s}, password, out, rc);
+        if (!ok) {
+            emit_snapshots_feedback(state, false, "回滚快照 #" + id_s + " 失败: " + trim_copy(out));
+        } else {
+            emit_snapshots_feedback(
+                state, true,
+                "已准备回滚到快照 #" + id_s + "！请立即重启电脑以切换到回滚后的系统状态。", true);
+        }
+        push_snapshots_state(state);
+    }).detach();
+}
+
+void delete_system_snapshot(AppState *state, const std::string &payload) {
+    std::string id_raw;
+    std::string password;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "id") id_raw = v;
+        else if (k == "password") password = v;
+    }
+    int snap_id = 0;
+    if (!is_valid_snapshot_id(id_raw, snap_id)) {
+        emit_snapshots_feedback(state, false, "无效的快照编号。");
+        return;
+    }
+
+    std::thread([state, snap_id, password]() {
+        std::string out;
+        int rc = 1;
+        std::string id_s = std::to_string(snap_id);
+        bool ok = run_snapper_sudo_cmd({"snapper", "-c", "root", "delete", id_s}, password, out, rc);
+        if (!ok) {
+            emit_snapshots_feedback(state, false, "删除快照 #" + id_s + " 失败: " + trim_copy(out));
+        } else {
+            emit_snapshots_feedback(state, true, "已删除快照 #" + id_s + "。");
+        }
+        push_snapshots_state(state);
+    }).detach();
+}

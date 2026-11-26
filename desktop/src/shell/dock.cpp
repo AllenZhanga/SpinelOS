@@ -18,8 +18,8 @@ namespace {
 constexpr double kDockHeight = 124.0;
 constexpr double kDockBottomPad = 6.0;
 constexpr double kDockIconBase = 48.0;
-constexpr double kDockGap = 8.0;
-constexpr double kDockPadX = 14.0;
+constexpr double kDockGap = 10.0;
+constexpr double kDockPadX = 16.0;
 constexpr double kDockDividerW = 14.0;
 
 int dock_total_items(const NativeShellState *ns) {
@@ -51,11 +51,23 @@ void compute_dock_layout(const NativeShellState *ns,
     int e = static_cast<int>(ns->extra_items.size());
     int total = p + e;
 
+    auto item_draw_size = [&](int i) -> double {
+        const DockItem *it = dock_item_at(ns, i);
+        double sz = it ? it->anim_size : kDockIconBase;
+        if (ns->drag_active && ns->drag_cur_index == i) sz = 54.0;
+        return sz;
+    };
+    auto extra_pair_gap = [&](int i) -> double {
+        double a = std::max(0.0, item_draw_size(i - 1) - kDockIconBase);
+        double b = std::max(0.0, item_draw_size(i) - kDockIconBase);
+        return (a + b) * 0.16;
+    };
+
     double content_w = 0.0;
     for (int i = 0; i < total; ++i) {
-        if (i > 0) content_w += kDockGap;
+        if (i > 0) content_w += kDockGap + extra_pair_gap(i);
         if (e > 0 && i == p) content_w += kDockDividerW;
-        content_w += kDockIconBase;
+        content_w += item_draw_size(i);
     }
     pill_w = content_w + kDockPadX * 2.0;
     pill_x = (widget_w - pill_w) * 0.5;
@@ -64,10 +76,36 @@ void compute_dock_layout(const NativeShellState *ns,
     centers.reserve(total);
     double cur = pill_x + kDockPadX;
     for (int i = 0; i < total; ++i) {
-        if (i > 0) cur += kDockGap;
+        if (i > 0) cur += kDockGap + extra_pair_gap(i);
         if (e > 0 && i == p) cur += kDockDividerW;
-        centers.push_back(cur + kDockIconBase * 0.5);
-        cur += kDockIconBase;
+        double sz = item_draw_size(i);
+        centers.push_back(cur + sz * 0.5);
+        cur += sz;
+    }
+}
+
+void update_dock_input_region(NativeShellState *ns) {
+    if (!ns || !ns->dock_win || !ns->dock_da) return;
+    GdkSurface *surf = gtk_native_get_surface(GTK_NATIVE(ns->dock_win));
+    if (!surf) return;
+
+    bool popover_open = ns->dock_popover && gtk_widget_get_visible(ns->dock_popover);
+    if (ns->dock_mode == "autohide" && !ns->dock_revealed && !ns->drag_active && !popover_open) {
+        int w = std::max(ns->dock_width, gtk_widget_get_width(ns->dock_da));
+        double pill_x = 0.0, pill_w = 0.0;
+        std::vector<double> centers;
+        compute_dock_layout(ns, w, pill_x, pill_w, centers);
+        cairo_rectangle_int_t rect{
+            std::max(0, static_cast<int>(std::floor(pill_x)) - 6),
+            static_cast<int>(kDockHeight) - 6,
+            std::clamp(static_cast<int>(std::ceil(pill_w)) + 12, 120, w),
+            6
+        };
+        cairo_region_t *reg = cairo_region_create_rectangle(&rect);
+        gdk_surface_set_input_region(surf, reg);
+        cairo_region_destroy(reg);
+    } else {
+        gdk_surface_set_input_region(surf, nullptr);
     }
 }
 
@@ -75,17 +113,18 @@ gboolean on_dock_anim_tick(gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
     int total = dock_total_items(ns);
     bool moving = false;
+    bool allow_magnify = (ns->dock_mode == "magnify");
 
     for (int i = 0; i < total; ++i) {
         DockItem *item = dock_item_at_mut(ns, i);
         double target_sz = kDockIconBase;
         double target_lift = 0.0;
-        if (ns->hover_index == i) {
+        if (allow_magnify && ns->hover_index == i) {
             target_sz = 58.0;
-            target_lift = 8.0;
-        } else if (ns->hover_index >= 0 && std::abs(ns->hover_index - i) == 1) {
+            target_lift = 7.0;
+        } else if (allow_magnify && ns->hover_index >= 0 && std::abs(ns->hover_index - i) == 1) {
             target_sz = 52.0;
-            target_lift = 3.0;
+            target_lift = 2.5;
         }
         double d_sz = target_sz - item->anim_size;
         double d_lf = target_lift - item->anim_lift;
@@ -99,9 +138,22 @@ gboolean on_dock_anim_tick(gpointer user_data) {
         }
     }
 
+    bool popover_open = ns->dock_popover && gtk_widget_get_visible(ns->dock_popover);
+    double target_hide = (ns->dock_mode == "autohide" && !ns->dock_revealed && !ns->drag_active && !popover_open)
+                             ? 1.0
+                             : 0.0;
+    double d_hide = target_hide - ns->dock_hide_progress;
+    if (std::abs(d_hide) > 0.015) {
+        ns->dock_hide_progress += d_hide * 0.28;
+        moving = true;
+    } else {
+        ns->dock_hide_progress = target_hide;
+    }
+
     if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
     if (!moving) {
         ns->dock_anim_timer = 0;
+        update_dock_input_region(ns);
         return G_SOURCE_REMOVE;
     }
     return G_SOURCE_CONTINUE;
@@ -111,6 +163,48 @@ void ensure_dock_anim(NativeShellState *ns) {
     if (ns->dock_anim_timer == 0) {
         ns->dock_anim_timer = g_timeout_add(16, on_dock_anim_tick, ns);
     }
+}
+
+void cancel_dock_hide_grace(NativeShellState *ns) {
+    if (ns && ns->dock_hide_grace_timer != 0) {
+        g_source_remove(ns->dock_hide_grace_timer);
+        ns->dock_hide_grace_timer = 0;
+    }
+}
+
+void schedule_dock_hide_if_needed(NativeShellState *ns) {
+    if (!ns || ns->dock_mode != "autohide") return;
+    cancel_dock_hide_grace(ns);
+    ns->dock_hide_grace_timer = g_timeout_add(300, +[](gpointer d) -> gboolean {
+        auto *n = static_cast<NativeShellState *>(d);
+        if (!n) return G_SOURCE_REMOVE;
+        n->dock_hide_grace_timer = 0;
+        bool popover_open = n->dock_popover && gtk_widget_get_visible(n->dock_popover);
+        if (n->dock_mode == "autohide" && !n->drag_active && !popover_open) {
+            n->dock_revealed = false;
+            ensure_dock_anim(n);
+        }
+        return G_SOURCE_REMOVE;
+    }, ns);
+}
+
+void apply_dock_mode_state(NativeShellState *ns) {
+    if (!ns) return;
+    cancel_dock_hide_grace(ns);
+    if (ns->dock_win) {
+        gtk_layer_set_exclusive_zone(ns->dock_win, ns->dock_mode == "autohide" ? 0 : 74);
+    }
+    if (ns->dock_mode != "autohide") {
+        ns->dock_revealed = true;
+    } else {
+        ns->dock_revealed = false;
+        ns->hover_index = -1;
+    }
+    if (ns->dock_mode != "magnify") {
+        ns->hover_index = -1;
+    }
+    update_dock_input_region(ns);
+    ensure_dock_anim(ns);
 }
 
 std::string dock_pins_path() {
@@ -323,6 +417,17 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
     double pill_h = 66.0;
     double pill_y = h - kDockBottomPad - pill_h;
     double pill_rad = 20.0;
+    double y_shift = ns->dock_hide_progress * 78.0;
+
+    if (ns->dock_mode == "autohide" && ns->dock_hide_progress > 0.65) {
+        double bar_w = std::clamp(pill_w * 0.42, 120.0, 220.0);
+        cairo_rounded_rect(cr, (w - bar_w) * 0.5, h - 4.0, bar_w, 2.8, 1.4);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, ns->theme.is_light ? 0.38 : 0.32);
+        cairo_fill(cr);
+    }
+
+    cairo_save(cr);
+    cairo_translate(cr, 0.0, y_shift);
 
     cairo_rounded_rect(cr, pill_x, pill_y + 3.0, pill_w, pill_h, pill_rad);
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, ns->theme.is_light ? 0.16 : 0.36);
@@ -403,7 +508,7 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
     }
 
     bool popover_open = ns->dock_popover && gtk_widget_get_visible(ns->dock_popover);
-    if (!ns->drag_active && !popover_open && ns->hover_index >= 0 && ns->hover_index < total) {
+    if (!ns->drag_active && !popover_open && ns->dock_hide_progress < 0.35 && ns->hover_index >= 0 && ns->hover_index < total) {
         const DockItem *hitem = dock_item_at(ns, ns->hover_index);
         if (hitem && !hitem->label.empty()) {
             int tw = 0, th = 0;
@@ -433,10 +538,12 @@ void draw_dock_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_dat
             draw_pango_text(cr, hitem->label, tip_x + pad_x, tip_y + pad_y, 12.0, false, tfg_r, tfg_g, tfg_b, tfg_a);
         }
     }
+    cairo_restore(cr);
 }
 
 int hit_test_dock(const NativeShellState *ns, double x, double y) {
     if (!ns || !ns->dock_da) return -1;
+    if (ns->dock_mode == "autohide" && !ns->dock_revealed) return -1;
     int w = gtk_widget_get_width(ns->dock_da);
     int h = gtk_widget_get_height(ns->dock_da);
     if (y < h - 78.0 || y > h - 2.0) return -1;
@@ -447,7 +554,7 @@ int hit_test_dock(const NativeShellState *ns, double x, double y) {
     if (x < pill_x || x > pill_x + pill_w) return -1;
 
     int best = -1;
-    double best_d = 30.0;
+    double best_d = 32.0;
     for (size_t i = 0; i < centers.size(); ++i) {
         double d = std::abs(x - centers[i]);
         if (d < best_d) {
@@ -461,6 +568,14 @@ int hit_test_dock(const NativeShellState *ns, double x, double y) {
 void on_dock_motion(GtkEventControllerMotion *, double x, double y, gpointer user_data) {
     auto *ns = static_cast<NativeShellState *>(user_data);
     if (ns->drag_active) return;
+    if (ns->dock_mode == "autohide") {
+        cancel_dock_hide_grace(ns);
+        if (!ns->dock_revealed) {
+            ns->dock_revealed = true;
+            update_dock_input_region(ns);
+            ensure_dock_anim(ns);
+        }
+    }
     int idx = hit_test_dock(ns, x, y);
     if (idx != ns->hover_index) {
         ns->hover_index = idx;
@@ -475,6 +590,7 @@ void on_dock_leave(GtkEventControllerMotion *, gpointer user_data) {
         ns->hover_index = -1;
         ensure_dock_anim(ns);
     }
+    schedule_dock_hide_if_needed(ns);
 }
 
 void on_dock_popover_cmd(GtkButton *btn, gpointer user_data) {
@@ -551,6 +667,10 @@ void show_dock_context_menu(NativeShellState *ns, int idx, double x) {
         gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
         gtk_popover_set_autohide(GTK_POPOVER(pop), TRUE);
         gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+        g_signal_connect(pop, "closed", G_CALLBACK(+[](GtkPopover *, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            schedule_dock_hide_if_needed(n);
+        }), ns);
 
         GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         gtk_popover_set_child(GTK_POPOVER(pop), box);
@@ -851,18 +971,24 @@ void rebuild_dock_items(NativeShellState *ns, const std::vector<TrackedWindowInf
     }
 
     int total = dock_total_items(ns);
-    int target_w = std::clamp(total * 58 + (ns->extra_items.empty() ? 48 : 64) + 120, 260, 1600);
+    int target_w = std::clamp(total * 64 + (ns->extra_items.empty() ? 56 : 74) + 140, 300, 1760);
     if (ns->dock_win && ns->dock_da && target_w != ns->dock_width) {
         ns->dock_width = target_w;
         gtk_widget_set_size_request(ns->dock_da, target_w, static_cast<int>(kDockHeight));
         gtk_window_set_default_size(ns->dock_win, target_w, static_cast<int>(kDockHeight));
+        update_dock_input_region(ns);
     }
     if (ns->dock_da) gtk_widget_queue_draw(ns->dock_da);
 }
 
 void build_native_dock(GtkApplication *app, NativeShellState *ns) {
+    ns->dock_mode = load_dock_config().mode;
+    ns->dock_revealed = (ns->dock_mode != "autohide");
+    ns->dock_hide_progress = (ns->dock_mode == "autohide") ? 1.0 : 0.0;
+
     GtkWindow *win = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(win, "SpinelDock");
+    gtk_window_set_decorated(win, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
     gtk_window_set_default_size(win, ns->dock_width, static_cast<int>(kDockHeight));
 
@@ -871,8 +997,12 @@ void build_native_dock(GtkApplication *app, NativeShellState *ns) {
     gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_TOP);
     gtk_layer_set_anchor(win, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_margin(win, GTK_LAYER_SHELL_EDGE_BOTTOM, static_cast<int>(kDockBottomPad));
-    gtk_layer_set_exclusive_zone(win, 74);
+    gtk_layer_set_exclusive_zone(win, ns->dock_mode == "autohide" ? 0 : 74);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    g_signal_connect_after(win, "map", G_CALLBACK(+[](GtkWidget *, gpointer d) {
+        update_dock_input_region(static_cast<NativeShellState *>(d));
+    }), ns);
 
     ns->dock_da = gtk_drawing_area_new();
     gtk_widget_set_size_request(ns->dock_da, ns->dock_width, static_cast<int>(kDockHeight));
@@ -904,3 +1034,10 @@ void build_native_dock(GtkApplication *app, NativeShellState *ns) {
 }
 
 }  // namespace shell_internal
+
+void native_shell_sync_dock(AppState *state) {
+    if (!state || !state->native) return;
+    NativeShellState *ns = state->native;
+    ns->dock_mode = load_dock_config().mode;
+    shell_internal::apply_dock_mode_state(ns);
+}

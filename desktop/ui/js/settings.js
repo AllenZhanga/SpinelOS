@@ -18,7 +18,8 @@
       shortcuts: "键盘与快捷键",
       perf: "游戏性能",
       appearance: "外观与输入法",
-      perms: "权限与安全"
+      perms: "权限与安全",
+      snapshots: "系统快照 (Snapper)"
     };
     const tabs = Object.keys(titles);
     const target = tabs.includes(tab) ? tab : "wifi";
@@ -45,9 +46,11 @@
     else if (target === "perf") sendCommand("perf:get");
     else if (target === "appearance") {
       sendCommand("theme:refresh");
+      sendCommand("dock:config-get");
       sendCommand("ime:status");
     }
     else if (target === "perms") sendCommand("settings:perms-get");
+    else if (target === "snapshots") sendCommand("settings:snapshots-get");
   }
 
   function switchMonitorTab(tab) {
@@ -84,6 +87,169 @@
 
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
   window.__spinelOpenMonitor = (tab) => switchMonitorTab(tab);
+
+  /* ---------------- Dock Display Mode ---------------- */
+  const dockModeDescs = {
+    magnify: "悬浮放大（自适应间距防拥挤，底部常驻）",
+    fixed: "固定尺寸（不放大，仅悬停显示应用名称）",
+    autohide: "不悬浮默认隐藏（释放屏幕底部空间，鼠标移至底边自动滑出）"
+  };
+
+  window.__spinelDockConfig = (cfg) => {
+    const mode = (cfg && cfg.mode) || "magnify";
+    document.querySelectorAll("#dock-mode-group [data-dock-mode]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-dock-mode") === mode);
+    });
+    const descEl = document.getElementById("dock-mode-desc");
+    if (descEl) descEl.textContent = dockModeDescs[mode] || dockModeDescs.magnify;
+  };
+
+  document.querySelectorAll("#dock-mode-group [data-dock-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.getAttribute("data-dock-mode") || "magnify";
+      sendCommand(`dock:config-set:${mode}`);
+    });
+  });
+
+  /* ---------------- Btrfs Snapper Snapshots ---------------- */
+  let snapSudoNopass = false;
+  let pendingSnapOp = null;
+
+  function closeSnapModal() {
+    pendingSnapOp = null;
+    document.getElementById("snap-pass-modal")?.classList.add("hidden");
+  }
+
+  function executeSnapOp(op, password = "") {
+    if (!op) return;
+    if (op.action === "create") {
+      sendCommand(`settings:snapshot-create\ndesc=${op.desc || "SpinelOS 手动还原点"}\npassword=${password}`);
+    } else if (op.action === "rollback") {
+      sendCommand(`settings:snapshot-rollback\nid=${op.id}\npassword=${password}`);
+    } else if (op.action === "delete") {
+      sendCommand(`settings:snapshot-delete\nid=${op.id}\npassword=${password}`);
+    }
+  }
+
+  function requestSnapOp(op) {
+    if (snapSudoNopass) {
+      executeSnapOp(op, "");
+      return;
+    }
+    pendingSnapOp = op;
+    const modal = document.getElementById("snap-pass-modal");
+    const title = document.getElementById("snap-pass-title");
+    const desc = document.getElementById("snap-pass-desc");
+    const input = document.getElementById("snap-pass-input");
+    if (title) {
+      title.textContent = op.action === "create"
+        ? "创建 Btrfs 系统快照"
+        : (op.action === "rollback" ? `回滚到系统快照 #${op.id}` : `删除快照 #${op.id}`);
+    }
+    if (desc) {
+      desc.textContent = op.action === "rollback"
+        ? "回滚将在下次重启后切换到该快照对应的只读/可写系统子卷，你的用户数据 (/home) 默认保留。"
+        : "操作根分区 @snapshots 子卷需要当前用户 sudo 管理员权限。";
+    }
+    if (input) input.value = "";
+    modal?.classList.remove("hidden");
+    input?.focus();
+  }
+
+  document.getElementById("btn-snap-create")?.addEventListener("click", () => {
+    const inp = document.getElementById("snap-desc-input");
+    const desc = (inp?.value || "").trim() || "SpinelOS 手动还原点";
+    requestSnapOp({ action: "create", desc });
+  });
+
+  document.getElementById("btn-snap-pass-cancel")?.addEventListener("click", closeSnapModal);
+  document.getElementById("snap-pass-modal")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "snap-pass-modal") closeSnapModal();
+  });
+  document.getElementById("btn-snap-pass-confirm")?.addEventListener("click", () => {
+    const pass = document.getElementById("snap-pass-input")?.value || "";
+    if (!pass && !snapSudoNopass) {
+      document.getElementById("snap-pass-input")?.focus();
+      return;
+    }
+    const op = pendingSnapOp;
+    closeSnapModal();
+    executeSnapOp(op, pass);
+  });
+  document.getElementById("snap-pass-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      document.getElementById("btn-snap-pass-confirm")?.click();
+    }
+  });
+
+  window.__spinelSnapshotsFeedback = (ok, msg, rebootRequired = false) => {
+    showFeedback("snap-feedback", rebootRequired ? `${msg}（建议立即重启）` : (msg || ""), !ok);
+  };
+
+  window.__spinelSnapshotsData = (data) => {
+    if (!data) return;
+    snapSudoNopass = Boolean(data.sudo_nopass);
+    const chip = document.getElementById("snap-status-chip");
+    const createBtn = document.getElementById("btn-snap-create");
+    const listEl = document.getElementById("snap-list");
+    const snaps = Array.isArray(data.snapshots) ? data.snapshots : [];
+
+    const ready = !data.is_live && data.root_fs === "btrfs" && data.snapper_installed && data.config_ready;
+    if (chip) {
+      if (data.is_live) chip.textContent = "Live ISO 环境不可用";
+      else if (data.root_fs !== "btrfs") chip.textContent = `根分区为 ${data.root_fs || "非 Btrfs"}`;
+      else if (!data.snapper_installed) chip.textContent = "未安装 snapper";
+      else if (!data.config_ready) chip.textContent = "未初始化 root 快照配置";
+      else chip.textContent = `Btrfs 已就绪 · 共 ${snaps.length} 个快照`;
+    }
+    if (createBtn) createBtn.disabled = !ready;
+
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    if (!ready) {
+      listEl.innerHTML = '<div class="disk-empty">当前仅在已安装到硬盘的 Btrfs 根目录（并配置 snapper root 子卷）中可管理快照。通过 Spinel OS 安装器格式化为 Btrfs 后将自动就绪。</div>';
+      return;
+    }
+    if (snaps.length === 0) {
+      listEl.innerHTML = '<div class="disk-empty">暂无历史快照记录，建议点击上方「创建系统快照」保存当前干净状态。</div>';
+      return;
+    }
+
+    snaps.forEach((s) => {
+      const item = document.createElement("div");
+      item.className = "disk-item";
+      const left = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "disk-title";
+      title.textContent = `#${s.id} · ${s.description || "系统快照"}${s.is_current ? "（当前运行中）" : ""}`;
+      const sub = document.createElement("div");
+      sub.className = "disk-sub";
+      sub.textContent = `时间: ${s.date || "-"} · 类型: ${s.type || "single"}${s.cleanup ? ` · 策略: ${s.cleanup}` : ""}`;
+      left.append(title, sub);
+
+      const actions = document.createElement("div");
+      actions.className = "disk-tags";
+
+      const rbBtn = document.createElement("button");
+      rbBtn.type = "button";
+      rbBtn.className = "btn small primary";
+      rbBtn.textContent = "回滚到此状态";
+      rbBtn.disabled = Boolean(s.is_current);
+      rbBtn.addEventListener("click", () => requestSnapOp({ action: "rollback", id: s.id }));
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn small danger";
+      delBtn.textContent = "删除";
+      delBtn.disabled = Boolean(s.is_current);
+      delBtn.addEventListener("click", () => requestSnapOp({ action: "delete", id: s.id }));
+
+      actions.append(rbBtn, delBtn);
+      item.append(left, actions);
+      listEl.appendChild(item);
+    });
+  };
 
   /* ---------------- Permissions & Security ---------------- */
   window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);

@@ -153,7 +153,12 @@ struct NativeShellState {
     bool drag_active = false;
     bool drag_just_finished = false;
     guint dock_anim_timer = 0;
-    int dock_width = 580;
+    int dock_width = 620;
+    std::string dock_mode = "magnify";  // "magnify" | "fixed" | "autohide"
+    bool dock_revealed = true;
+    double dock_hide_progress = 0.0;    // 0.0 = visible, 1.0 = hidden off bottom
+    guint dock_autohide_timer = 0;
+    guint dock_hide_grace_timer = 0;
 
     // Control Center
     GtkWindow *cc_backdrop_win = nullptr;
@@ -212,13 +217,18 @@ struct NativeShellState {
     std::string osd_kind = "volume";
     int osd_value = 0;
     bool osd_muted = false;
+    GtkWidget *cc_net_circle = nullptr;
     GtkWidget *cc_net_val = nullptr;
+    GtkWidget *cc_bt_circle = nullptr;
+    GtkWidget *cc_bt_val = nullptr;
     GtkWidget *cc_gpu_badge = nullptr;
     GtkWidget *cc_mem_val = nullptr;
     GtkWidget *cc_gm_circle = nullptr;
     GtkWidget *cc_gm_val = nullptr;
+    GtkWidget *cc_gm_dot = nullptr;
     GtkWidget *cc_dnd_circle = nullptr;
     GtkWidget *cc_dnd_val = nullptr;
+    GtkWidget *cc_dnd_dot = nullptr;
     GtkWidget *cc_mh_circle = nullptr;
     GtkWidget *cc_mh_val = nullptr;
     GtkWidget *cc_bright_pct = nullptr;

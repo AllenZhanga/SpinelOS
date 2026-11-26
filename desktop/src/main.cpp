@@ -434,6 +434,9 @@ void register_shell_actions(GtkApplication *app, AppState *state) {
     add_act("sync-theme", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         native_shell_sync_theme(static_cast<AppState *>(d));
     }));
+    add_act("sync-dock", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
+        native_shell_sync_dock(static_cast<AppState *>(d));
+    }));
     add_act("sync-perf", G_CALLBACK(+[](GSimpleAction *, GVariant *, gpointer d) {
         native_shell_sync_perf(static_cast<AppState *>(d));
     }));
@@ -506,6 +509,7 @@ void native_shell_sync_workspaces(AppState *) {}
 void native_shell_sync_desktop(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-desktop"); }
 void native_shell_sync_wallpaper(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
 void native_shell_sync_theme(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-theme"); }
+void native_shell_sync_dock(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-dock"); }
 void native_shell_sync_perf(AppState *) { notify_dbus_action("org.spinelos.shell", "/org/spinelos/shell", "sync-perf"); }
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}

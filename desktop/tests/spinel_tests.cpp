@@ -28,6 +28,7 @@ void native_shell_sync_windows(AppState *) {}
 void native_shell_sync_desktop(AppState *) {}
 void native_shell_sync_wallpaper(AppState *) {}
 void native_shell_sync_theme(AppState *) {}
+void native_shell_sync_dock(AppState *) {}
 void native_shell_sync_perf(AppState *) {}
 void native_shell_toggle_cc(AppState *) {}
 void native_shell_set_cc_visible(AppState *, bool) {}
@@ -701,6 +702,34 @@ void test_dock_quit_and_store_helpers() {
     EXPECT(is_valid_https_url("https://antigravity.google"));
     EXPECT(!is_valid_https_url("http://example.com"));
     EXPECT(!is_valid_https_url("https://evil.com/\"rm -rf\""));
+
+    // Dock mode config & Btrfs Snapper parsing / validation
+    EXPECT(is_valid_dock_mode("magnify"));
+    EXPECT(is_valid_dock_mode("fixed"));
+    EXPECT(is_valid_dock_mode("autohide"));
+    EXPECT(!is_valid_dock_mode("invalid-mode"));
+
+    DockConfig dcfg;
+    dcfg.mode = "autohide";
+    EXPECT(save_dock_config(dcfg));
+    EXPECT(load_dock_config().mode == "autohide");
+
+    int parsed_id = 0;
+    EXPECT(!is_valid_snapshot_id("0", parsed_id));
+    EXPECT(!is_valid_snapshot_id("-1", parsed_id));
+    EXPECT(!is_valid_snapshot_id("12;rm", parsed_id));
+    EXPECT(is_valid_snapshot_id("15", parsed_id) && parsed_id == 15);
+    EXPECT(is_valid_snapper_desc("Before kernel upgrade"));
+
+    const std::string csv =
+        "number,type,date,user,cleanup,description\n"
+        "0,single,,, ,current\n"
+        "12,single,2026-11-26 10:00:00,root,number,Initial install\n"
+        "15*,single,2026-11-26 11:30:00,root,number,\"Before GPU driver, v2\"\n";
+    auto snaps = parse_snapper_csv(csv);
+    EXPECT(snaps.size() == 2);
+    EXPECT(snaps[0].id == 15 && snaps[0].is_current && snaps[0].description == "Before GPU driver, v2");
+    EXPECT(snaps[1].id == 12 && !snaps[1].is_current && snaps[1].description == "Initial install");
 }
 
 }  // namespace

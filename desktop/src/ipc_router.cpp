@@ -490,6 +490,21 @@ bool dispatch_ipc_command(AppState *state,
         {"theme:export", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             export_custom_theme_template();
         }},
+        {"dock:config-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_dock_config(s);
+        }},
+        {"settings:snapshots-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_snapshots_state(s);
+        }},
+        {"settings:snapshot-create", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            create_system_snapshot(s, r.legacy_raw);
+        }},
+        {"settings:snapshot-rollback", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            rollback_system_snapshot(s, r.legacy_raw);
+        }},
+        {"settings:snapshot-delete", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            delete_system_snapshot(s, r.legacy_raw);
+        }},
         {"system:audio-down", +[](AppState *, const IpcRequest &, const IpcHostActions &) {
             spawn_argv_detached({"wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"});
         }},
@@ -801,6 +816,10 @@ bool dispatch_ipc_command(AppState *state,
         {"theme:set:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             set_active_theme(s, arg_or_param(r, "theme:set:", {"id", "theme"}));
             if (a.notify_webui_sync) a.notify_webui_sync("sync-theme");
+        }},
+        {"dock:config-set:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            set_dock_mode(s, arg_or_param(r, "dock:config-set:", {"mode", "value"}));
+            if (a.notify_webui_sync) a.notify_webui_sync("sync-dock");
         }},
         {"settings:wifi-disconnect:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             disconnect_iface(s, arg_or_param(r, "settings:wifi-disconnect:", {"device", "iface"}));

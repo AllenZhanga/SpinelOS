@@ -1,6 +1,7 @@
 #include "system_control.hpp"
 #include "sys_internal.hpp"
 #include "common.hpp"
+#include "native_shell.hpp"
 #include "theme_manager.hpp"
 
 #include <sys/stat.h>
@@ -643,4 +644,59 @@ void reset_shortcuts_config(AppState *state) {
         eval_js(state->settings_view,
                 "window.__spinelShortcutsFeedback && window.__spinelShortcutsFeedback(true, \"已恢复默认快捷键并立即生效！\");");
     }
+}
+
+/* ---------------- Dock Mode Configuration ---------------- */
+
+bool is_valid_dock_mode(const std::string &mode) {
+    return mode == "magnify" || mode == "fixed" || mode == "autohide";
+}
+
+DockConfig load_dock_config() {
+    DockConfig cfg;
+    fs::path p = fs::path(home_dir()) / ".config/spinelos/dock.conf";
+    std::ifstream ifs(p);
+    if (!ifs.is_open()) return cfg;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "mode" && is_valid_dock_mode(v)) {
+            cfg.mode = v;
+        }
+    }
+    return cfg;
+}
+
+bool save_dock_config(const DockConfig &cfg) {
+    if (!is_valid_dock_mode(cfg.mode)) return false;
+    fs::path p = fs::path(home_dir()) / ".config/spinelos/dock.conf";
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+    return write_text_file(p.string(), "mode=" + cfg.mode + "\n");
+}
+
+void push_dock_config(AppState *state) {
+    if (!state || !state->settings_view) return;
+    DockConfig cfg = load_dock_config();
+    std::ostringstream js;
+    js << "window.__spinelDockConfig && window.__spinelDockConfig({"
+       << "\"mode\":\"" << json_escape(cfg.mode) << "\""
+       << "});";
+    eval_js(state->settings_view, js.str());
+}
+
+void set_dock_mode(AppState *state, const std::string &mode_raw) {
+    std::string mode = trim_copy(mode_raw);
+    if (!is_valid_dock_mode(mode)) {
+        mode = "magnify";
+    }
+    DockConfig cfg;
+    cfg.mode = mode;
+    save_dock_config(cfg);
+    append_app_log("[Dock] 切换 Dock 栏显示模式为: " + mode);
+    push_dock_config(state);
+    native_shell_sync_dock(state);
 }

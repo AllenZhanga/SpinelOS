@@ -192,3 +192,31 @@ void clear_clipboard_history();
 void copy_text_to_clipboard(const std::string &text);
 void start_clipboard_watcher();
 void stop_clipboard_watcher();
+
+// Dock behavior mode ("magnify" | "fixed" | "autohide")
+struct DockConfig {
+    std::string mode = "magnify";
+};
+bool is_valid_dock_mode(const std::string &mode);
+DockConfig load_dock_config();
+bool save_dock_config(const DockConfig &cfg);
+void push_dock_config(AppState *state);
+void set_dock_mode(AppState *state, const std::string &mode);
+
+// Btrfs Snapper system snapshots
+struct SnapperSnapshotInfo {
+    int id = 0;
+    std::string type;
+    std::string date;
+    std::string user;
+    std::string cleanup;
+    std::string description;
+    bool is_current = false;
+};
+bool is_valid_snapshot_id(const std::string &s, int &out_id);
+bool is_valid_snapper_desc(const std::string &desc);
+std::vector<SnapperSnapshotInfo> parse_snapper_csv(const std::string &csv);
+void push_snapshots_state(AppState *state);
+void create_system_snapshot(AppState *state, const std::string &payload);
+void rollback_system_snapshot(AppState *state, const std::string &payload);
+void delete_system_snapshot(AppState *state, const std::string &payload);

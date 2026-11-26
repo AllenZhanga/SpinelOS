@@ -376,6 +376,10 @@
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:snapshots">
+          <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9"/><path d="M2.5 4.8V8h3.2"/><path d="M8 5.2V8l2 1.2"/></svg></span>
+          <span>系统快照</span>
+        </button>
       </nav>
       <div class="settings-sidebar-foot">Spinel OS</div>
     </aside>
@@ -867,6 +871,17 @@
             <button type="button" class="btn small" id="btn-wp-clear" data-cmd="wallpaper:clear-image">恢复主题渐变</button>
           </div>
         </div>
+        <div class="perf-row" style="margin-top: 10px;">
+          <div class="perf-row-info">
+            <strong>Dock 栏显示与交互模式</strong>
+            <span class="muted-hint" id="dock-mode-desc">悬浮放大（自动扩展间距防拥挤，底部常驻保留工作区）</span>
+          </div>
+          <div class="pill-group" id="dock-mode-group">
+            <button type="button" class="pill-btn active" data-dock-mode="magnify">悬浮放大</button>
+            <button type="button" class="pill-btn" data-dock-mode="fixed">不放大</button>
+            <button type="button" class="pill-btn" data-dock-mode="autohide">不悬浮默认隐藏</button>
+          </div>
+        </div>
       </div>
 
       <div class="inst-section">
@@ -971,6 +986,57 @@
         </div>
       </div>
     </div>
+
+    <div id="tab-snapshots" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>Btrfs 系统快照与安全回滚 (Snapper)</h3>
+            <p class="muted-hint">在系统更新、驱动升级或 AI 修改系统配置前创建零占用写时复制 (CoW) 还原点，出错可一键回滚恢复。</p>
+          </div>
+          <div class="footer-actions">
+            <span class="status-chip" id="snap-status-chip">检测中...</span>
+            <button type="button" class="btn small" data-cmd="settings:snapshots-get">刷新快照</button>
+          </div>
+        </div>
+
+        <div class="part-section" style="margin-bottom: 12px;">
+          <div class="perf-row">
+            <div class="perf-row-info" style="flex: 1;">
+              <strong>立即创建系统还原点</strong>
+              <span class="muted-hint">支持自定义备注名称（例如：升级驱动前 / 安装 AI 环境前）</span>
+            </div>
+            <div class="footer-actions" style="flex-wrap: nowrap;">
+              <input type="text" id="snap-desc-input" class="modal-input" style="min-width: 220px;" placeholder="输入快照备注（可选）..." />
+              <button type="button" class="btn small primary" id="btn-snap-create">创建系统快照</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="snap-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+        <div id="snap-list" class="disk-list">
+          <div class="disk-empty">正在读取 Btrfs 快照列表...</div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div id="snap-pass-modal" class="store-modal-backdrop hidden">
+      <div class="store-modal-card glass">
+        <div class="sub-panel-head">
+          <strong id="snap-pass-title">操作 Btrfs 系统快照</strong>
+          <button type="button" class="btn small ghost" id="btn-snap-pass-cancel">取消</button>
+        </div>
+        <p id="snap-pass-desc" class="muted-hint">需要管理员权限 (sudo) 读写系统根目录 @snapshots 子卷。</p>
+        <div>
+          <label class="muted-hint" for="snap-pass-input" style="display:block;margin-bottom:4px;">管理员密码</label>
+          <input type="password" id="snap-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
+        </div>
+        <div class="modal-footer" style="margin-top: 4px;">
+          <span class="muted-hint">密码仅用于本次授权，不会保存</span>
+          <button type="button" class="btn primary small" id="btn-snap-pass-confirm">确认执行</button>
+        </div>
+      </div>
     </div>
 
     <div id="dev-fstab-modal" class="store-modal-backdrop hidden">

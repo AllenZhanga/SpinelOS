@@ -535,7 +535,9 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(clip_btn, "spinel-bar-menubtn");
     gtk_widget_set_tooltip_text(clip_btn, "剪贴板历史（最多 10 条）");
     GtkWidget *clip_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(clip_da, 16, 16);
+    gtk_widget_set_size_request(clip_da, 17, 17);
+    gtk_widget_set_halign(clip_da, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(clip_da, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(clip_da), draw_glyph_cb,
                                    reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Clipboard)), nullptr);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(clip_btn), clip_da);
@@ -640,7 +642,9 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     ns->bar_vol_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "system:audio-mute-toggle");
     gtk_widget_set_tooltip_text(ns->bar_vol_btn, "声音状态（点击静音切换）");
     GtkWidget *vol_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(vol_da, 16, 16);
+    gtk_widget_set_size_request(vol_da, 17, 17);
+    gtk_widget_set_halign(vol_da, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(vol_da, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(vol_da),
         +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
             auto *n = static_cast<NativeShellState *>(d);
@@ -654,7 +658,9 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     ns->bar_net_btn = make_cmd_button(state, nullptr, "spinel-bar-icon-btn", "settings:open:wifi");
     gtk_widget_set_tooltip_text(ns->bar_net_btn, "网络状态（点击打开网络设置）");
     GtkWidget *net_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(net_da, 16, 16);
+    gtk_widget_set_size_request(net_da, 17, 17);
+    gtk_widget_set_halign(net_da, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(net_da, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(net_da),
         +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
             auto *n = static_cast<NativeShellState *>(d);
@@ -674,7 +680,8 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_add_css_class(ns->bar_bat_box, "spinel-bar-bat");
     gtk_widget_set_valign(ns->bar_bat_box, GTK_ALIGN_CENTER);
     GtkWidget *bat_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(bat_da, 16, 16);
+    gtk_widget_set_size_request(bat_da, 17, 17);
+    gtk_widget_set_valign(bat_da, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(bat_da), draw_glyph_cb,
                                    reinterpret_cast<gpointer>(static_cast<intptr_t>(BarGlyph::Battery)), nullptr);
     ns->bar_bat_lbl = gtk_label_new("");
@@ -692,7 +699,8 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     GtkWidget *nc_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_valign(nc_row, GTK_ALIGN_CENTER);
     GtkWidget *notif_da = gtk_drawing_area_new();
-    gtk_widget_set_size_request(notif_da, 15, 15);
+    gtk_widget_set_size_request(notif_da, 16, 16);
+    gtk_widget_set_valign(notif_da, GTK_ALIGN_CENTER);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(notif_da),
         +[](GtkDrawingArea *da, cairo_t *cr, int w, int h, gpointer d) {
             auto *n = static_cast<NativeShellState *>(d);
