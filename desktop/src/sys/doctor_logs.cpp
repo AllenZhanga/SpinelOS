@@ -2,6 +2,7 @@
 #include "sys_internal.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
+#include "temp_memory.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -1236,6 +1238,10 @@ void push_process_list(AppState *state) {
     js << "window.__spinelProcessList && window.__spinelProcessList({"
        << "\"cpu_pct\":" << static_cast<int>(sys_cpu + 0.5) << ","
        << "\"mem\":\"" << json_escape(mem_str) << "\","
+       << "\"tmpfs_bytes\":";
+    if (const auto bytes = tmpfs_used_bytes("/tmp")) js << *bytes;
+    else js << "null";
+    js << ",\"tmpfs_cleanup_running\":" << (state->temp_cleanup_running ? "true" : "false") << ","
        << "\"total_procs\":" << total_procs << ","
        << "\"procs\":[";
     for (size_t i = 0; i < rows.size(); ++i) {
@@ -1255,6 +1261,33 @@ void push_process_list(AppState *state) {
     js << "]});";
     eval_js(state->monitor_view, js.str());
     eval_js(state->settings_view, js.str());
+}
+
+void cleanup_monitor_temp_memory(AppState *state) {
+    GApplication *app = g_application_get_default();
+    if (!state || !state->monitor_view || !app || state->temp_cleanup_running) return;
+    state->temp_cleanup_running = true;
+    g_application_hold(app);
+    g_autoptr(GTask) task = g_task_new(app, nullptr,
+        +[](GObject *app, GAsyncResult *async, gpointer data) {
+            auto *state = static_cast<AppState *>(data);
+            state->temp_cleanup_running = false;
+            std::unique_ptr<TempMemoryCleanup> result(
+                static_cast<TempMemoryCleanup *>(g_task_propagate_pointer(G_TASK(async), nullptr)));
+            std::ostringstream script;
+            script << "window.__spinelTempCleanup && window.__spinelTempCleanup("
+                   << result->directories_removed << ",";
+            if (result->released_bytes) script << *result->released_bytes;
+            else script << "null";
+            script << "," << (result->incomplete ? "true" : "false") << ");";
+            eval_js(state->monitor_view, script.str());
+            g_application_release(G_APPLICATION(app));
+        }, state);
+    g_task_run_in_thread(task, +[](GTask *task, gpointer, gpointer, GCancellable *) {
+        g_task_return_pointer(task, new TempMemoryCleanup(clean_temp_memory("/tmp")), +[](gpointer result) {
+            delete static_cast<TempMemoryCleanup *>(result);
+        });
+    });
 }
 
 void kill_process_by_pid(AppState *state, int pid, bool force) {

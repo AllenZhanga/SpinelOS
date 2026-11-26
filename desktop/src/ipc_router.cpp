@@ -656,6 +656,9 @@ bool dispatch_ipc_command(AppState *state,
         {"monitor:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},
+        {"monitor:temp-clean", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            cleanup_monitor_temp_memory(s);
+        }},
         {"settings:devices-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_devices_state(s);
         }},

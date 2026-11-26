@@ -1088,6 +1088,7 @@
         <div class="bt-head-left">
           <span class="status-chip" id="procs-cpu-chip">CPU: --%</span>
           <span class="status-chip" id="procs-mem-chip">内存: --</span>
+          <span class="status-chip hidden" id="procs-tmpfs-chip"></span>
           <span class="status-chip" id="procs-cnt-chip">进程: --</span>
         </div>
         <div class="footer-actions">
@@ -1097,9 +1098,11 @@
             <button type="button" class="pill-btn" data-proc-sort="mem">按内存</button>
           </div>
           <button type="button" class="btn small" data-cmd="monitor:procs-get">刷新</button>
+          <button type="button" class="btn small hidden" id="btn-clear-temp-memory"
+                  title="清理已登记且未使用的 SpinelOS 临时文件">清理临时内存</button>
         </div>
       </div>
-      <div id="procs-feedback" class="feedback-banner hidden"></div>
+      <div id="procs-feedback" class="feedback-banner hidden" role="status"></div>
       <div class="proc-table-wrap">
         <div class="proc-head-row">
           <span>进程名称与命令</span>

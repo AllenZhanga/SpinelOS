@@ -371,15 +371,36 @@
   };
 
   /* ---------------- Process Monitor ---------------- */
+  const tempMemoryButton = document.getElementById("btn-clear-temp-memory");
+  let tempCleanupRequested = false;
+
+  function formatTempBytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+    if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KiB`;
+    return `${bytes} B`;
+  }
+
   function renderProcessList() {
     const listEl = document.getElementById("procs-list");
     if (!listEl || !lastProcPayload) return;
 
     const cpuChip = document.getElementById("procs-cpu-chip");
     const memChip = document.getElementById("procs-mem-chip");
+    const tmpfsChip = document.getElementById("procs-tmpfs-chip");
     const cntChip = document.getElementById("procs-cnt-chip");
     if (cpuChip) cpuChip.textContent = `CPU: ${lastProcPayload.cpu_pct ?? "--"}%`;
     if (memChip) memChip.textContent = `内存: ${lastProcPayload.mem || "--"}`;
+    const tmpfsBytes = lastProcPayload.tmpfs_bytes;
+    const hasTmpfs = Number.isFinite(tmpfsBytes);
+    if (tmpfsChip) {
+      tmpfsChip.classList.toggle("hidden", !hasTmpfs);
+      if (hasTmpfs) tmpfsChip.textContent = `/tmp：${formatTempBytes(tmpfsBytes)}`;
+    }
+    if (tempMemoryButton) {
+      tempMemoryButton.classList.toggle("hidden", !hasTmpfs);
+      tempMemoryButton.disabled = tempCleanupRequested || Boolean(lastProcPayload.tmpfs_cleanup_running);
+    }
     if (cntChip) cntChip.textContent = `进程: ${lastProcPayload.total_procs ?? "--"}`;
 
     const q = (document.getElementById("procs-search-input")?.value || "").trim().toLowerCase();
@@ -454,6 +475,25 @@
     renderProcessList();
   };
   window.__spinelProcsFeedback = (ok, msg) => showFeedback("procs-feedback", msg || "", !ok);
+  tempMemoryButton?.addEventListener("click", () => {
+    tempCleanupRequested = true;
+    tempMemoryButton.disabled = true;
+    showFeedback("procs-feedback", "正在清理临时文件…");
+    sendCommand("monitor:temp-clean");
+  });
+  window.__spinelTempCleanup = (directories, bytes, incomplete) => {
+    tempCleanupRequested = false;
+    if (lastProcPayload) lastProcPayload.tmpfs_cleanup_running = false;
+    if (tempMemoryButton) tempMemoryButton.disabled = false;
+    const messages = [];
+    if (directories > 0) messages.push(`已清理 ${directories} 个临时目录。`);
+    if (bytes > 0 && (directories > 0 || incomplete)) messages.push(`/tmp 占用减少 ${formatTempBytes(bytes)}。`);
+    if (incomplete) messages.push("清理未全部完成，可稍后重试。");
+    else if (bytes === null) messages.push("无法读取 /tmp 的占用量。");
+    else if (directories === 0) messages.push("当前没有可清理的 SpinelOS 临时目录。");
+    showFeedback("procs-feedback", messages.join(""), incomplete || bytes === null);
+    sendCommand("monitor:procs-get");
+  };
 
   document.getElementById("procs-search-input")?.addEventListener("input", renderProcessList);
   document.querySelectorAll("[data-proc-sort]").forEach((btn) => {
