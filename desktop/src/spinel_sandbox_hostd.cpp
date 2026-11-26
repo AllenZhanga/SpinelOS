@@ -158,7 +158,9 @@ void on_host_frame_ready(void *d, struct zwlr_screencopy_frame_v1 *f, uint32_t, 
         const uint32_t *srow = reinterpret_cast<const uint32_t *>(src + static_cast<size_t>(sy) * hw->stride);
         uint32_t *drow = reinterpret_cast<uint32_t *>(hw->bgra.data() + static_cast<size_t>(y) * hw->w * 4);
         if (!is_bgr) {
-            std::memcpy(drow, srow, static_cast<size_t>(hw->w) * 4);
+            for (uint32_t x = 0; x < hw->w; ++x) {
+                drow[x] = 0xFF000000u | (srow[x] & 0x00FFFFFFu);
+            }
         } else {
             for (uint32_t x = 0; x < hw->w; ++x) {
                 uint32_t p = srow[x];
@@ -240,17 +242,24 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     HostWayland hw;
     std::string sock = sandbox_runtime_dir() + "/" + sandbox_socket_name();
     hw.dpy = wl_display_connect(sock.c_str());
-    if (!hw.dpy) return;
+    if (!hw.dpy) {
+        append_app_log("[RelayHostd] wl_display_connect failed: " + sock);
+        return;
+    }
     hw.reg = wl_display_get_registry(hw.dpy);
     wl_registry_add_listener(hw.reg, &kHostRegListener, &hw);
     wl_display_roundtrip(hw.dpy);
-    if (!hw.sc_mgr || !hw.output) return;
+    if (!hw.sc_mgr || !hw.output) {
+        append_app_log("[RelayHostd] missing screencopy manager or output");
+        return;
+    }
     if (hw.vp_mgr) hw.vptr = zwlr_virtual_pointer_manager_v1_create_virtual_pointer(hw.vp_mgr, hw.seat);
     if (hw.vk_mgr && hw.seat) {
         hw.vkbd = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(hw.vk_mgr, hw.seat);
         init_host_keymap(hw);
     }
     wl_display_flush(hw.dpy);
+    append_app_log("[RelayHostd] session started (" + tun->transport_label() + ") sock=" + sock);
 
     std::atomic<bool> sess_done{false};
     std::atomic<bool> takeover_mode{false};
@@ -365,6 +374,7 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     // Screen capture & tile encoding loop
     sandbox_stream::TileEncoderState enc;
     std::vector<uint8_t> pkt;
+    bool logged_first_frame = false;
     while (!g_stop_hostd.load() && !sess_done.load() && tun->is_open()) {
         if (!query_sandbox_status().running) break;
 
@@ -398,6 +408,12 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
             if (sandbox_stream::encode_tile_frame(enc, hw.bgra.data(), static_cast<int>(hw.w),
                                                   static_cast<int>(hw.h), static_cast<int>(hw.w * 4),
                                                   kf, max_w, pkt)) {
+                if (!logged_first_frame) {
+                    logged_first_frame = true;
+                    append_app_log("[RelayHostd] first frame " + std::to_string(hw.w) + "x" +
+                                   std::to_string(hw.h) + " fmt=" + std::to_string(hw.fmt) +
+                                   " pkt=" + std::to_string(pkt.size()) + "B");
+                }
                 if (!tun->send_msg(sandbox_stream::MSG_FRAME_TILE, pkt.data(), pkt.size())) {
                     break;
                 }

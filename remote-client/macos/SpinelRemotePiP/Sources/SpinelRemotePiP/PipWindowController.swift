@@ -63,7 +63,7 @@ private final class PipVideoCanvasView: NSView {
         frameHeight = height
 
         let cs = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
         guard let provider = CGDataProvider(data: bgra as CFData),
               let cgImg = CGImage(
                 width: width,
@@ -275,6 +275,7 @@ private final class StopToken: @unchecked Sendable {
 @MainActor
 final class PipWindowController: NSWindowController, NSWindowDelegate {
     private let tunnel: E2eeTunnel
+    private let peerName: String
     private let onClosed: () -> Void
     private let rxQueue = DispatchQueue(label: "spinel.mac.pip.rx")
     private let stopToken = StopToken()
@@ -289,9 +290,12 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
 
     private var minimized = false
     private var takeover = false
+    private var hasReceivedFrame = false
+    private var retryTimer: Timer?
 
     init(peerName: String, tunnel: E2eeTunnel, mapCommandToCtrl: Bool, onClosed: @escaping () -> Void) {
         self.tunnel = tunnel
+        self.peerName = peerName
         self.onClosed = onClosed
 
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
@@ -322,6 +326,12 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
         setupUI(peerName: peerName, mapCommandToCtrl: mapCommandToCtrl)
         startRxLoop()
         sendControl(.keyframeReq, Data())
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.hasReceivedFrame, !self.stopToken.isStopped else { return }
+                self.sendControl(.keyframeReq, Data())
+            }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -440,6 +450,7 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
                 frame.origin.y = max(vis.minY + 12, min(frame.origin.y, vis.maxY - frame.height - 12))
             }
             win.setFrame(frame, display: true, animate: true)
+            NSApplication.shared.activate(ignoringOtherApps: true)
             win.makeKeyAndOrderFront(nil)
             win.makeFirstResponder(videoView)
         } else {
@@ -521,6 +532,8 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func disconnectAndClose() {
+        retryTimer?.invalidate()
+        retryTimer = nil
         stopToken.stop()
         let tun = tunnel
         DispatchQueue.global(qos: .userInitiated).async {
@@ -530,6 +543,8 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        retryTimer?.invalidate()
+        retryTimer = nil
         stopToken.stop()
         let tun = tunnel
         DispatchQueue.global(qos: .userInitiated).async {
@@ -543,16 +558,33 @@ final class PipWindowController: NSWindowController, NSWindowDelegate {
         let stop = stopToken
         rxQueue.async { [weak self] in
             let dec = TileDecoder()
+            var lastKF = Date.distantPast
             while !stop.isStopped, tun.isOpen {
-                guard let msg = tun.recvMsg(timeoutMs: 250) else { continue }
+                guard let msg = tun.recvMsg(timeoutMs: 250) else {
+                    if dec.width == 0 && Date().timeIntervalSince(lastKF) > 1.2 {
+                        lastKF = Date()
+                        _ = tun.sendMsg(type: .keyframeReq, payload: Data())
+                    }
+                    continue
+                }
                 if msg.type == SandboxMsgType.frameTile.rawValue {
                     if dec.decodeTileFrame(msg.payload) {
                         let w = dec.width
                         let h = dec.height
                         let bgraCopy = dec.bgra
                         Task { @MainActor [weak self] in
-                            self?.videoView.updateFrame(width: w, height: h, bgra: bgraCopy)
+                            guard let self else { return }
+                            if !self.hasReceivedFrame {
+                                self.hasReceivedFrame = true
+                                self.retryTimer?.invalidate()
+                                self.retryTimer = nil
+                                self.statusLabel.stringValue = "\(self.peerName) · \(tun.transportLabel) · \(w)×\(h)"
+                            }
+                            self.videoView.updateFrame(width: w, height: h, bgra: bgraCopy)
                         }
+                    } else if Date().timeIntervalSince(lastKF) > 0.8 {
+                        lastKF = Date()
+                        _ = tun.sendMsg(type: .keyframeReq, payload: Data())
                     }
                 }
             }

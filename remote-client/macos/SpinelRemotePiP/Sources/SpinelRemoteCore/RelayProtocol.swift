@@ -483,10 +483,16 @@ public enum NetworkCandidates {
     }
 
     public static func createDualStackUDPSocket() -> (fd: Int32, port: UInt16) {
+        func tune(_ fd: Int32) {
+            var sz: Int32 = 4 * 1024 * 1024
+            setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, socklen_t(MemoryLayout<Int32>.size))
+            setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, socklen_t(MemoryLayout<Int32>.size))
+        }
         var fd = Darwin.socket(AF_INET6, SOCK_DGRAM, 0)
         if fd >= 0 {
             var off: Int32 = 0
             setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, socklen_t(MemoryLayout<Int32>.size))
+            tune(fd)
             var sa = sockaddr_in6()
             sa.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
             sa.sin6_family = sa_family_t(AF_INET6)
@@ -513,6 +519,7 @@ public enum NetworkCandidates {
 
         fd = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
         if fd >= 0 {
+            tune(fd)
             var sa = sockaddr_in()
             sa.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             sa.sin_family = sa_family_t(AF_INET)

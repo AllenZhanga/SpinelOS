@@ -527,10 +527,16 @@ std::string stun_probe_with_socket(int udp_sock, const std::string &server_addr,
 }
 
 int create_dualstack_udp_socket(uint16_t &out_port) {
+    auto tune_bufs = [](int fd) {
+        int buf_sz = 4 * 1024 * 1024;
+        ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buf_sz, sizeof(buf_sz));
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf_sz, sizeof(buf_sz));
+    };
     int fd = ::socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd >= 0) {
         int off = 0;
         ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+        tune_bufs(fd);
         struct sockaddr_in6 sa{};
         sa.sin6_family = AF_INET6;
         sa.sin6_addr = in6addr_any;
@@ -546,6 +552,7 @@ int create_dualstack_udp_socket(uint16_t &out_port) {
     }
     fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd >= 0) {
+        tune_bufs(fd);
         struct sockaddr_in sa{};
         sa.sin_family = AF_INET;
         sa.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -1237,6 +1244,9 @@ struct E2eeTunnel::Impl {
             if (chunk > 0) std::memcpy(dgram.data() + 21, ct.data() + off, chunk);
             ::sendto(udp_fd, dgram.data(), dgram.size(), 0,
                      reinterpret_cast<struct sockaddr *>(&peer_addr), peer_len);
+            if (cnt > 8 && (i % 6) == 5) {
+                std::this_thread::sleep_for(std::chrono::microseconds(250));
+            }
         }
         return true;
     }
