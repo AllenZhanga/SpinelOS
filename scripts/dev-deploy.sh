@@ -110,7 +110,7 @@ sudo cp -a /tmp/spinel-dev/ui/. /usr/share/spinel-shell/ui/
 if [ "$MODE" = "full" ]; then
   echo "==> Updating SpinelDark theme, Plymouth splash, labwc/terminal config & desktop packages..."
   sudo pacman -Syu --noconfirm --needed \
-    flatpak bubblewrap vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+    flatpak bubblewrap ffmpeg vte4 plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
     zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
     spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
     wlr-randr wl-clipboard wl-clip-persist os-prober \

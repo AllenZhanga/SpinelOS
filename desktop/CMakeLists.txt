@@ -6,7 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(PkgConfig REQUIRED)
+find_package(OpenSSL REQUIRED)
+pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
+pkg_check_modules(GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0)
 pkg_check_modules(WEBKIT6 REQUIRED IMPORTED_TARGET webkitgtk-6.0)
 pkg_check_modules(LAYER_SHELL REQUIRED IMPORTED_TARGET gtk4-layer-shell-0)
 pkg_check_modules(VTE4 REQUIRED IMPORTED_TARGET vte-2.91-gtk4)
@@ -105,7 +108,7 @@ add_custom_target(spinel_wayland_protos
 set_source_files_properties(src/window_tracker.cpp PROPERTIES
     OBJECT_DEPENDS "${TOPLEVEL_HDR};${EXT_WORKSPACE_HDR}"
 )
-set_source_files_properties(src/shell/sandbox_pip.cpp PROPERTIES
+set_source_files_properties(src/shell/sandbox_pip.cpp src/spinel_sandbox_hostd.cpp PROPERTIES
     OBJECT_DEPENDS "${SCREENCOPY_HDR};${VPOINTER_HDR};${VKEYBOARD_HDR}"
 )
 
@@ -114,6 +117,8 @@ add_executable(spinel-shell
     src/ipc_router.cpp
     src/common.cpp
     src/sandbox_manager.cpp
+    src/relay_client.cpp
+    src/sandbox_stream_codec.cpp
     src/steam_library.cpp
     src/sys/network.cpp
     src/sys/display_input.cpp
@@ -157,9 +162,13 @@ target_include_directories(spinel-shell PRIVATE
 
 target_link_libraries(spinel-shell PRIVATE
     PkgConfig::GTK4
+    PkgConfig::GIO_UNIX
     PkgConfig::LAYER_SHELL
     PkgConfig::WAYLAND_CLIENT
     PkgConfig::XKBCOMMON
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    PkgConfig::ZLIB
 )
 
 target_compile_options(spinel-shell PRIVATE
@@ -171,6 +180,8 @@ add_executable(spinel-webui
     src/ipc_router.cpp
     src/common.cpp
     src/sandbox_manager.cpp
+    src/relay_client.cpp
+    src/sandbox_stream_codec.cpp
     src/steam_library.cpp
     src/sys/network.cpp
     src/sys/display_input.cpp
@@ -195,7 +206,11 @@ target_include_directories(spinel-webui PRIVATE
 
 target_link_libraries(spinel-webui PRIVATE
     PkgConfig::GTK4
+    PkgConfig::GIO_UNIX
     PkgConfig::WEBKIT6
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    PkgConfig::ZLIB
 )
 
 target_compile_options(spinel-webui PRIVATE
@@ -245,12 +260,32 @@ target_compile_options(spinel-files PRIVATE
 
 add_executable(spinel-sandbox
     src/spinel_sandbox_main.cpp
+    src/spinel_sandbox_hostd.cpp
     src/sandbox_manager.cpp
+    src/relay_client.cpp
+    src/sandbox_stream_codec.cpp
     src/common.cpp
+    "${SCREENCOPY_HDR}"
+    "${SCREENCOPY_SRC}"
+    "${VPOINTER_HDR}"
+    "${VPOINTER_SRC}"
+    "${VKEYBOARD_HDR}"
+    "${VKEYBOARD_SRC}"
 )
+
+add_dependencies(spinel-sandbox spinel_wayland_protos)
 
 target_include_directories(spinel-sandbox PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
+target_link_libraries(spinel-sandbox PRIVATE
+    PkgConfig::WAYLAND_CLIENT
+    PkgConfig::XKBCOMMON
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    PkgConfig::ZLIB
 )
 
 target_compile_options(spinel-sandbox PRIVATE
@@ -266,6 +301,8 @@ add_executable(spinel-tests
     src/ipc_router.cpp
     src/common.cpp
     src/sandbox_manager.cpp
+    src/relay_client.cpp
+    src/sandbox_stream_codec.cpp
     src/wine_launcher.cpp
     src/temp_memory.cpp
     src/theme_manager.cpp
@@ -290,6 +327,10 @@ target_include_directories(spinel-tests PRIVATE
 
 target_link_libraries(spinel-tests PRIVATE
     PkgConfig::GTK4
+    PkgConfig::GIO_UNIX
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    PkgConfig::ZLIB
 )
 
 target_compile_options(spinel-tests PRIVATE

@@ -688,6 +688,33 @@ bool dispatch_ipc_command(AppState *state,
         {"sandbox:app-launch", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             launch_sandbox_app_ipc(s, r.legacy_raw);
         }},
+        {"relay:state-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_relay_state(s, true);
+        }},
+        {"relay:login", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_auth_ipc(s, r.legacy_raw, false);
+        }},
+        {"relay:register", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_auth_ipc(s, r.legacy_raw, true);
+        }},
+        {"relay:pair-create", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            relay_pair_create_ipc(s);
+        }},
+        {"relay:pair-claim", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_pair_claim_ipc(s, r.legacy_raw);
+        }},
+        {"relay:set-allow-remote", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_set_allow_remote_ipc(s, r.legacy_raw);
+        }},
+        {"relay:device-remove", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_device_remove_ipc(s, r.legacy_raw);
+        }},
+        {"relay:reset-fp", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            relay_reset_fp_ipc(s);
+        }},
+        {"relay:logout", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            relay_logout_ipc(s);
+        }},
         {"settings:procs-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_process_list(s);
         }},
@@ -777,10 +804,14 @@ bool dispatch_ipc_command(AppState *state,
                 return;
             }
             if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "devices" || tab == "audio" || tab == "shortcuts" ||
-                tab == "perf" || tab == "appearance" || tab == "perms") {
+                tab == "perf" || tab == "appearance" || tab == "perms" || tab == "relay") {
                 native_shell_set_cc_visible(s, false);
                 if (a.open_settings) a.open_settings(s, tab);
             }
+        }},
+        {"relay:connect:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            std::string did = arg_or_param(r, "relay:connect:", {"device_id", "id"});
+            if (!did.empty()) relay_connect_remote_ipc(s, did);
         }},
         {"monitor:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             std::string tab = arg_or_param(r, "monitor:open:", {"tab", "id"});

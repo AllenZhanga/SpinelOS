@@ -2,7 +2,9 @@
 
 #include "../common.hpp"
 #include "../desktop_apps.hpp"
+#include "../relay_client.hpp"
 #include "../sandbox_manager.hpp"
+#include "../sandbox_stream_codec.hpp"
 
 extern "C" {
 #include <glib-unix.h>
@@ -17,10 +19,13 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -44,6 +49,18 @@ struct PipGlyphCtx {
     PipGlyph kind = PipGlyph::Shield;
     bool danger = false;
 };
+
+void put_u16(std::vector<uint8_t> &b, uint16_t v) {
+    b.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    b.push_back(static_cast<uint8_t>(v & 0xFF));
+}
+
+void put_u32(std::vector<uint8_t> &b, uint32_t v) {
+    b.push_back(static_cast<uint8_t>((v >> 24) & 0xFF));
+    b.push_back(static_cast<uint8_t>((v >> 16) & 0xFF));
+    b.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    b.push_back(static_cast<uint8_t>(v & 0xFF));
+}
 
 }  // namespace
 
@@ -80,7 +97,20 @@ struct SandboxPipState {
     guint capture_timer_id = 0;
     guint fd_watch_id = 0;
 
-    // Wayland sandbox client objects
+    // Remote Peer Stream mode
+    bool remote_mode = false;
+    std::string remote_device_id;
+    std::string remote_status;
+    std::atomic<bool> remote_stop{false};
+    std::atomic<bool> remote_frame_pending{false};
+    std::mutex remote_mu;
+    std::shared_ptr<E2eeTunnel> remote_tun;
+    std::thread remote_thread;
+    std::vector<uint8_t> remote_bgra;
+    int remote_w = 0;
+    int remote_h = 0;
+
+    // Local Wayland sandbox client objects
     struct wl_display *wl_dpy = nullptr;
     struct wl_registry *wl_reg = nullptr;
     struct wl_shm *wl_shm = nullptr;
@@ -93,7 +123,7 @@ struct SandboxPipState {
     struct zwp_virtual_keyboard_v1 *vkbd = nullptr;
     bool keymap_sent = false;
 
-    // Screencopy SHM & rendered frame buffer
+    // Local Screencopy SHM & rendered frame buffer
     bool capturing = false;
     struct zwlr_screencopy_frame_v1 *cur_frame = nullptr;
     uint32_t frame_format = 0;
@@ -188,16 +218,8 @@ void draw_pip_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
     if (!ctx || !ctx->ns || w <= 0 || h <= 0) return;
 
     double r = 0.94, g = 0.96, b = 0.99, a = 0.92;
-    if (ctx->ns->theme.is_light) {
-        r = 0.08;
-        g = 0.12;
-        b = 0.20;
-    }
-    if (ctx->danger) {
-        r = 0.94;
-        g = 0.32;
-        b = 0.36;
-    }
+    if (ctx->ns->theme.is_light) { r = 0.08; g = 0.12; b = 0.20; }
+    if (ctx->danger) { r = 0.94; g = 0.32; b = 0.36; }
 
     cairo_save(cr);
     cairo_set_source_rgba(cr, r, g, b, a);
@@ -221,10 +243,8 @@ void draw_pip_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
         cairo_stroke(cr);
         break;
     case PipGlyph::Plus:
-        cairo_move_to(cr, cx - u, cy);
-        cairo_line_to(cr, cx + u, cy);
-        cairo_move_to(cr, cx, cy - u);
-        cairo_line_to(cr, cx, cy + u);
+        cairo_move_to(cr, cx - u, cy); cairo_line_to(cr, cx + u, cy);
+        cairo_move_to(cr, cx, cy - u); cairo_line_to(cr, cx, cy + u);
         cairo_stroke(cr);
         break;
     case PipGlyph::Refresh:
@@ -276,9 +296,7 @@ void draw_pip_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
     cairo_restore(cr);
 }
 
-void free_glyph_ctx(gpointer d) {
-    delete static_cast<PipGlyphCtx *>(d);
-}
+void free_glyph_ctx(gpointer d) { delete static_cast<PipGlyphCtx *>(d); }
 
 GtkWidget *make_pip_glyph_da(NativeShellState *ns, PipGlyph kind, bool danger = false, int sz = 13) {
     GtkWidget *da = gtk_drawing_area_new();
@@ -306,27 +324,11 @@ GtkWidget *make_pip_btn_content(NativeShellState *ns,
 }
 
 void release_shm_buffer(SandboxPipState *pip) {
-    if (pip->shm_buf) {
-        wl_buffer_destroy(pip->shm_buf);
-        pip->shm_buf = nullptr;
-    }
-    if (pip->shm_pool) {
-        wl_shm_pool_destroy(pip->shm_pool);
-        pip->shm_pool = nullptr;
-    }
-    if (pip->shm_map && pip->shm_map != MAP_FAILED) {
-        ::munmap(pip->shm_map, pip->shm_size);
-        pip->shm_map = nullptr;
-    }
-    if (pip->shm_fd >= 0) {
-        ::close(pip->shm_fd);
-        pip->shm_fd = -1;
-    }
-    pip->shm_size = 0;
-    pip->shm_w = 0;
-    pip->shm_h = 0;
-    pip->shm_stride = 0;
-    pip->shm_format = 0;
+    if (pip->shm_buf) { wl_buffer_destroy(pip->shm_buf); pip->shm_buf = nullptr; }
+    if (pip->shm_pool) { wl_shm_pool_destroy(pip->shm_pool); pip->shm_pool = nullptr; }
+    if (pip->shm_map && pip->shm_map != MAP_FAILED) { ::munmap(pip->shm_map, pip->shm_size); pip->shm_map = nullptr; }
+    if (pip->shm_fd >= 0) { ::close(pip->shm_fd); pip->shm_fd = -1; }
+    pip->shm_size = pip->shm_w = pip->shm_h = pip->shm_stride = pip->shm_format = 0;
 }
 
 bool ensure_shm_buffer(SandboxPipState *pip, uint32_t w, uint32_t h, uint32_t stride, uint32_t fmt) {
@@ -338,38 +340,16 @@ bool ensure_shm_buffer(SandboxPipState *pip, uint32_t w, uint32_t h, uint32_t st
     size_t sz = static_cast<size_t>(stride) * static_cast<size_t>(h);
     int fd = ::memfd_create("spinel-sandbox-frame", MFD_CLOEXEC);
     if (fd < 0) return false;
-    if (::ftruncate(fd, static_cast<off_t>(sz)) != 0) {
-        ::close(fd);
-        return false;
-    }
+    if (::ftruncate(fd, static_cast<off_t>(sz)) != 0) { ::close(fd); return false; }
     void *map = ::mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (map == MAP_FAILED) {
-        ::close(fd);
-        return false;
-    }
+    if (map == MAP_FAILED) { ::close(fd); return false; }
     struct wl_shm_pool *pool = wl_shm_create_pool(pip->wl_shm, fd, static_cast<int32_t>(sz));
-    if (!pool) {
-        ::munmap(map, sz);
-        ::close(fd);
-        return false;
-    }
+    if (!pool) { ::munmap(map, sz); ::close(fd); return false; }
     struct wl_buffer *buf = wl_shm_pool_create_buffer(
         pool, 0, static_cast<int32_t>(w), static_cast<int32_t>(h), static_cast<int32_t>(stride), fmt);
-    if (!buf) {
-        wl_shm_pool_destroy(pool);
-        ::munmap(map, sz);
-        ::close(fd);
-        return false;
-    }
-    pip->shm_fd = fd;
-    pip->shm_map = map;
-    pip->shm_size = sz;
-    pip->shm_pool = pool;
-    pip->shm_buf = buf;
-    pip->shm_w = w;
-    pip->shm_h = h;
-    pip->shm_stride = stride;
-    pip->shm_format = fmt;
+    if (!buf) { wl_shm_pool_destroy(pool); ::munmap(map, sz); ::close(fd); return false; }
+    pip->shm_fd = fd; pip->shm_map = map; pip->shm_size = sz; pip->shm_pool = pool; pip->shm_buf = buf;
+    pip->shm_w = w; pip->shm_h = h; pip->shm_stride = stride; pip->shm_format = fmt;
     return true;
 }
 
@@ -380,10 +360,7 @@ void send_virtual_keymap(SandboxPipState *pip) {
     struct xkb_rule_names names{};
     names.layout = "us";
     struct xkb_keymap *keymap = xkb_keymap_new_from_names(ctx, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    if (!keymap) {
-        xkb_context_unref(ctx);
-        return;
-    }
+    if (!keymap) { xkb_context_unref(ctx); return; }
     char *str = xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
     if (str) {
         size_t len = std::strlen(str) + 1;
@@ -409,10 +386,8 @@ void send_virtual_keymap(SandboxPipState *pip) {
     xkb_context_unref(ctx);
 }
 
-void copy_shm_to_surface(SandboxPipState *pip) {
-    if (!pip || !pip->shm_map || pip->frame_w == 0 || pip->frame_h == 0) return;
-    int w = static_cast<int>(pip->frame_w);
-    int h = static_cast<int>(pip->frame_h);
+void copy_bgra_to_cairo_surface(SandboxPipState *pip, const uint8_t *src, int w, int h, int src_stride, bool y_invert, bool is_bgr) {
+    if (!pip || !src || w <= 0 || h <= 0) return;
     if (!pip->surface || pip->surface_w != w || pip->surface_h != h) {
         if (pip->surface) cairo_surface_destroy(pip->surface);
         pip->surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
@@ -424,11 +399,6 @@ void copy_shm_to_surface(SandboxPipState *pip) {
     cairo_surface_flush(pip->surface);
     unsigned char *dst = cairo_image_surface_get_data(pip->surface);
     int dst_stride = cairo_image_surface_get_stride(pip->surface);
-    const unsigned char *src = static_cast<const unsigned char *>(pip->shm_map);
-    int src_stride = static_cast<int>(pip->frame_stride);
-    bool y_invert = (pip->frame_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT) != 0;
-    bool is_bgr = (pip->frame_format == WL_SHM_FORMAT_XBGR8888 || pip->frame_format == WL_SHM_FORMAT_ABGR8888);
-
     for (int y = 0; y < h; ++y) {
         int sy = y_invert ? (h - 1 - y) : y;
         const uint32_t *srow = reinterpret_cast<const uint32_t *>(src + static_cast<size_t>(sy) * src_stride);
@@ -438,29 +408,19 @@ void copy_shm_to_surface(SandboxPipState *pip) {
         } else {
             for (int x = 0; x < w; ++x) {
                 uint32_t p = srow[x];
-                uint32_t r = (p & 0x000000FFu) << 16;
-                uint32_t g = (p & 0x0000FF00u);
-                uint32_t b = (p & 0x00FF0000u) >> 16;
-                drow[x] = 0xFF000000u | r | g | b;
+                drow[x] = 0xFF000000u | ((p & 0xFFu) << 16) | (p & 0xFF00u) | ((p & 0xFF0000u) >> 16);
             }
         }
     }
     cairo_surface_mark_dirty(pip->surface);
 }
 
-void on_frame_buffer(void *data,
-                     struct zwlr_screencopy_frame_v1 *frame,
-                     uint32_t format,
-                     uint32_t width,
-                     uint32_t height,
-                     uint32_t stride) {
+void on_frame_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame,
+                     uint32_t format, uint32_t width, uint32_t height, uint32_t stride) {
     auto *pip = static_cast<SandboxPipState *>(data);
     if (!pip || frame != pip->cur_frame) return;
-    pip->frame_format = format;
-    pip->frame_w = width;
-    pip->frame_h = height;
-    pip->frame_stride = stride;
-    pip->frame_flags = 0;
+    pip->frame_format = format; pip->frame_w = width; pip->frame_h = height;
+    pip->frame_stride = stride; pip->frame_flags = 0;
     if (ensure_shm_buffer(pip, width, height, stride, format)) {
         zwlr_screencopy_frame_v1_copy(frame, pip->shm_buf);
     } else {
@@ -472,18 +432,19 @@ void on_frame_buffer(void *data,
 
 void on_frame_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t flags) {
     auto *pip = static_cast<SandboxPipState *>(data);
-    if (!pip || frame != pip->cur_frame) return;
-    pip->frame_flags = flags;
+    if (pip && frame == pip->cur_frame) pip->frame_flags = flags;
 }
 
-void on_frame_ready(void *data,
-                    struct zwlr_screencopy_frame_v1 *frame,
-                    uint32_t,
-                    uint32_t,
-                    uint32_t) {
+void on_frame_ready(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t, uint32_t, uint32_t) {
     auto *pip = static_cast<SandboxPipState *>(data);
     if (!pip || frame != pip->cur_frame) return;
-    copy_shm_to_surface(pip);
+    if (!pip->remote_mode && pip->shm_map) {
+        bool y_inv = (pip->frame_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT) != 0;
+        bool is_bgr = (pip->frame_format == WL_SHM_FORMAT_XBGR8888 || pip->frame_format == WL_SHM_FORMAT_ABGR8888);
+        copy_bgra_to_cairo_surface(pip, static_cast<const uint8_t *>(pip->shm_map),
+                                   static_cast<int>(pip->frame_w), static_cast<int>(pip->frame_h),
+                                   static_cast<int>(pip->frame_stride), y_inv, is_bgr);
+    }
     zwlr_screencopy_frame_v1_destroy(frame);
     pip->cur_frame = nullptr;
     pip->capturing = false;
@@ -499,31 +460,18 @@ void on_frame_failed(void *data, struct zwlr_screencopy_frame_v1 *frame) {
 }
 
 const struct zwlr_screencopy_frame_v1_listener kFrameListener = {
-    on_frame_buffer,
-    on_frame_flags,
-    on_frame_ready,
-    on_frame_failed,
-    nullptr,
-    nullptr,
-    nullptr,
+    on_frame_buffer, on_frame_flags, on_frame_ready, on_frame_failed, nullptr, nullptr, nullptr
 };
 
-void on_reg_global(void *data,
-                   struct wl_registry *reg,
-                   uint32_t name,
-                   const char *iface,
-                   uint32_t version) {
+void on_reg_global(void *data, struct wl_registry *reg, uint32_t name, const char *iface, uint32_t version) {
     auto *pip = static_cast<SandboxPipState *>(data);
     if (!pip || !iface) return;
     if (std::strcmp(iface, wl_shm_interface.name) == 0 && !pip->wl_shm) {
-        pip->wl_shm = static_cast<struct wl_shm *>(
-            wl_registry_bind(reg, name, &wl_shm_interface, 1));
+        pip->wl_shm = static_cast<struct wl_shm *>(wl_registry_bind(reg, name, &wl_shm_interface, 1));
     } else if (std::strcmp(iface, wl_output_interface.name) == 0 && !pip->wl_output) {
-        pip->wl_output = static_cast<struct wl_output *>(
-            wl_registry_bind(reg, name, &wl_output_interface, std::min(version, 2u)));
+        pip->wl_output = static_cast<struct wl_output *>(wl_registry_bind(reg, name, &wl_output_interface, std::min(version, 2u)));
     } else if (std::strcmp(iface, wl_seat_interface.name) == 0 && !pip->wl_seat) {
-        pip->wl_seat = static_cast<struct wl_seat *>(
-            wl_registry_bind(reg, name, &wl_seat_interface, 1));
+        pip->wl_seat = static_cast<struct wl_seat *>(wl_registry_bind(reg, name, &wl_seat_interface, 1));
     } else if (std::strcmp(iface, zwlr_screencopy_manager_v1_interface.name) == 0 && !pip->sc_mgr) {
         pip->sc_mgr = static_cast<struct zwlr_screencopy_manager_v1 *>(
             wl_registry_bind(reg, name, &zwlr_screencopy_manager_v1_interface, 1));
@@ -537,80 +485,32 @@ void on_reg_global(void *data,
 }
 
 void on_reg_remove(void *, struct wl_registry *, uint32_t) {}
-
-const struct wl_registry_listener kRegListener = {
-    on_reg_global,
-    on_reg_remove,
-};
+const struct wl_registry_listener kRegListener = { on_reg_global, on_reg_remove };
 
 void disconnect_sandbox_wl(SandboxPipState *pip) {
     if (!pip) return;
-    if (pip->capture_timer_id > 0) {
-        g_source_remove(pip->capture_timer_id);
-        pip->capture_timer_id = 0;
-    }
-    if (pip->fd_watch_id > 0) {
-        g_source_remove(pip->fd_watch_id);
-        pip->fd_watch_id = 0;
-    }
-    if (pip->cur_frame) {
-        zwlr_screencopy_frame_v1_destroy(pip->cur_frame);
-        pip->cur_frame = nullptr;
-    }
+    if (pip->capture_timer_id > 0) { g_source_remove(pip->capture_timer_id); pip->capture_timer_id = 0; }
+    if (pip->fd_watch_id > 0) { g_source_remove(pip->fd_watch_id); pip->fd_watch_id = 0; }
+    if (pip->cur_frame) { zwlr_screencopy_frame_v1_destroy(pip->cur_frame); pip->cur_frame = nullptr; }
     pip->capturing = false;
     release_shm_buffer(pip);
-    if (pip->vptr) {
-        zwlr_virtual_pointer_v1_destroy(pip->vptr);
-        pip->vptr = nullptr;
-    }
-    if (pip->vp_mgr) {
-        zwlr_virtual_pointer_manager_v1_destroy(pip->vp_mgr);
-        pip->vp_mgr = nullptr;
-    }
-    if (pip->vkbd) {
-        zwp_virtual_keyboard_v1_destroy(pip->vkbd);
-        pip->vkbd = nullptr;
-    }
-    if (pip->vk_mgr) {
-        zwp_virtual_keyboard_manager_v1_destroy(pip->vk_mgr);
-        pip->vk_mgr = nullptr;
-    }
+    if (pip->vptr) { zwlr_virtual_pointer_v1_destroy(pip->vptr); pip->vptr = nullptr; }
+    if (pip->vp_mgr) { zwlr_virtual_pointer_manager_v1_destroy(pip->vp_mgr); pip->vp_mgr = nullptr; }
+    if (pip->vkbd) { zwp_virtual_keyboard_v1_destroy(pip->vkbd); pip->vkbd = nullptr; }
+    if (pip->vk_mgr) { zwp_virtual_keyboard_manager_v1_destroy(pip->vk_mgr); pip->vk_mgr = nullptr; }
     pip->keymap_sent = false;
-    if (pip->sc_mgr) {
-        zwlr_screencopy_manager_v1_destroy(pip->sc_mgr);
-        pip->sc_mgr = nullptr;
-    }
-    if (pip->wl_output) {
-        wl_output_destroy(pip->wl_output);
-        pip->wl_output = nullptr;
-    }
-    if (pip->wl_seat) {
-        wl_seat_destroy(pip->wl_seat);
-        pip->wl_seat = nullptr;
-    }
-    if (pip->wl_shm) {
-        wl_shm_destroy(pip->wl_shm);
-        pip->wl_shm = nullptr;
-    }
-    if (pip->wl_reg) {
-        wl_registry_destroy(pip->wl_reg);
-        pip->wl_reg = nullptr;
-    }
-    if (pip->wl_dpy) {
-        wl_display_disconnect(pip->wl_dpy);
-        pip->wl_dpy = nullptr;
-    }
+    if (pip->sc_mgr) { zwlr_screencopy_manager_v1_destroy(pip->sc_mgr); pip->sc_mgr = nullptr; }
+    if (pip->wl_output) { wl_output_destroy(pip->wl_output); pip->wl_output = nullptr; }
+    if (pip->wl_seat) { wl_seat_destroy(pip->wl_seat); pip->wl_seat = nullptr; }
+    if (pip->wl_shm) { wl_shm_destroy(pip->wl_shm); pip->wl_shm = nullptr; }
+    if (pip->wl_reg) { wl_registry_destroy(pip->wl_reg); pip->wl_reg = nullptr; }
+    if (pip->wl_dpy) { wl_display_disconnect(pip->wl_dpy); pip->wl_dpy = nullptr; }
 }
 
 gboolean on_wl_fd_ready(gint, GIOCondition cond, gpointer data) {
     auto *pip = static_cast<SandboxPipState *>(data);
     if (!pip || !pip->wl_dpy) return G_SOURCE_REMOVE;
-    if (cond & (G_IO_ERR | G_IO_HUP)) {
-        pip->fd_watch_id = 0;
-        disconnect_sandbox_wl(pip);
-        return G_SOURCE_REMOVE;
-    }
-    if (wl_display_dispatch(pip->wl_dpy) < 0) {
+    if ((cond & (G_IO_ERR | G_IO_HUP)) || wl_display_dispatch(pip->wl_dpy) < 0) {
         pip->fd_watch_id = 0;
         disconnect_sandbox_wl(pip);
         return G_SOURCE_REMOVE;
@@ -620,7 +520,7 @@ gboolean on_wl_fd_ready(gint, GIOCondition cond, gpointer data) {
 }
 
 bool ensure_sandbox_wl_connected(SandboxPipState *pip) {
-    if (!pip) return false;
+    if (!pip || pip->remote_mode) return false;
     if (pip->wl_dpy) return true;
 
     std::string sock = sandbox_runtime_dir() + "/" + sandbox_socket_name();
@@ -631,7 +531,6 @@ bool ensure_sandbox_wl_connected(SandboxPipState *pip) {
     pip->wl_reg = wl_display_get_registry(dpy);
     wl_registry_add_listener(pip->wl_reg, &kRegListener, pip);
     wl_display_roundtrip(dpy);
-
     if (pip->vp_mgr && !pip->vptr) {
         pip->vptr = zwlr_virtual_pointer_manager_v1_create_virtual_pointer(pip->vp_mgr, pip->wl_seat);
     }
@@ -650,7 +549,7 @@ bool ensure_sandbox_wl_connected(SandboxPipState *pip) {
 }
 
 void trigger_screencopy_frame(SandboxPipState *pip) {
-    if (!pip || !pip->visible || pip->minimized || pip->capturing) return;
+    if (!pip || pip->remote_mode || !pip->visible || pip->minimized || pip->capturing) return;
     if (!ensure_sandbox_wl_connected(pip)) return;
     if (!pip->sc_mgr || !pip->wl_output || !pip->wl_dpy) return;
 
@@ -667,13 +566,146 @@ void refresh_capture_timer(SandboxPipState *pip) {
         g_source_remove(pip->capture_timer_id);
         pip->capture_timer_id = 0;
     }
-    if (!pip->visible || pip->minimized || !pip->last_running) return;
+    if (pip->remote_mode || !pip->visible || pip->minimized || !pip->last_running) return;
     guint interval_ms = pip->takeover ? 33u : 66u;
     pip->capture_timer_id = g_timeout_add(interval_ms, +[](gpointer d) -> gboolean {
         trigger_screencopy_frame(static_cast<SandboxPipState *>(d));
         return G_SOURCE_CONTINUE;
     }, pip);
     trigger_screencopy_frame(pip);
+}
+
+/* ---------------- Remote Mode Stream Helpers ---------------- */
+
+void apply_pip_window_geometry(SandboxPipState *pip);
+void sync_pip_state(SandboxPipState *pip);
+
+void disconnect_remote_tunnel(SandboxPipState *pip) {
+    if (!pip) return;
+    pip->remote_stop.store(true);
+    {
+        std::lock_guard<std::mutex> lk(pip->remote_mu);
+        if (pip->remote_tun) pip->remote_tun->close();
+    }
+    if (pip->remote_thread.joinable()) pip->remote_thread.join();
+    {
+        std::lock_guard<std::mutex> lk(pip->remote_mu);
+        pip->remote_tun.reset();
+        pip->remote_bgra.clear();
+        pip->remote_w = 0;
+        pip->remote_h = 0;
+    }
+    pip->remote_mode = false;
+    pip->remote_device_id.clear();
+    pip->remote_status.clear();
+}
+
+void connect_remote_tunnel(SandboxPipState *pip, const std::string &device_id) {
+    if (!pip || device_id.empty()) return;
+    disconnect_remote_tunnel(pip);
+    disconnect_sandbox_wl(pip);
+
+    pip->remote_stop.store(false);
+    pip->remote_mode = true;
+    pip->remote_device_id = device_id;
+    pip->remote_status = "正在连接远程沙箱…";
+    pip->visible = true;
+    pip->minimized = false;
+    if (pip->surface) {
+        cairo_surface_destroy(pip->surface);
+        pip->surface = nullptr;
+        pip->surface_w = 0;
+        pip->surface_h = 0;
+    }
+    apply_pip_window_geometry(pip);
+    sync_pip_state(pip);
+
+    pip->remote_thread = std::thread([pip, device_id]() {
+        std::string err;
+        auto tun = E2eeTunnel::dial_remote_host(device_id, err);
+        if (!tun || pip->remote_stop.load()) {
+            {
+                std::lock_guard<std::mutex> lk(pip->remote_mu);
+                pip->remote_status = err.empty() ? "远程连接失败" : err;
+            }
+            g_idle_add(+[](gpointer d) -> gboolean {
+                auto *p = static_cast<SandboxPipState *>(d);
+                if (p && p->remote_mode) {
+                    apply_pip_window_geometry(p);
+                    if (p->video_da) gtk_widget_queue_draw(p->video_da);
+                }
+                return G_SOURCE_REMOVE;
+            }, pip);
+            return;
+        }
+
+        auto shared_tun = std::shared_ptr<E2eeTunnel>(std::move(tun));
+        {
+            std::lock_guard<std::mutex> lk(pip->remote_mu);
+            pip->remote_tun = shared_tun;
+            pip->remote_status = shared_tun->transport_label();
+        }
+        uint8_t mode_byte = pip->takeover ? 1 : 0;
+        shared_tun->send_msg(sandbox_stream::MSG_SET_MODE, &mode_byte, 1);
+
+        g_idle_add(+[](gpointer d) -> gboolean {
+            auto *p = static_cast<SandboxPipState *>(d);
+            if (p && p->remote_mode) {
+                apply_pip_window_geometry(p);
+                sync_pip_state(p);
+            }
+            return G_SOURCE_REMOVE;
+        }, pip);
+
+        sandbox_stream::TileDecoderState dec;
+        uint8_t mtype = 0;
+        std::vector<uint8_t> data;
+        while (!pip->remote_stop.load() && shared_tun->is_open()) {
+            if (!shared_tun->recv_msg(mtype, data, 400)) continue;
+            if (mtype == sandbox_stream::MSG_FRAME_TILE) {
+                if (sandbox_stream::decode_tile_frame(dec, data.data(), data.size())) {
+                    {
+                        std::lock_guard<std::mutex> lk(pip->remote_mu);
+                        pip->remote_w = dec.width;
+                        pip->remote_h = dec.height;
+                        pip->remote_bgra = dec.bgra;
+                    }
+                    if (!pip->remote_frame_pending.exchange(true)) {
+                        g_idle_add(+[](gpointer d) -> gboolean {
+                            auto *p = static_cast<SandboxPipState *>(d);
+                            if (p) {
+                                p->remote_frame_pending.store(false);
+                                if (p->remote_mode) {
+                                    std::lock_guard<std::mutex> lk(p->remote_mu);
+                                    if (!p->remote_bgra.empty() && p->remote_w > 0 && p->remote_h > 0) {
+                                        copy_bgra_to_cairo_surface(p, p->remote_bgra.data(),
+                                                                   p->remote_w, p->remote_h,
+                                                                   p->remote_w * 4, false, false);
+                                    }
+                                    if (p->video_da) gtk_widget_queue_draw(p->video_da);
+                                }
+                            }
+                            return G_SOURCE_REMOVE;
+                        }, pip);
+                    }
+                }
+            }
+        }
+        if (!pip->remote_stop.load()) {
+            {
+                std::lock_guard<std::mutex> lk(pip->remote_mu);
+                pip->remote_status = "远程连接已断开";
+            }
+            g_idle_add(+[](gpointer d) -> gboolean {
+                auto *p = static_cast<SandboxPipState *>(d);
+                if (p && p->remote_mode) {
+                    apply_pip_window_geometry(p);
+                    if (p->video_da) gtk_widget_queue_draw(p->video_da);
+                }
+                return G_SOURCE_REMOVE;
+            }, pip);
+        }
+    });
 }
 
 void rebuild_launch_popover_items(SandboxPipState *pip) {
@@ -697,16 +729,31 @@ void rebuild_launch_popover_items(SandboxPipState *pip) {
             gtk_widget_add_css_class(b, "spinel-ctx-item");
             g_object_set_data_full(G_OBJECT(b), "sb-cmd", g_strdup(app.cmd.c_str()), g_free);
             g_object_set_data(G_OBJECT(b), "sb-pop", pip->launch_popover);
+            g_object_set_data(G_OBJECT(b), "sb-pip", pip);
             g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer) {
                 const char *cmd = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "sb-cmd"));
                 GtkWidget *p = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(btn), "sb-pop"));
+                auto *pip_s = static_cast<SandboxPipState *>(g_object_get_data(G_OBJECT(btn), "sb-pip"));
                 if (p) gtk_popover_popdown(GTK_POPOVER(p));
                 if (cmd && *cmd) {
-                    std::string c = cmd;
-                    std::thread([c]() {
-                        std::string err;
-                        launch_cmd_in_sandbox(c, err);
-                    }).detach();
+                    if (pip_s && pip_s->remote_mode) {
+                        std::string target = cmd;
+                        if (target == "launch:terminal") target = "spinel-terminal";
+                        else if (target == "launch:files") target = "spinel-files";
+                        else if (target == "launch:browser") target = "chromium";
+                        std::shared_ptr<E2eeTunnel> tun;
+                        {
+                            std::lock_guard<std::mutex> lk(pip_s->remote_mu);
+                            tun = pip_s->remote_tun;
+                        }
+                        if (tun) tun->send_msg(sandbox_stream::MSG_LAUNCH_APP, target.data(), target.size());
+                    } else {
+                        std::string c = cmd;
+                        std::thread([c]() {
+                            std::string err;
+                            launch_cmd_in_sandbox(c, err);
+                        }).detach();
+                    }
                 }
             }), nullptr);
             gtk_box_append(GTK_BOX(pip->launch_popover_box), b);
@@ -734,6 +781,12 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
     if (!pip || !pip->win) return;
     GtkWindow *win = pip->win;
 
+    std::string rstat;
+    if (pip->remote_mode) {
+        std::lock_guard<std::mutex> lk(pip->remote_mu);
+        rstat = pip->remote_status;
+    }
+
     if (pip->takeover) {
         gtk_widget_set_size_request(pip->video_da, 1024, 576);
         gtk_widget_add_css_class(pip->card, "is-takeover");
@@ -743,9 +796,11 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
             gtk_widget_queue_draw(pip->expand_icon_da);
         }
         gtk_widget_set_tooltip_text(pip->btn_expand, "缩小回悬浮画中画");
-        gtk_widget_set_visible(pip->btn_reset, TRUE);
+        gtk_widget_set_visible(pip->btn_reset, !pip->remote_mode);
         gtk_widget_set_visible(pip->net_lbl, TRUE);
-        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出");
+        gtk_label_set_text(GTK_LABEL(pip->title_lbl),
+                           pip->remote_mode ? "正在远程操控平行桌面 · 按 Ctrl+Shift+Esc 退出"
+                                            : "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出");
     } else {
         gtk_widget_set_size_request(pip->video_da, 384, 216);
         gtk_widget_remove_css_class(pip->card, "is-takeover");
@@ -756,14 +811,18 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
         }
         gtk_widget_set_tooltip_text(pip->btn_expand, "放大并接管键鼠操作（拖拽标题栏或预览区可移动位置）");
         gtk_widget_set_visible(pip->btn_reset, FALSE);
-        gtk_widget_set_visible(pip->net_lbl, FALSE);
-        gtk_label_set_text(GTK_LABEL(pip->title_lbl), "平行沙箱");
+        gtk_widget_set_visible(pip->net_lbl, pip->remote_mode);
+        gtk_label_set_text(GTK_LABEL(pip->title_lbl), pip->remote_mode ? "远程沙箱" : "平行沙箱");
     }
 
-    SandboxConfig cfg = load_sandbox_config();
-    gtk_label_set_text(GTK_LABEL(pip->net_lbl), cfg.allow_network ? "共享网络" : "离线隔离");
+    if (pip->remote_mode) {
+        gtk_label_set_text(GTK_LABEL(pip->net_lbl), rstat.c_str());
+    } else {
+        SandboxConfig cfg = load_sandbox_config();
+        gtk_label_set_text(GTK_LABEL(pip->net_lbl), cfg.allow_network ? "共享网络" : "离线隔离");
+    }
 
-    bool should_show = pip->visible && !pip->minimized && pip->last_running;
+    bool should_show = pip->visible && !pip->minimized && (pip->last_running || pip->remote_mode);
     gtk_widget_set_visible(GTK_WIDGET(win), should_show ? TRUE : FALSE);
     if (should_show) {
         gtk_window_present(win);
@@ -802,12 +861,17 @@ void draw_pip_video_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer dat
         cairo_set_source_rgba(cr, 0.78, 0.85, 0.96, 0.84);
         cairo_select_font_face(cr, "Noto Sans CJK SC", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, pip->takeover ? 15.0 : 12.0);
-        const char *hint = "平行桌面已就绪 · 点击「+ 应用」运行程序（支持拖拽标题栏移动）";
-        if (!pip->takeover) hint = "平行桌面就绪 · 点击接管 / 拖拽移动";
+        std::string hint = pip->takeover
+            ? "平行桌面已就绪 · 点击「+ 应用」运行程序（支持拖拽标题栏移动）"
+            : "平行桌面就绪 · 点击接管 / 拖拽移动";
+        if (pip->remote_mode) {
+            std::lock_guard<std::mutex> lk(pip->remote_mu);
+            hint = pip->remote_status.empty() ? "正在连接远程沙箱…" : pip->remote_status;
+        }
         cairo_text_extents_t ext{};
-        cairo_text_extents(cr, hint, &ext);
+        cairo_text_extents(cr, hint.c_str(), &ext);
         cairo_move_to(cr, (w - ext.width) * 0.5, (h + ext.height) * 0.5);
-        cairo_show_text(cr, hint);
+        cairo_show_text(cr, hint.c_str());
     }
     cairo_restore(cr);
 }
@@ -883,7 +947,8 @@ void sync_pip_state(SandboxPipState *pip) {
     SandboxStatus st = query_sandbox_status();
     bool changed = (st.running != pip->last_running);
     pip->last_running = st.running;
-    if (!st.running) {
+
+    if (!st.running && !pip->remote_mode) {
         pip->takeover = false;
         pip->visible = false;
         disconnect_sandbox_wl(pip);
@@ -894,12 +959,16 @@ void sync_pip_state(SandboxPipState *pip) {
             pip->surface_h = 0;
         }
         apply_pip_window_geometry(pip);
-    } else if (changed) {
+    } else if (changed && !pip->remote_mode) {
         apply_pip_window_geometry(pip);
     }
+
+    bool pill_show = st.running || pip->remote_mode;
     if (pip->ns && pip->ns->bar_sandbox_btn && pip->ns->bar_sandbox_lbl) {
-        gtk_widget_set_visible(pip->ns->bar_sandbox_btn, st.running ? TRUE : FALSE);
-        if (st.running) {
+        gtk_widget_set_visible(pip->ns->bar_sandbox_btn, pill_show ? TRUE : FALSE);
+        if (pip->remote_mode) {
+            gtk_label_set_text(GTK_LABEL(pip->ns->bar_sandbox_lbl), "远程沙箱");
+        } else if (st.running) {
             SandboxConfig cfg = load_sandbox_config();
             std::string txt = "沙箱";
             if (!cfg.allow_network) txt += " · 离线";
@@ -907,6 +976,12 @@ void sync_pip_state(SandboxPipState *pip) {
             gtk_label_set_text(GTK_LABEL(pip->ns->bar_sandbox_lbl), txt.c_str());
         }
     }
+}
+
+std::shared_ptr<E2eeTunnel> grab_remote_tun(SandboxPipState *pip) {
+    if (!pip || !pip->remote_mode) return nullptr;
+    std::lock_guard<std::mutex> lk(pip->remote_mu);
+    return pip->remote_tun;
 }
 
 }  // namespace
@@ -919,8 +994,6 @@ void init_sandbox_pip(NativeShellState *ns) {
     pip->ns = ns;
     ns->sandbox_pip = pip;
 
-    // Native undecorated XDG toplevel window (pinned AlwaysOnTop + Omnipresent by labwc windowRules)
-    // so compositor handles dragging at full frame rate with zero Layer-Shell feedback jitter.
     GtkWindow *win = GTK_WINDOW(gtk_window_new());
     gtk_window_set_title(win, "Spinel 平行沙箱");
     gtk_window_set_decorated(win, FALSE);
@@ -962,12 +1035,10 @@ void init_sandbox_pip(NativeShellState *ns) {
     GtkWidget *btn_launch = gtk_menu_button_new();
     gtk_menu_button_set_child(GTK_MENU_BUTTON(btn_launch), make_pip_btn_content(ns, PipGlyph::Plus, "应用", false));
     gtk_widget_add_css_class(btn_launch, "spinel-sandbox-btn");
-    gtk_widget_set_tooltip_text(btn_launch, "在沙箱中打开应用（可在设置中自定义列表）");
 
     GtkWidget *btn_reset = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(btn_reset), make_pip_btn_content(ns, PipGlyph::Refresh, "重置", false));
     gtk_widget_add_css_class(btn_reset, "spinel-sandbox-btn");
-    gtk_widget_set_tooltip_text(btn_reset, "清空沙箱临时环境（白名单目录保留）");
     gtk_widget_set_visible(btn_reset, FALSE);
 
     GtkWidget *btn_expand = gtk_button_new();
@@ -979,13 +1050,11 @@ void init_sandbox_pip(NativeShellState *ns) {
     GtkWidget *btn_min = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(btn_min), make_pip_btn_content(ns, PipGlyph::Minimize, "收起", false));
     gtk_widget_add_css_class(btn_min, "spinel-sandbox-btn");
-    gtk_widget_set_tooltip_text(btn_min, "收起到顶部栏胶囊（后台零占用挂起）");
 
     GtkWidget *btn_stop = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(btn_stop), make_pip_btn_content(ns, PipGlyph::Stop, "停止", true));
     gtk_widget_add_css_class(btn_stop, "spinel-sandbox-btn");
     gtk_widget_add_css_class(btn_stop, "danger");
-    gtk_widget_set_tooltip_text(btn_stop, "停止平行沙箱会话");
 
     gtk_box_append(GTK_BOX(header), dot);
     gtk_box_append(GTK_BOX(header), shield);
@@ -1023,7 +1092,7 @@ void init_sandbox_pip(NativeShellState *ns) {
 
     build_launch_popover(pip);
 
-    // Header press hands off immediately to compositor xdg_toplevel::move in BOTH modes
+    // Compositor-driven smooth window move on header press
     GtkGesture *hdr_press = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(hdr_press), 1);
     g_signal_connect(hdr_press, "pressed", G_CALLBACK(+[](GtkGestureClick *g, int, double sx, double sy, gpointer d) {
@@ -1039,7 +1108,6 @@ void init_sandbox_pip(NativeShellState *ns) {
     }), pip);
     gtk_widget_add_controller(header, GTK_EVENT_CONTROLLER(hdr_press));
 
-    // In Compact PiP mode, dragging preview (>4px) hands off once to native compositor move; click toggles Takeover
     GtkGesture *da_drag = gtk_gesture_drag_new();
     g_signal_connect(da_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double sx, double sy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
@@ -1064,17 +1132,33 @@ void init_sandbox_pip(NativeShellState *ns) {
     g_signal_connect(btn_expand, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
         p->takeover = !p->takeover;
+        if (auto tun = grab_remote_tun(p)) {
+            uint8_t mb = p->takeover ? 1 : 0;
+            tun->send_msg(sandbox_stream::MSG_SET_MODE, &mb, 1);
+        }
         apply_pip_window_geometry(p);
     }), pip);
     g_signal_connect(btn_min, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
         p->takeover = false;
         p->minimized = true;
+        if (auto tun = grab_remote_tun(p)) {
+            uint8_t mb = 0;
+            tun->send_msg(sandbox_stream::MSG_SET_MODE, &mb, 1);
+        }
         apply_pip_window_geometry(p);
         sync_pip_state(p);
     }), pip);
     g_signal_connect(btn_stop, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
+        if (p->remote_mode) {
+            p->takeover = false;
+            p->visible = false;
+            disconnect_remote_tunnel(p);
+            apply_pip_window_geometry(p);
+            sync_pip_state(p);
+            return;
+        }
         std::thread([p]() {
             std::string err;
             stop_sandbox_session(err);
@@ -1096,14 +1180,20 @@ void init_sandbox_pip(NativeShellState *ns) {
         }).detach();
     }), pip);
 
-    // Mouse / Pointer forwarding in takeover mode
+    // Mouse & Keyboard forwarding (local Wayland or remote E2EE tunnel)
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "motion", G_CALLBACK(+[](GtkEventControllerMotion *, double x, double y, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || !p->takeover || !p->vptr || !p->wl_dpy) return;
+        if (!p || !p->takeover) return;
         uint32_t nx = 0;
         uint32_t ny = 0;
-        if (compute_video_norm_coords(p, x, y, nx, ny)) {
+        if (!compute_video_norm_coords(p, x, y, nx, ny)) return;
+        if (auto tun = grab_remote_tun(p)) {
+            std::vector<uint8_t> pl;
+            put_u16(pl, static_cast<uint16_t>(nx));
+            put_u16(pl, static_cast<uint16_t>(ny));
+            tun->send_msg(sandbox_stream::MSG_MOUSE_MOVE, pl.data(), pl.size());
+        } else if (p->vptr && p->wl_dpy) {
             zwlr_virtual_pointer_v1_motion_absolute(p->vptr, now_msec(), nx, ny, 10000, 10000);
             zwlr_virtual_pointer_v1_frame(p->vptr);
             wl_display_flush(p->wl_dpy);
@@ -1117,16 +1207,29 @@ void init_sandbox_pip(NativeShellState *ns) {
         auto *p = static_cast<SandboxPipState *>(d);
         if (!p || !p->takeover) return;
         gtk_widget_grab_focus(p->video_da);
-        if (!p->vptr || !p->wl_dpy) return;
         uint32_t nx = 0;
         uint32_t ny = 0;
-        if (compute_video_norm_coords(p, x, y, nx, ny)) {
-            zwlr_virtual_pointer_v1_motion_absolute(p->vptr, now_msec(), nx, ny, 10000, 10000);
-        }
         guint btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
-        zwlr_virtual_pointer_v1_button(p->vptr, now_msec(), gdk_button_to_evdev(btn), WL_POINTER_BUTTON_STATE_PRESSED);
-        zwlr_virtual_pointer_v1_frame(p->vptr);
-        wl_display_flush(p->wl_dpy);
+        uint32_t evdev_btn = gdk_button_to_evdev(btn);
+        if (auto tun = grab_remote_tun(p)) {
+            if (compute_video_norm_coords(p, x, y, nx, ny)) {
+                std::vector<uint8_t> mv;
+                put_u16(mv, static_cast<uint16_t>(nx));
+                put_u16(mv, static_cast<uint16_t>(ny));
+                tun->send_msg(sandbox_stream::MSG_MOUSE_MOVE, mv.data(), mv.size());
+            }
+            std::vector<uint8_t> bp;
+            put_u32(bp, evdev_btn);
+            bp.push_back(1);
+            tun->send_msg(sandbox_stream::MSG_MOUSE_BTN, bp.data(), bp.size());
+        } else if (p->vptr && p->wl_dpy) {
+            if (compute_video_norm_coords(p, x, y, nx, ny)) {
+                zwlr_virtual_pointer_v1_motion_absolute(p->vptr, now_msec(), nx, ny, 10000, 10000);
+            }
+            zwlr_virtual_pointer_v1_button(p->vptr, now_msec(), evdev_btn, WL_POINTER_BUTTON_STATE_PRESSED);
+            zwlr_virtual_pointer_v1_frame(p->vptr);
+            wl_display_flush(p->wl_dpy);
+        }
     }), pip);
     g_signal_connect(click, "released", G_CALLBACK(+[](GtkGestureClick *g, int, double, double, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
@@ -1136,36 +1239,52 @@ void init_sandbox_pip(NativeShellState *ns) {
             p->canvas_drag_moved = false;
             if (!was_drag) {
                 p->takeover = true;
+                if (auto tun = grab_remote_tun(p)) {
+                    uint8_t mb = 1;
+                    tun->send_msg(sandbox_stream::MSG_SET_MODE, &mb, 1);
+                }
                 apply_pip_window_geometry(p);
             }
             return;
         }
-        if (!p->vptr || !p->wl_dpy) return;
         guint btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
-        zwlr_virtual_pointer_v1_button(p->vptr, now_msec(), gdk_button_to_evdev(btn), WL_POINTER_BUTTON_STATE_RELEASED);
-        zwlr_virtual_pointer_v1_frame(p->vptr);
-        wl_display_flush(p->wl_dpy);
+        uint32_t evdev_btn = gdk_button_to_evdev(btn);
+        if (auto tun = grab_remote_tun(p)) {
+            std::vector<uint8_t> bp;
+            put_u32(bp, evdev_btn);
+            bp.push_back(0);
+            tun->send_msg(sandbox_stream::MSG_MOUSE_BTN, bp.data(), bp.size());
+        } else if (p->vptr && p->wl_dpy) {
+            zwlr_virtual_pointer_v1_button(p->vptr, now_msec(), evdev_btn, WL_POINTER_BUTTON_STATE_RELEASED);
+            zwlr_virtual_pointer_v1_frame(p->vptr);
+            wl_display_flush(p->wl_dpy);
+        }
     }), pip);
     gtk_widget_add_controller(da, GTK_EVENT_CONTROLLER(click));
 
     GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
     g_signal_connect(scroll, "scroll", G_CALLBACK(+[](GtkEventControllerScroll *, double dx, double dy, gpointer d) -> gboolean {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || !p->takeover || !p->vptr || !p->wl_dpy) return FALSE;
+        if (!p || !p->takeover) return FALSE;
+        wl_fixed_t fdx = std::abs(dx) > 1e-4 ? wl_fixed_from_double(dx * 15.0) : 0;
+        wl_fixed_t fdy = std::abs(dy) > 1e-4 ? wl_fixed_from_double(dy * 15.0) : 0;
+        if (auto tun = grab_remote_tun(p)) {
+            std::vector<uint8_t> sp;
+            put_u32(sp, static_cast<uint32_t>(fdx));
+            put_u32(sp, static_cast<uint32_t>(fdy));
+            tun->send_msg(sandbox_stream::MSG_MOUSE_AXIS, sp.data(), sp.size());
+            return TRUE;
+        }
+        if (!p->vptr || !p->wl_dpy) return FALSE;
         uint32_t t = now_msec();
-        if (std::abs(dy) > 1e-4) {
-            zwlr_virtual_pointer_v1_axis(p->vptr, t, WL_POINTER_AXIS_VERTICAL_SCROLL, wl_fixed_from_double(dy * 15.0));
-        }
-        if (std::abs(dx) > 1e-4) {
-            zwlr_virtual_pointer_v1_axis(p->vptr, t, WL_POINTER_AXIS_HORIZONTAL_SCROLL, wl_fixed_from_double(dx * 15.0));
-        }
+        if (fdy != 0) zwlr_virtual_pointer_v1_axis(p->vptr, t, WL_POINTER_AXIS_VERTICAL_SCROLL, fdy);
+        if (fdx != 0) zwlr_virtual_pointer_v1_axis(p->vptr, t, WL_POINTER_AXIS_HORIZONTAL_SCROLL, fdx);
         zwlr_virtual_pointer_v1_frame(p->vptr);
         wl_display_flush(p->wl_dpy);
         return TRUE;
     }), pip);
     gtk_widget_add_controller(da, scroll);
 
-    // Keyboard forwarding during takeover mode (Ctrl+Shift+Esc exits takeover cleanly)
     GtkEventController *key = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(key, GTK_PHASE_CAPTURE);
     g_signal_connect(key, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint keycode, GdkModifierType mods, gpointer d) -> gboolean {
@@ -1177,22 +1296,45 @@ void init_sandbox_pip(NativeShellState *ns) {
                 wl_display_flush(p->wl_dpy);
             }
             p->takeover = false;
+            if (auto tun = grab_remote_tun(p)) {
+                uint8_t mb = 0;
+                tun->send_msg(sandbox_stream::MSG_SET_MODE, &mb, 1);
+            }
             apply_pip_window_geometry(p);
+            return TRUE;
+        }
+        uint32_t evdev = keycode >= 8 ? keycode - 8 : keycode;
+        uint32_t xmods = gdk_mods_to_xkb(mods);
+        if (auto tun = grab_remote_tun(p)) {
+            std::vector<uint8_t> kp;
+            put_u32(kp, evdev);
+            kp.push_back(1);
+            put_u32(kp, xmods);
+            tun->send_msg(sandbox_stream::MSG_KEY_EVENT, kp.data(), kp.size());
             return TRUE;
         }
         if (!p->vkbd || !p->wl_dpy) return FALSE;
         send_virtual_keymap(p);
-        uint32_t evdev = keycode >= 8 ? keycode - 8 : keycode;
-        zwp_virtual_keyboard_v1_modifiers(p->vkbd, gdk_mods_to_xkb(mods), 0, 0, 0);
+        zwp_virtual_keyboard_v1_modifiers(p->vkbd, xmods, 0, 0, 0);
         zwp_virtual_keyboard_v1_key(p->vkbd, now_msec(), evdev, WL_KEYBOARD_KEY_STATE_PRESSED);
         wl_display_flush(p->wl_dpy);
         return TRUE;
     }), pip);
     g_signal_connect(key, "key-released", G_CALLBACK(+[](GtkEventControllerKey *, guint, guint keycode, GdkModifierType mods, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || !p->takeover || !p->vkbd || !p->wl_dpy) return;
+        if (!p || !p->takeover) return;
         uint32_t evdev = keycode >= 8 ? keycode - 8 : keycode;
-        zwp_virtual_keyboard_v1_modifiers(p->vkbd, gdk_mods_to_xkb(mods), 0, 0, 0);
+        uint32_t xmods = gdk_mods_to_xkb(mods);
+        if (auto tun = grab_remote_tun(p)) {
+            std::vector<uint8_t> kp;
+            put_u32(kp, evdev);
+            kp.push_back(0);
+            put_u32(kp, xmods);
+            tun->send_msg(sandbox_stream::MSG_KEY_EVENT, kp.data(), kp.size());
+            return;
+        }
+        if (!p->vkbd || !p->wl_dpy) return;
+        zwp_virtual_keyboard_v1_modifiers(p->vkbd, xmods, 0, 0, 0);
         zwp_virtual_keyboard_v1_key(p->vkbd, now_msec(), evdev, WL_KEYBOARD_KEY_STATE_RELEASED);
         wl_display_flush(p->wl_dpy);
     }), pip);
@@ -1213,25 +1355,31 @@ void shutdown_sandbox_pip(NativeShellState *ns) {
         g_source_remove(pip->poll_timer_id);
         pip->poll_timer_id = 0;
     }
+    disconnect_remote_tunnel(pip);
     disconnect_sandbox_wl(pip);
-    if (pip->surface) {
-        cairo_surface_destroy(pip->surface);
-        pip->surface = nullptr;
-    }
-    if (pip->win) {
-        gtk_window_destroy(pip->win);
-        pip->win = nullptr;
-    }
+    if (pip->surface) { cairo_surface_destroy(pip->surface); pip->surface = nullptr; }
+    if (pip->win) { gtk_window_destroy(pip->win); pip->win = nullptr; }
     delete pip;
 }
 
 void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
     if (!ns || !ns->sandbox_pip) return;
     SandboxPipState *pip = ns->sandbox_pip;
+
+    if (action.rfind("remote:", 0) == 0) {
+        std::string target_id = action.substr(7);
+        connect_remote_tunnel(pip, target_id);
+        return;
+    }
+    if (action == "local") {
+        disconnect_remote_tunnel(pip);
+    }
+
     SandboxStatus st = query_sandbox_status();
     pip->last_running = st.running;
 
     if (action == "show") {
+        if (pip->remote_mode) disconnect_remote_tunnel(pip);
         if (st.running) {
             pip->visible = true;
             pip->minimized = false;
@@ -1240,7 +1388,15 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
         pip->takeover = false;
         pip->minimized = true;
     } else if (action == "toggle") {
-        if (!st.running) {
+        if (pip->remote_mode) {
+            if (pip->visible && !pip->minimized) {
+                pip->takeover = false;
+                pip->minimized = true;
+            } else {
+                pip->visible = true;
+                pip->minimized = false;
+            }
+        } else if (!st.running) {
             std::thread([ns]() {
                 std::string err;
                 if (start_sandbox_session(err)) {
@@ -1321,9 +1477,10 @@ std::string sandbox_pip_css(const NativeShellState *ns) {
 }
 
 bool sandbox_pip_is_running(const NativeShellState *ns) {
-    return ns && ns->sandbox_pip && ns->sandbox_pip->last_running;
+    return ns && ns->sandbox_pip && (ns->sandbox_pip->last_running || ns->sandbox_pip->remote_mode);
 }
 
 bool sandbox_pip_is_visible(const NativeShellState *ns) {
-    return ns && ns->sandbox_pip && ns->sandbox_pip->visible && !ns->sandbox_pip->minimized && ns->sandbox_pip->last_running;
+    return ns && ns->sandbox_pip && ns->sandbox_pip->visible && !ns->sandbox_pip->minimized &&
+           (ns->sandbox_pip->last_running || ns->sandbox_pip->remote_mode);
 }

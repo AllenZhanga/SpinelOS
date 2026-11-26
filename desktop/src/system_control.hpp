@@ -45,7 +45,8 @@ struct ProxyConfig {
 ProxyConfig load_proxy_config();
 ProxyConfig resolve_effective_proxy();
 std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs();
-void launch_browser_command(std::vector<std::string> args, const std::string &tag);
+void launch_browser_command(std::vector<std::string> args, const std::string &tag,
+                            const std::string &working_dir = {}, std::size_t program_index = 0);
 void sync_process_proxy_env();
 void push_proxy_config(AppState *state);
 void update_proxy_config(AppState *state, const std::string &payload);
@@ -232,3 +233,14 @@ void add_sandbox_app_ipc(AppState *state, const std::string &payload);
 void remove_sandbox_app_ipc(AppState *state, const std::string &payload);
 void set_sandbox_app_autostart_ipc(AppState *state, const std::string &payload);
 void launch_sandbox_app_ipc(AppState *state, const std::string &payload);
+
+// Cloud Relay & Multi-device Remote Sandbox
+void push_relay_state(AppState *state, bool fetch_peers = false);
+void relay_auth_ipc(AppState *state, const std::string &payload, bool is_register);
+void relay_pair_create_ipc(AppState *state);
+void relay_pair_claim_ipc(AppState *state, const std::string &payload);
+void relay_set_allow_remote_ipc(AppState *state, const std::string &payload);
+void relay_device_remove_ipc(AppState *state, const std::string &payload);
+void relay_reset_fp_ipc(AppState *state);
+void relay_logout_ipc(AppState *state);
+void relay_connect_remote_ipc(AppState *state, const std::string &device_id);

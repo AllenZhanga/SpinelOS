@@ -4,7 +4,9 @@
 #include "file_associations.hpp"
 #include "ipc_router.hpp"
 #include "native_shell.hpp"
+#include "relay_client.hpp"
 #include "sandbox_manager.hpp"
+#include "sandbox_stream_codec.hpp"
 #include "shell/sni_tray.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
@@ -1026,6 +1028,64 @@ void test_parallel_sandbox() {
     EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
 }
 
+void test_relay_crypto_and_stream() {
+    // 1. Ed25519 sign/verify roundtrip & tamper rejection
+    std::string pub_hex, err;
+    EXPECT(ensure_device_ed25519_key(pub_hex, err));
+    EXPECT(pub_hex.size() == 64);
+    std::string sig;
+    EXPECT(sign_ed25519_hex("sess123|pubabc", sig));
+    EXPECT(verify_ed25519_hex(pub_hex, "sess123|pubabc", sig));
+    EXPECT(!verify_ed25519_hex(pub_hex, "sess123|tampered", sig));
+
+    // 2. X25519 ECDH agreement & ChaCha20-Poly1305 AEAD
+    std::vector<uint8_t> a_priv, b_priv, a_key, b_key;
+    std::string a_pub, b_pub;
+    EXPECT(generate_x25519_keypair(a_priv, a_pub));
+    EXPECT(generate_x25519_keypair(b_priv, b_pub));
+    EXPECT(derive_x25519_session_key(a_priv, b_pub, "sid001", a_key));
+    EXPECT(derive_x25519_session_key(b_priv, a_pub, "sid001", b_key));
+    EXPECT(a_key == b_key && a_key.size() == 32);
+
+    std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7}, ct, dec;
+    EXPECT(aead_encrypt(a_key, 42, 1, plain, ct));
+    EXPECT(aead_decrypt(b_key, 42, 1, ct, dec));
+    EXPECT(dec == plain);
+    ct[0] ^= 0xFF;
+    EXPECT(!aead_decrypt(b_key, 42, 1, ct, dec));
+
+    // 3. Tile-Delta zlib video codec roundtrip
+    const int w = 128, h = 128;
+    std::vector<uint8_t> fb(w * h * 4, 0x20);
+    sandbox_stream::TileEncoderState enc;
+    sandbox_stream::TileDecoderState dec_st;
+    std::vector<uint8_t> pkt;
+    EXPECT(sandbox_stream::encode_tile_frame(enc, fb.data(), w, h, w * 4, false, 0, pkt));
+    EXPECT(sandbox_stream::decode_tile_frame(dec_st, pkt.data(), pkt.size()));
+    EXPECT(dec_st.width == w && dec_st.height == h && dec_st.bgra == fb);
+
+    // Unchanged frame produces 0 bytes
+    EXPECT(!sandbox_stream::encode_tile_frame(enc, fb.data(), w, h, w * 4, false, 0, pkt));
+
+    // Modify single pixel -> delta decodes identically
+    fb[(70 * w + 70) * 4 + 1] = 0xEE;
+    EXPECT(sandbox_stream::encode_tile_frame(enc, fb.data(), w, h, w * 4, false, 0, pkt));
+    EXPECT(sandbox_stream::decode_tile_frame(dec_st, pkt.data(), pkt.size()));
+    EXPECT(dec_st.bgra == fb);
+
+    // 4. Relay Config & IPC routing
+    RelayConfig rc = load_relay_config();
+    rc.server_addr = "127.0.0.1:7443";
+    rc.allow_remote = true;
+    EXPECT(save_relay_config(rc));
+    EXPECT(load_relay_config().server_addr == "127.0.0.1:7443");
+
+    AppState dummy;
+    std::string ipc_rep;
+    EXPECT(dispatch_ipc_command(&dummy, "{\"id\":101,\"method\":\"relay:state-get\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -1044,6 +1104,7 @@ int main() {
     test_dock_quit_and_store_helpers();
     test_temp_memory_cleanup();
     test_parallel_sandbox();
+    test_relay_crypto_and_stream();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

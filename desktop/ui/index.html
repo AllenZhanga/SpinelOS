@@ -342,6 +342,10 @@
           <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2v12l3.8-3.4L4.5 5.4M8 2l3.8 3.4-7.3 5.2"/></svg></span>
           <span>蓝牙手柄</span>
         </button>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:relay">
+          <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 11.5h7.2a2.8 2.8 0 0 0 .3-5.6 4 4 0 0 0-7.7-1.1A3.1 3.1 0 0 0 4.5 11.5z"/></svg></span>
+          <span>云接力与远程沙箱</span>
+        </button>
 
         <div class="settings-nav-group">硬件与外设</div>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:display">
@@ -487,6 +491,91 @@
             <button class="btn small danger" id="btn-proxy-clear">关闭代理</button>
           </div>
           <div id="proxy-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-relay" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>Spinel ID 跨设备互联与云接力</h3>
+            <p class="muted-hint">同账号设备自动尝试「局域网 -> IPv6 打洞 -> UDP 穿透 -> 私有云中继」端到端加密连接，外出也能用轻量设备零负载接管家里台式机平行沙箱。</p>
+          </div>
+          <span class="badge" id="relay-status-chip">未登录</span>
+        </div>
+        <div class="part-section" id="relay-auth-panel">
+          <div class="form-grid">
+            <label class="field">
+              <span>自建服务器地址 (IP:端口)</span>
+              <input type="text" id="relay-server-input" placeholder="例如 123.45.67.89:7443" />
+            </label>
+            <label class="field">
+              <span>STUN UDP 端口</span>
+              <input type="number" id="relay-udp-input" value="7444" min="1" max="65535" />
+            </label>
+            <label class="field" style="grid-column: 1 / -1;">
+              <span>TLS 证书指纹（留空将首次自动信任并锁定，防劫持）</span>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="relay-fp-input" style="flex:1;" placeholder="sha256-..." />
+                <button class="btn small ghost" id="btn-relay-reset-fp">清除指纹</button>
+              </div>
+            </label>
+            <label class="field">
+              <span>Spinel 账号名</span>
+              <input type="text" id="relay-account-input" placeholder="例如 allen" />
+            </label>
+            <label class="field">
+              <span>账号密码（至少 6 位）</span>
+              <input type="password" id="relay-password-input" placeholder="输入密码登录或注册" />
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
+            <button class="btn small primary" id="btn-relay-login">登录 Spinel ID</button>
+            <button class="btn small" id="btn-relay-register">注册并绑定本机</button>
+          </div>
+          <hr style="margin: 14px 0; border-color: var(--ui-border);" />
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="relay-paircode-input" class="search-input" style="max-width: 180px;" placeholder="输入 6 位配对码" />
+            <button class="btn small" id="btn-relay-pair-claim">通过配对码加入账号</button>
+          </div>
+        </div>
+
+        <div class="part-section hidden" id="relay-online-panel">
+          <div class="status-grid" style="margin-bottom: 10px;">
+            <div class="status-row">
+              <div>
+                <strong id="relay-account-label">当前账号: --</strong>
+                <div class="muted-hint" id="relay-device-label">本机设备 ID: --</div>
+              </div>
+              <button class="btn small danger" id="btn-relay-logout">退出账号</button>
+            </div>
+            <div class="status-row">
+              <div>
+                <strong>允许其他同账号设备远程接管本机平行沙箱</strong>
+                <div class="muted-hint" id="relay-hostd-desc">开启后本机台式机在后台待命，供外出的笔记本一键投流接管</div>
+              </div>
+              <button type="button" class="sp-switch" id="sw-relay-allow-remote" aria-label="允许远程接管"><span class="sp-switch-thumb"></span></button>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn small primary" id="btn-relay-pair-create">生成 6 位配对码</button>
+            <button class="btn small" id="btn-relay-refresh">刷新同账号设备</button>
+            <span class="badge hidden" id="relay-paircode-display" style="font-size: 13px; letter-spacing: 2px;">------</span>
+          </div>
+        </div>
+        <div id="relay-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>同账号互联设备</h3>
+            <p class="muted-hint">点击在线设备的「远程画中画接管」，即可把它的平行沙箱窗口拉到当前屏幕操作。</p>
+          </div>
+        </div>
+        <div id="relay-device-list" class="disk-list">
+          <div class="disk-empty">登录后这里会显示同一账号下的所有 SpinelOS 设备</div>
         </div>
       </div>
     </div>

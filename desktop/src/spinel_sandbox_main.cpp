@@ -1,6 +1,6 @@
-#include "sandbox_manager.hpp"
-
 #include "common.hpp"
+#include "relay_client.hpp"
+#include "sandbox_manager.hpp"
 
 #include <iostream>
 #include <string>
@@ -27,12 +27,77 @@ void print_usage() {
     std::cout
         << "SpinelOS Agent 平行沙箱管理工具 (spinel-sandbox)\n\n"
         << "用法:\n"
-        << "  spinel-sandbox start                         启动平行沙箱桌面\n"
-        << "  spinel-sandbox stop                          停止平行沙箱会话\n"
-        << "  spinel-sandbox reset                         停止并清空沙箱临时主目录\n"
-        << "  spinel-sandbox status [--json]               查看沙箱状态与配置\n"
-        << "  spinel-sandbox run [--workspace <dir>] <cmd...> 在平行沙箱中运行程序\n"
-        << "  spinel-sandbox pip-show | pip-hide | pip-toggle 控制桌面画中画悬浮窗\n";
+        << "  spinel-sandbox start                          启动平行沙箱桌面\n"
+        << "  spinel-sandbox stop                           停止平行沙箱会话\n"
+        << "  spinel-sandbox reset                          停止并清空沙箱临时主目录\n"
+        << "  spinel-sandbox status [--json]                查看沙箱状态与配置\n"
+        << "  spinel-sandbox run [--workspace <dir>] <cmd..> 在平行沙箱中运行程序\n"
+        << "  spinel-sandbox pip-show | pip-hide | pip-toggle 控制桌面画中画悬浮窗\n"
+        << "  spinel-sandbox hostd                          运行跨设备远程接管宿主守护服务\n"
+        << "  spinel-sandbox relay status|register|login|pair|join|devices|connect <arg>\n";
+}
+
+int handle_relay_cli(int argc, char **argv) {
+    if (argc < 3) {
+        std::cout << relay_state_json() << "\n";
+        return 0;
+    }
+    std::string act = argv[2];
+    std::string err;
+    if (act == "status") {
+        std::cout << relay_state_json() << "\n";
+        return 0;
+    }
+    if (act == "devices") {
+        std::vector<RelayPeerDevice> devs;
+        if (!relay_fetch_devices(devs, err)) {
+            std::cerr << "spinel-sandbox relay: " << err << "\n";
+            return 1;
+        }
+        for (const auto &d : devs) {
+            std::cout << d.device_id << " | " << d.name
+                      << " | online=" << (d.online ? "yes" : "no")
+                      << " | remote=" << (d.allow_remote ? "on" : "off")
+                      << " | sandbox=" << (d.sandbox_running ? "running" : "idle")
+                      << "\n";
+        }
+        return 0;
+    }
+    if ((act == "register" || act == "login") && argc >= 6) {
+        std::string server = argv[3];
+        std::string acc = argv[4];
+        std::string pass = argv[5];
+        if (!relay_login_or_register(act == "register", server, 7444, "", acc, pass, err)) {
+            std::cerr << "spinel-sandbox relay: " << err << "\n";
+            return 1;
+        }
+        std::cout << "OK account=" << acc << "\n";
+        return 0;
+    }
+    if (act == "pair") {
+        std::string code;
+        long long exp = 0;
+        if (!relay_create_pair_code(code, exp, err)) {
+            std::cerr << "spinel-sandbox relay: " << err << "\n";
+            return 1;
+        }
+        std::cout << "pair_code=" << code << "\n";
+        return 0;
+    }
+    if (act == "join" && argc >= 5) {
+        if (!relay_claim_pair_code(argv[3], 7444, "", argv[4], err)) {
+            std::cerr << "spinel-sandbox relay: " << err << "\n";
+            return 1;
+        }
+        std::cout << "Paired OK\n";
+        return 0;
+    }
+    if (act == "connect" && argc >= 4) {
+        notify_shell_sandbox("remote:" + std::string(argv[3]));
+        return 0;
+    }
+    std::cerr << "用法: spinel-sandbox relay status|register <ip:port> <acc> <pwd>|login <ip:port> <acc> <pwd>|pair|join <ip:port> <code>|devices|connect <device_id>\n";
+    return 1;
 }
 
 }  // namespace
@@ -55,6 +120,12 @@ int main(int argc, char **argv) {
     if (sub == "--clip-push") {
         if (argc < 3) return 1;
         return handle_sandbox_clipboard_push(argv[2]);
+    }
+    if (sub == "hostd") {
+        return run_sandbox_host_daemon();
+    }
+    if (sub == "relay") {
+        return handle_relay_cli(argc, argv);
     }
 
     std::string err;

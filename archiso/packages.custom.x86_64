@@ -67,7 +67,9 @@ reflector
 
 # Desktop Apps (App Store + Built-in File Manager, Archive Manager, Editor, Viewer, PDF, Printing)
 flatpak
+# Parallel Sandbox & Cloud Continuity
 bubblewrap
+ffmpeg
 file-roller
 7zip
 gvfs

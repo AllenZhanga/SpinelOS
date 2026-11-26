@@ -1,0 +1,16 @@
+[Unit]
+Description=SpinelOS Parallel Sandbox Relay & Signaling Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/spinel-relay -listen :7443 -udp :7444 -data /var/lib/spinel-relay
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/spinel-relay
+
+[Install]
+WantedBy=multi-user.target

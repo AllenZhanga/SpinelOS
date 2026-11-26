@@ -42,3 +42,8 @@ fi
 if command -v fcitx5 >/dev/null 2>&1; then
   (sleep 0.8; exec fcitx5 -d >/tmp/spinel-fcitx5.log 2>&1) &
 fi
+
+# Start remote parallel sandbox host daemon if user opted in under cloud relay settings
+if command -v spinel-sandbox >/dev/null 2>&1 && grep -qx "allow_remote=true" "$HOME/.config/spinelos/relay.conf" 2>/dev/null; then
+  (sleep 1.2; exec /usr/local/bin/spinel-sandbox hostd >/tmp/spinel-sandbox-hostd.log 2>&1) &
+fi

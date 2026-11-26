@@ -12,6 +12,7 @@
     const titles = {
       wifi: "Wi-Fi 与网络",
       bt: "蓝牙手柄",
+      relay: "云接力与远程沙箱",
       display: "显示器",
       devices: "设备管理器",
       audio: "声音与电源",
@@ -39,6 +40,7 @@
     });
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
+    else if (target === "relay") sendCommand("relay:state-get");
     else if (target === "display") sendCommand("settings:display-scan");
     else if (target === "devices") sendCommand("settings:devices-get");
     else if (target === "audio") sendCommand("settings:audio-get");
@@ -1652,4 +1654,136 @@
       sendCommand(`sandbox:app-add\nname=${name}\ncmd=${sel.value}\nauto_start=false`);
     });
   }
+
+  /* ---------------- Cloud Relay & Multi-Device Continuity ---------------- */
+  let lastRelayState = null;
+
+  window.__spinelRelayFeedback = (ok, msg) => showFeedback("relay-feedback", msg || "", !ok);
+  window.__spinelRelayPairCode = (code) => {
+    const badge = document.getElementById("relay-paircode-display");
+    if (!badge) return;
+    badge.textContent = code ? `配对码: ${code}` : "";
+    badge.classList.toggle("hidden", !code);
+  };
+
+  window.__spinelRelayData = (data, peers) => {
+    if (!data) return;
+    lastRelayState = data;
+    const chip = document.getElementById("relay-status-chip");
+    const authPanel = document.getElementById("relay-auth-panel");
+    const onlinePanel = document.getElementById("relay-online-panel");
+    const srvInput = document.getElementById("relay-server-input");
+    const udpInput = document.getElementById("relay-udp-input");
+    const fpInput = document.getElementById("relay-fp-input");
+    const accInput = document.getElementById("relay-account-input");
+    const accLbl = document.getElementById("relay-account-label");
+    const devLbl = document.getElementById("relay-device-label");
+    const swAllow = document.getElementById("sw-relay-allow-remote");
+    const hostDesc = document.getElementById("relay-hostd-desc");
+    const listEl = document.getElementById("relay-device-list");
+
+    const logged = Boolean(data.logged_in);
+    if (chip) chip.textContent = logged ? `已登录 · ${data.account}` : "未登录";
+    if (authPanel) authPanel.classList.toggle("hidden", logged);
+    if (onlinePanel) onlinePanel.classList.toggle("hidden", !logged);
+
+    if (srvInput && !srvInput.value && data.server_addr) srvInput.value = data.server_addr;
+    if (udpInput && data.udp_port) udpInput.value = String(data.udp_port);
+    if (fpInput && data.server_fp) fpInput.value = data.server_fp;
+    if (accInput && !accInput.value && data.account) accInput.value = data.account;
+
+    if (accLbl) accLbl.textContent = `当前账号: ${data.account || "--"} · 服务器 ${data.server_addr || "--"}`;
+    if (devLbl) devLbl.textContent = `本机名: ${data.device_name || "--"} · 设备ID: ${data.device_id || "--"}`;
+    if (swAllow) swAllow.classList.toggle("is-on", Boolean(data.allow_remote));
+    if (hostDesc) {
+      hostDesc.textContent = data.allow_remote
+        ? (data.hostd_running ? "宿主服务在线待命中 · 其他同账号设备可一键远程画中画接管本机沙箱" : "已开启远程权限 · 正在后台连接服务器")
+        : "关闭中 · 仅本机使用，不对其他同账号设备暴露";
+    }
+
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    const devArr = Array.isArray(peers) ? peers : [];
+    if (!logged) {
+      listEl.innerHTML = '<div class="disk-empty">登录后这里会显示同一账号下的所有 SpinelOS 设备</div>';
+      return;
+    }
+    if (devArr.length === 0) {
+      listEl.innerHTML = '<div class="disk-empty">暂无设备记录（点击「刷新同账号设备」同步列表）</div>';
+      return;
+    }
+    devArr.forEach((d) => {
+      const isSelf = d.device_id === data.device_id;
+      const item = document.createElement("div");
+      item.className = "disk-item";
+      const left = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "disk-title";
+      title.textContent = `${d.name || d.device_id}${isSelf ? "（本机）" : ""}`;
+      const sub = document.createElement("div");
+      sub.className = "disk-sub";
+      const netMeta = `LAN:${d.lan_count || 0} / IPv6:${d.ipv6_count || 0}${d.udp_mapped ? " / STUN已探测" : ""}`;
+      sub.textContent = `${d.online ? "在线" : "离线"} · ${d.allow_remote ? "允许远程接管" : "仅主控端"} · ${netMeta}`;
+      left.append(title, sub);
+
+      const actions = document.createElement("div");
+      actions.className = "disk-tags";
+      if (!isSelf) {
+        const connBtn = document.createElement("button");
+        connBtn.type = "button";
+        connBtn.className = "btn small primary";
+        connBtn.textContent = "远程画中画接管";
+        connBtn.disabled = !(d.online && d.allow_remote);
+        connBtn.addEventListener("click", () => sendCommand(`relay:connect:${d.device_id}`));
+        const rmBtn = document.createElement("button");
+        rmBtn.type = "button";
+        rmBtn.className = "btn small danger";
+        rmBtn.textContent = "解绑";
+        rmBtn.addEventListener("click", () => sendCommand(`relay:device-remove\ndevice_id=${d.device_id}`));
+        actions.append(connBtn, rmBtn);
+      } else {
+        const selfTag = document.createElement("span");
+        selfTag.className = "tag";
+        selfTag.textContent = "当前设备";
+        actions.appendChild(selfTag);
+      }
+      item.append(left, actions);
+      listEl.appendChild(item);
+    });
+  };
+
+  function collectRelayAuthPayload() {
+    const s = (document.getElementById("relay-server-input")?.value || "").trim();
+    const u = (document.getElementById("relay-udp-input")?.value || "7444").trim();
+    const f = (document.getElementById("relay-fp-input")?.value || "").trim();
+    const a = (document.getElementById("relay-account-input")?.value || "").trim();
+    const p = document.getElementById("relay-password-input")?.value || "";
+    return `server=${s}\nudp_port=${u}\nfp=${f}\naccount=${a}\npassword=${p}`;
+  }
+
+  document.getElementById("btn-relay-login")?.addEventListener("click", () => {
+    sendCommand(`relay:login\n${collectRelayAuthPayload()}`);
+  });
+  document.getElementById("btn-relay-register")?.addEventListener("click", () => {
+    sendCommand(`relay:register\n${collectRelayAuthPayload()}`);
+  });
+  document.getElementById("btn-relay-pair-claim")?.addEventListener("click", () => {
+    const s = (document.getElementById("relay-server-input")?.value || "").trim();
+    const u = (document.getElementById("relay-udp-input")?.value || "7444").trim();
+    const f = (document.getElementById("relay-fp-input")?.value || "").trim();
+    const c = (document.getElementById("relay-paircode-input")?.value || "").trim();
+    sendCommand(`relay:pair-claim\nserver=${s}\nudp_port=${u}\nfp=${f}\ncode=${c}`);
+  });
+  document.getElementById("btn-relay-reset-fp")?.addEventListener("click", () => {
+    const fpEl = document.getElementById("relay-fp-input");
+    if (fpEl) fpEl.value = "";
+    sendCommand("relay:reset-fp");
+  });
+  document.getElementById("btn-relay-logout")?.addEventListener("click", () => sendCommand("relay:logout"));
+  document.getElementById("btn-relay-pair-create")?.addEventListener("click", () => sendCommand("relay:pair-create"));
+  document.getElementById("btn-relay-refresh")?.addEventListener("click", () => sendCommand("relay:state-get"));
+  document.getElementById("sw-relay-allow-remote")?.addEventListener("click", () => {
+    const next = !(lastRelayState && lastRelayState.allow_remote);
+    sendCommand(`relay:set-allow-remote\nallow=${next ? "true" : "false"}`);
+  });
 })();
