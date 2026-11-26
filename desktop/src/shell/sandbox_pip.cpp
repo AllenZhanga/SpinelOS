@@ -6,7 +6,6 @@
 
 extern "C" {
 #include <glib-unix.h>
-#include <gtk4-layer-shell.h>
 #include <linux/input-event-codes.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -20,8 +19,13 @@ extern "C" {
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <thread>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -68,15 +72,9 @@ struct SandboxPipState {
     bool takeover = false;
     bool last_running = false;
 
-    bool pos_initialized = false;
-    int compact_x = 0;
-    int compact_y = 0;
-    int takeover_x = 0;
-    int takeover_y = 0;
-    int drag_base_x = 0;
-    int drag_base_y = 0;
-    bool header_dragging = false;
-    bool canvas_dragging = false;
+    double canvas_press_x = 0.0;
+    double canvas_press_y = 0.0;
+    bool canvas_drag_moved = false;
 
     guint poll_timer_id = 0;
     guint capture_timer_id = 0;
@@ -125,56 +123,64 @@ uint32_t now_msec() {
     return static_cast<uint32_t>(g_get_monotonic_time() / 1000);
 }
 
-void get_monitor_size(int &out_w, int &out_h) {
-    out_w = 1920;
-    out_h = 1080;
-    GdkDisplay *display = gdk_display_get_default();
-    if (!display) return;
-    GListModel *mons = gdk_display_get_monitors(display);
-    if (!mons || g_list_model_get_n_items(mons) == 0) return;
-    GdkMonitor *mon = GDK_MONITOR(g_list_model_get_item(mons, 0));
-    if (!mon) return;
-    GdkRectangle geom{};
-    gdk_monitor_get_geometry(mon, &geom);
-    g_object_unref(mon);
-    if (geom.width > 0 && geom.height > 0) {
-        out_w = geom.width;
-        out_h = geom.height;
+void ensure_labwc_pip_window_rule() {
+    const char *xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    fs::path cfg_base = (xdg_cfg && *xdg_cfg) ? fs::path(xdg_cfg) : (fs::path(home_dir()) / ".config");
+    fs::path user_rc = cfg_base / "labwc/rc.xml";
+    std::error_code ec;
+    if (!fs::exists(user_rc, ec)) {
+        fs::create_directories(user_rc.parent_path(), ec);
+        if (fs::exists("/etc/xdg/labwc/rc.xml", ec)) {
+            fs::copy_file("/etc/xdg/labwc/rc.xml", user_rc, fs::copy_options::overwrite_existing, ec);
+        }
+    }
+    std::ifstream in(user_rc);
+    if (!in) return;
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    std::string xml = ss.str();
+    if (xml.find("Spinel 平行沙箱") != std::string::npos) return;
+
+    auto close_pos = xml.rfind("</labwc_config>");
+    if (close_pos == std::string::npos) return;
+    std::string rule_block =
+        "  <windowRules>\n"
+        "    <windowRule title=\"Spinel 平行沙箱\" serverDecoration=\"no\" skipTaskbar=\"yes\" skipWindowSwitcher=\"yes\" matchOnce=\"true\">\n"
+        "      <action name=\"ToggleAlwaysOnTop\" />\n"
+        "      <action name=\"ToggleOmnipresent\" />\n"
+        "    </windowRule>\n"
+        "    <windowRule title=\"Spinel 平行沙箱\" serverDecoration=\"no\" skipTaskbar=\"yes\" skipWindowSwitcher=\"yes\" />\n"
+        "  </windowRules>\n";
+    xml.insert(close_pos, rule_block);
+    if (write_text_file(user_rc.string(), xml) && has_executable("labwc")) {
+        spawn_argv_detached({"labwc", "--reconfigure"});
     }
 }
 
-void ensure_pip_positions(SandboxPipState *pip) {
-    if (!pip || pip->pos_initialized) return;
-    int mw = 1920;
-    int mh = 1080;
-    get_monitor_size(mw, mh);
-    pip->compact_x = std::max(12, mw - 460);
-    pip->compact_y = std::max(36, mh - 365);
-    pip->takeover_x = std::max(12, (mw - 1096) / 2);
-    pip->takeover_y = std::max(32, (mh - 695) / 2);
-    pip->pos_initialized = true;
-}
+void begin_native_window_move(SandboxPipState *pip, GtkWidget *widget, double wx, double wy, GdkEvent *ev = nullptr) {
+    if (!pip || !pip->win || !widget) return;
+    GdkSurface *surf = gtk_native_get_surface(GTK_NATIVE(pip->win));
+    if (!surf || !GDK_IS_TOPLEVEL(surf)) return;
 
-void apply_pip_layer_position(SandboxPipState *pip) {
-    if (!pip || !pip->win) return;
-    ensure_pip_positions(pip);
-    int mw = 1920;
-    int mh = 1080;
-    get_monitor_size(mw, mh);
+    graphene_point_t src = GRAPHENE_POINT_INIT(static_cast<float>(wx), static_cast<float>(wy));
+    graphene_point_t dst{};
+    if (!gtk_widget_compute_point(widget, GTK_WIDGET(pip->win), &src, &dst)) {
+        dst = src;
+    }
+    double sx = 0.0, sy = 0.0;
+    gtk_native_get_surface_transform(GTK_NATIVE(pip->win), &sx, &sy);
 
-    int est_w = pip->takeover ? 1096 : 444;
-    int est_h = pip->takeover ? 688 : 284;
-    int &px = pip->takeover ? pip->takeover_x : pip->compact_x;
-    int &py = pip->takeover ? pip->takeover_y : pip->compact_y;
-    px = std::clamp(px, -16, std::max(-16, mw - est_w + 16));
-    py = std::clamp(py, 26, std::max(26, mh - est_h + 16));
-
-    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_BOTTOM, FALSE);
-    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_RIGHT, FALSE);
-    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
-    gtk_layer_set_anchor(pip->win, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_margin(pip->win, GTK_LAYER_SHELL_EDGE_LEFT, px);
-    gtk_layer_set_margin(pip->win, GTK_LAYER_SHELL_EDGE_TOP, py);
+    GdkDevice *dev = ev ? gdk_event_get_device(ev) : nullptr;
+    if (!dev) {
+        if (GdkDisplay *disp = gtk_widget_get_display(GTK_WIDGET(pip->win))) {
+            if (GdkSeat *seat = gdk_display_get_default_seat(disp)) {
+                dev = gdk_seat_get_pointer(seat);
+            }
+        }
+    }
+    uint32_t ts = ev ? gdk_event_get_time(ev) : GDK_CURRENT_TIME;
+    if (!dev) return;
+    gdk_toplevel_begin_move(GDK_TOPLEVEL(surf), dev, 1, dst.x + sx, dst.y + sy, ts);
 }
 
 void draw_pip_glyph_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer data) {
@@ -728,10 +734,7 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
     if (!pip || !pip->win) return;
     GtkWindow *win = pip->win;
 
-    apply_pip_layer_position(pip);
-
     if (pip->takeover) {
-        gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
         gtk_widget_set_size_request(pip->video_da, 1024, 576);
         gtk_widget_add_css_class(pip->card, "is-takeover");
         if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "画中画");
@@ -744,7 +747,6 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
         gtk_widget_set_visible(pip->net_lbl, TRUE);
         gtk_label_set_text(GTK_LABEL(pip->title_lbl), "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出");
     } else {
-        gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
         gtk_widget_set_size_request(pip->video_da, 384, 216);
         gtk_widget_remove_css_class(pip->card, "is-takeover");
         if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "接管");
@@ -752,7 +754,7 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
             ctx->kind = PipGlyph::Expand;
             gtk_widget_queue_draw(pip->expand_icon_da);
         }
-        gtk_widget_set_tooltip_text(pip->btn_expand, "放大并接管键鼠操作（拖动标题栏或预览区可移动位置）");
+        gtk_widget_set_tooltip_text(pip->btn_expand, "放大并接管键鼠操作（拖拽标题栏或预览区可移动位置）");
         gtk_widget_set_visible(pip->btn_reset, FALSE);
         gtk_widget_set_visible(pip->net_lbl, FALSE);
         gtk_label_set_text(GTK_LABEL(pip->title_lbl), "平行沙箱");
@@ -911,20 +913,28 @@ void sync_pip_state(SandboxPipState *pip) {
 
 void init_sandbox_pip(NativeShellState *ns) {
     if (!ns || ns->sandbox_pip) return;
+    ensure_labwc_pip_window_rule();
+
     auto *pip = new SandboxPipState();
     pip->ns = ns;
     ns->sandbox_pip = pip;
 
+    // Native undecorated XDG toplevel window (pinned AlwaysOnTop + Omnipresent by labwc windowRules)
+    // so compositor handles dragging at full frame rate with zero Layer-Shell feedback jitter.
     GtkWindow *win = GTK_WINDOW(gtk_window_new());
+    gtk_window_set_title(win, "Spinel 平行沙箱");
     gtk_window_set_decorated(win, FALSE);
     gtk_window_set_resizable(win, FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(win), "spinel-transparent");
-    gtk_layer_init_for_window(win);
-    gtk_layer_set_layer(win, GTK_LAYER_SHELL_LAYER_OVERLAY);
-    gtk_layer_set_namespace(win, "spinel-sandbox-pip");
-    gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    g_signal_connect(win, "close-request", G_CALLBACK(+[](GtkWindow *, gpointer d) -> gboolean {
+        auto *p = static_cast<SandboxPipState *>(d);
+        p->takeover = false;
+        p->minimized = true;
+        apply_pip_window_geometry(p);
+        sync_pip_state(p);
+        return TRUE;
+    }), pip);
 
-    // Outer padding exceeds CSS box-shadow spread to guarantee zero rectangular shadow clipping on Wayland
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_margin_top(outer, 24);
     gtk_widget_set_margin_bottom(outer, 34);
@@ -1012,57 +1022,41 @@ void init_sandbox_pip(NativeShellState *ns) {
     pip->video_da = da;
 
     build_launch_popover(pip);
-    apply_pip_layer_position(pip);
 
-    // Drag gesture on header bar works in BOTH Compact PiP & Expanded Takeover modes
-    GtkGesture *hdr_drag = gtk_gesture_drag_new();
-    g_signal_connect(hdr_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *g, double sx, double sy, gpointer d) {
+    // Header press hands off immediately to compositor xdg_toplevel::move in BOTH modes
+    GtkGesture *hdr_press = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(hdr_press), 1);
+    g_signal_connect(hdr_press, "pressed", G_CALLBACK(+[](GtkGestureClick *g, int, double sx, double sy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
         if (!p || !p->header_box) return;
         GtkWidget *hit = gtk_widget_pick(p->header_box, sx, sy, GTK_PICK_DEFAULT);
         if (hit && (gtk_widget_get_ancestor(hit, GTK_TYPE_BUTTON) || gtk_widget_get_ancestor(hit, GTK_TYPE_MENU_BUTTON))) {
-            p->header_dragging = false;
-            gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_DENIED);
             return;
         }
-        p->header_dragging = true;
-        p->drag_base_x = p->takeover ? p->takeover_x : p->compact_x;
-        p->drag_base_y = p->takeover ? p->takeover_y : p->compact_y;
+        GdkEvent *ev = gtk_gesture_get_last_event(GTK_GESTURE(g), nullptr);
+        gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+        begin_native_window_move(p, p->header_box, sx, sy, ev);
     }), pip);
-    g_signal_connect(hdr_drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double dx, double dy, gpointer d) {
-        auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || !p->header_dragging || !p->win) return;
-        if (p->takeover) {
-            p->takeover_x = p->drag_base_x + static_cast<int>(std::round(dx));
-            p->takeover_y = p->drag_base_y + static_cast<int>(std::round(dy));
-        } else {
-            p->compact_x = p->drag_base_x + static_cast<int>(std::round(dx));
-            p->compact_y = p->drag_base_y + static_cast<int>(std::round(dy));
-        }
-        apply_pip_layer_position(p);
-    }), pip);
-    g_signal_connect(hdr_drag, "drag-end", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer d) {
-        static_cast<SandboxPipState *>(d)->header_dragging = false;
-    }), pip);
-    gtk_widget_add_controller(header, GTK_EVENT_CONTROLLER(hdr_drag));
+    gtk_widget_add_controller(header, GTK_EVENT_CONTROLLER(hdr_press));
 
-    // In Compact PiP mode, dragging preview canvas moves window; quick tap opens Takeover
+    // In Compact PiP mode, dragging preview (>4px) hands off once to native compositor move; click toggles Takeover
     GtkGesture *da_drag = gtk_gesture_drag_new();
-    g_signal_connect(da_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer d) {
+    g_signal_connect(da_drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double sx, double sy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
         if (!p || p->takeover) return;
-        p->canvas_dragging = false;
-        p->drag_base_x = p->compact_x;
-        p->drag_base_y = p->compact_y;
+        p->canvas_press_x = sx;
+        p->canvas_press_y = sy;
+        p->canvas_drag_moved = false;
     }), pip);
-    g_signal_connect(da_drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double dx, double dy, gpointer d) {
+    g_signal_connect(da_drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *g, double dx, double dy, gpointer d) {
         auto *p = static_cast<SandboxPipState *>(d);
-        if (!p || p->takeover) return;
-        if (std::abs(dx) > 5.0 || std::abs(dy) > 5.0) p->canvas_dragging = true;
-        if (!p->canvas_dragging) return;
-        p->compact_x = p->drag_base_x + static_cast<int>(std::round(dx));
-        p->compact_y = p->drag_base_y + static_cast<int>(std::round(dy));
-        apply_pip_layer_position(p);
+        if (!p || p->takeover || p->canvas_drag_moved) return;
+        if (std::abs(dx) > 4.0 || std::abs(dy) > 4.0) {
+            p->canvas_drag_moved = true;
+            GdkEvent *ev = gtk_gesture_get_last_event(GTK_GESTURE(g), nullptr);
+            gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+            begin_native_window_move(p, p->video_da, p->canvas_press_x, p->canvas_press_y, ev);
+        }
     }), pip);
     gtk_widget_add_controller(da, GTK_EVENT_CONTROLLER(da_drag));
 
@@ -1138,8 +1132,8 @@ void init_sandbox_pip(NativeShellState *ns) {
         auto *p = static_cast<SandboxPipState *>(d);
         if (!p) return;
         if (!p->takeover) {
-            bool was_drag = p->canvas_dragging;
-            p->canvas_dragging = false;
+            bool was_drag = p->canvas_drag_moved;
+            p->canvas_drag_moved = false;
             if (!was_drag) {
                 p->takeover = true;
                 apply_pip_window_geometry(p);

@@ -92,4 +92,12 @@
   <mouse>
     <default />
   </mouse>
+
+  <windowRules>
+    <windowRule title="Spinel 平行沙箱" serverDecoration="no" skipTaskbar="yes" skipWindowSwitcher="yes" matchOnce="true">
+      <action name="ToggleAlwaysOnTop" />
+      <action name="ToggleOmnipresent" />
+    </windowRule>
+    <windowRule title="Spinel 平行沙箱" serverDecoration="no" skipTaskbar="yes" skipWindowSwitcher="yes" />
+  </windowRules>
 </labwc_config>
