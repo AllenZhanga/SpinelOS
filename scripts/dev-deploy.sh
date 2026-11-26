@@ -71,17 +71,21 @@ if [ "$MODE" != "ui" ]; then
     echo "==> Installing vte4 runtime for Spinel Terminal..."
     sudo pacman -Sy --noconfirm --needed vte4
   fi
+  sudo install -Dm755 /tmp/spinel-dev/spinel-wine /usr/local/bin/spinel-wine
   sudo install -Dm755 /tmp/spinel-dev/spinel-shell /usr/local/bin/spinel-shell
   sudo install -Dm755 /tmp/spinel-dev/spinel-webui /usr/local/bin/spinel-webui
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
   sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
   if [ -f /tmp/spinel-dev/spinel-files.svg ]; then
     sudo install -Dm644 /tmp/spinel-dev/spinel-files.svg /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
-    sudo gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
   fi
+  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WindowsApps.svg /usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg
+  sudo gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
   if [ -f /tmp/spinel-dev/org.spinelos.files.desktop ]; then
     sudo install -Dm644 /tmp/spinel-dev/org.spinelos.files.desktop /usr/share/applications/org.spinelos.files.desktop
   fi
+  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WindowsApps.desktop /usr/share/applications/org.spinelos.WindowsApps.desktop
+  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WineOpen.desktop /usr/share/applications/org.spinelos.WineOpen.desktop
   if [ -f /tmp/spinel-dev/org.spinelos.FileManager1.service ]; then
     sudo install -Dm644 /tmp/spinel-dev/org.spinelos.FileManager1.service /usr/share/dbus-1/services/org.spinelos.FileManager1.service
   fi
@@ -109,7 +113,7 @@ if [ "$MODE" = "full" ]; then
     zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
     spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
     wlr-randr wl-clipboard wl-clip-persist os-prober \
-    polkit-gnome xdg-desktop-portal-gtk noto-fonts-emoji \
+    polkit-gnome xdg-desktop-portal-gtk noto-fonts-cjk noto-fonts-emoji \
     fcitx5 fcitx5-rime fcitx5-gtk
   fc-cache -f >/dev/null 2>&1 || true
   for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp fcitx5-chinese-addons fcitx5-configtool fcitx5-qt; do
@@ -308,7 +312,11 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" \
     "${DEV_HOST}:/tmp/spinel-dev/"

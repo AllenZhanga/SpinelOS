@@ -46,6 +46,30 @@ bool is_valid_scale_str(const std::string &s) {
     return true;
 }
 
+bool hide_fcitx5_gnome_diagnosis() {
+    constexpr const char *group = "HiddenNotifications";
+    constexpr const char *tip = "wayland-diagnose-gnome";
+    const fs::path path = fs::path(g_get_user_config_dir()) / "fcitx5/conf/notifications.conf";
+    g_autoptr(GKeyFile) config = g_key_file_new();
+    g_autoptr(GError) error = nullptr;
+    auto flags = static_cast<GKeyFileFlags>(G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS);
+    if (!g_key_file_load_from_file(config, path.c_str(), flags, &error) &&
+        !g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_NOENT)) return false;
+
+    g_auto(GStrv) keys = g_key_file_get_keys(config, group, nullptr, nullptr);
+    for (char **key = keys; key && *key; ++key) {
+        g_autofree char *value = g_key_file_get_string(config, group, *key, nullptr);
+        if (g_strcmp0(value, tip) == 0) return false;
+    }
+    std::size_t index = 0;
+    while (g_key_file_has_key(config, group, std::to_string(index).c_str(), nullptr)) ++index;
+    g_key_file_set_string(config, group, std::to_string(index).c_str(), tip);
+
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    return !ec && g_key_file_save_to_file(config, path.c_str(), nullptr);
+}
+
 void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     fs::path conf_dir = fs::path(home_dir()) / ".config/fcitx5/conf";
     std::error_code ec;
@@ -255,6 +279,15 @@ void ensure_fcitx5_defaults(bool is_light) {
     std::error_code ec;
     fs::path fdir = fs::path(home_dir()) / ".config/fcitx5";
     fs::create_directories(fdir / "conf", ec);
+    // The GNOME compatibility identifier also triggers an irrelevant Fcitx tip on labwc.
+    if (hide_fcitx5_gnome_diagnosis()) {
+        g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+        if (bus) {
+            g_dbus_connection_call(bus, "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1",
+                                   "ReloadAddonConfig", g_variant_new("(s)", "notifications"), nullptr,
+                                   G_DBUS_CALL_FLAGS_NO_AUTO_START, 1000, nullptr, nullptr, nullptr);
+        }
+    }
 
     ensure_chromium_ime_flags();
 

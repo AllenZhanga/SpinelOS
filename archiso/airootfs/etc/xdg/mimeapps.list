@@ -1,2 +1,15 @@
 [Default Applications]
-inode/directory=org.spinelos.files.desktop
+inode/directory=org.spinelos.files.desktop;
+application/vnd.microsoft.portable-executable=org.spinelos.WineOpen.desktop;
+application/x-msdownload=org.spinelos.WineOpen.desktop;
+application/x-ms-dos-executable=org.spinelos.WineOpen.desktop;
+application/x-dosexec=org.spinelos.WineOpen.desktop;
+application/pdf=org.gnome.Papers.desktop;chromium.desktop;google-chrome.desktop;firefox.desktop;
+text/plain=org.xfce.mousepad.desktop;
+text/markdown=org.xfce.mousepad.desktop;
+text/x-log=org.xfce.mousepad.desktop;
+application/x-zerosize=org.xfce.mousepad.desktop;
+
+[Added Associations]
+text/markdown=org.xfce.mousepad.desktop;
+text/x-log=org.xfce.mousepad.desktop;

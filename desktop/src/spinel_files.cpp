@@ -1,4 +1,8 @@
 #include "common.hpp"
+#include "file_associations.hpp"
+#include "files_theme.hpp"
+#include "wine_launcher.hpp"
+#include "windows_apps_window.hpp"
 
 #include <gtk/gtk.h>
 
@@ -81,21 +85,10 @@ static _SpinelFileObj *spinel_file_obj_new(const DirItem &src) {
     return obj;
 }
 
-struct FilesTheme {
-    std::string id;
-    bool is_light = false;
-    std::string fg = "#f1f5f9";
-    std::string muted = "#94a3b8";
-    std::string accent = "#38bdf8";
-};
-
 struct FilesWin {
     GtkApplication *app = nullptr;
     GtkWindow *win = nullptr;
-    GtkCssProvider *css = nullptr;
-    guint theme_timer = 0;
     guint search_timer = 0;
-    std::string last_theme_id;
 
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(true);
     std::shared_ptr<std::atomic<uint64_t>> scan_gen = std::make_shared<std::atomic<uint64_t>>(0);
@@ -292,117 +285,6 @@ std::vector<MountItem> scan_external_mounts() {
         res.push_back({lbl, p, dev, is_media || dev.rfind("/dev/sd", 0) == 0 || dev.rfind("/dev/nvme", 0) == 0});
     }
     return res;
-}
-
-FilesTheme load_active_files_theme() {
-    std::string id = trim_copy(read_first_line(
-        (fs::path(home_dir()) / ".config/spinelos/theme.conf").string(), ""
-    ));
-    if (id.empty()) {
-        std::string legacy = trim_copy(read_first_line(
-            (fs::path(home_dir()) / ".config/spinelos/wallpaper.conf").string(), ""
-        ));
-        if (legacy == "obsidian-purple") id = "obsidian-neon";
-        else if (legacy == "emerald-aurora") id = "emerald-nordic";
-        else id = "tahoe-light";
-    }
-
-    FilesTheme th;
-    th.id = id;
-    if (id == "tahoe-light") {
-        th.is_light = true;
-        th.fg = "#0f172a";
-        th.muted = "#64748b";
-        th.accent = "#0a84ff";
-    } else if (id == "emerald-nordic") {
-        th.fg = "#ecfdf5";
-        th.muted = "#6ee7b7";
-        th.accent = "#10b981";
-    } else if (id == "obsidian-neon") {
-        th.fg = "#f5f3ff";
-        th.muted = "#c4b5fd";
-        th.accent = "#a855f7";
-    } else if (id != "crystal-aurora") {
-        fs::path custom = fs::path(home_dir()) / ".config/spinelos/themes" / (id + ".theme");
-        std::ifstream ifs(custom);
-        std::string line;
-        while (std::getline(ifs, line)) {
-            line = trim_copy(line);
-            auto eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            std::string k = trim_copy(line.substr(0, eq));
-            std::string v = trim_copy(line.substr(eq + 1));
-            if (k == "is_light") th.is_light = (v == "true" || v == "1");
-            else if (k == "ui_text") th.fg = v;
-            else if (k == "ui_muted") th.muted = v;
-            else if (k == "ui_accent") th.accent = v;
-        }
-    }
-    return th;
-}
-
-void apply_theme_css(FilesWin *fw) {
-    FilesTheme th = load_active_files_theme();
-    if (fw->last_theme_id == th.id && fw->css) return;
-    fw->last_theme_id = th.id;
-
-    std::string win_bg = th.is_light ? "#f5f7fb" : "#0b111e";
-    std::string bar_bg = th.is_light ? "#eef2f8" : "#11192b";
-    std::string side_bg = th.is_light ? "#eaf0f8" : "#0e1627";
-    std::string card_bg = th.is_light ? "#ffffff" : "#152038";
-    std::string hover_bg = th.is_light ? "rgba(10, 132, 255, 0.08)" : "rgba(56, 189, 248, 0.12)";
-    std::string sel_bg = th.is_light ? "rgba(10, 132, 255, 0.16)" : "rgba(56, 189, 248, 0.22)";
-    std::string border = th.is_light ? "rgba(15, 23, 42, 0.10)" : "rgba(255, 255, 255, 0.10)";
-    std::string fg = th.fg;
-    std::string muted = th.muted;
-    std::string accent = th.accent;
-
-    std::ostringstream css;
-    css << "window.sf-win { background: " << win_bg << "; color: " << fg << "; }\n"
-        << ".sf-toolbar { background: " << bar_bg << "; border-bottom: 1px solid " << border << "; padding: 8px 12px; }\n"
-        << ".sf-sidebar { background: " << side_bg << "; border-right: 1px solid " << border << "; padding: 10px 8px; }\n"
-        << ".sf-side-title { color: " << muted << "; font-size: 11px; font-weight: 700; padding: 6px 8px 4px 8px; }\n"
-        << ".sf-nav-btn { background: transparent; color: " << fg << "; border: none; border-radius: 8px; padding: 6px 10px; font-size: 13px; }\n"
-        << ".sf-nav-btn:hover { background: " << hover_bg << "; }\n"
-        << ".sf-nav-btn.is-active { background: " << sel_bg << "; color: " << accent << "; font-weight: 600; }\n"
-        << ".sf-tool-btn { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 8px; padding: 4px 10px; min-height: 28px; }\n"
-        << ".sf-tool-btn:hover { border-color: " << accent << "; }\n"
-        << ".sf-tool-btn.is-on { background: " << sel_bg << "; border-color: " << accent << "; color: " << accent << "; }\n"
-        << ".sf-tool-danger { background: rgba(244, 63, 94, 0.14); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 8px; padding: 4px 10px; min-height: 28px; font-weight: 600; }\n"
-        << ".sf-tool-danger:hover { background: rgba(244, 63, 94, 0.24); border-color: #f43f5e; }\n"
-        << ".sf-crumb-pill { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 7px; padding: 3px 9px; font-size: 12px; }\n"
-        << ".sf-crumb-pill:hover { border-color: " << accent << "; }\n"
-        << ".sf-entry { background: " << card_bg << "; color: " << fg << "; border: 1px solid " << border << "; border-radius: 8px; padding: 4px 10px; min-height: 28px; }\n"
-        << "listview.sf-listview, gridview.sf-gridview { background: transparent; padding: 6px; }\n"
-        << "listview.sf-listview > row { border-radius: 8px; margin: 1px 4px; }\n"
-        << "listview.sf-listview > row:hover { background: " << hover_bg << "; }\n"
-        << "listview.sf-listview > row:selected { background: " << sel_bg << "; }\n"
-        << ".sf-row { padding: 6px 10px; }\n"
-        << "gridview.sf-gridview > child { border-radius: 10px; margin: 4px; }\n"
-        << ".sf-grid-card { background: " << card_bg << "; border: 1px solid " << border << "; border-radius: 10px; padding: 10px 8px; min-width: 118px; }\n"
-        << "gridview.sf-gridview > child:hover .sf-grid-card { border-color: " << accent << "; }\n"
-        << "gridview.sf-gridview > child:selected .sf-grid-card { background: " << sel_bg << "; border-color: " << accent << "; }\n"
-        << ".sf-muted { color: " << muted << "; font-size: 12px; }\n"
-        << ".sf-status { background: " << bar_bg << "; border-top: 1px solid " << border << "; padding: 5px 14px; font-size: 12px; color: " << muted << "; }\n"
-        << ".sf-ico-dir { color: #38bdf8; }\n"
-        << ".sf-ico-img { color: #f472b6; }\n"
-        << ".sf-ico-vid { color: #a78bfa; }\n"
-        << ".sf-ico-aud { color: #34d399; }\n"
-        << ".sf-ico-arc { color: #fbbf24; }\n"
-        << ".sf-ico-code { color: #60a5fa; }\n"
-        << ".sf-ico-exec { color: #fb7185; }\n"
-        << ".sf-ico-file { color: " << muted << "; }\n"
-        << ".sf-menu-item { background: transparent; color: " << fg << "; border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px; }\n"
-        << ".sf-menu-item:hover { background: " << hover_bg << "; }\n"
-        << ".sf-menu-danger { color: #f43f5e; }\n";
-
-    if (!fw->css) {
-        fw->css = gtk_css_provider_new();
-        if (GdkDisplay *d = gdk_display_get_default()) {
-            gtk_style_context_add_provider_for_display(d, GTK_STYLE_PROVIDER(fw->css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        }
-    }
-    gtk_css_provider_load_from_string(fw->css, css.str().c_str());
 }
 
 void clear_box_children(GtkWidget *box) {
@@ -805,15 +687,6 @@ void do_delete_selected(FilesWin *fw, bool permanent) {
     g_object_unref(dlg);
 }
 
-void open_item_action(FilesWin *fw, const fs::path &p) {
-    std::error_code ec;
-    if (fs::is_directory(p, ec)) {
-        navigate_to(fw, p, true);
-        return;
-    }
-    spawn_argv_detached({"xdg-open", p.string()});
-}
-
 void open_terminal_at(const fs::path &dir) {
     std::string term = has_executable("spinel-terminal") ? "spinel-terminal" : (has_executable("ptyxis") ? "ptyxis" : "foot");
     spawn_argv_detached({term, "--working-directory", dir.string()});
@@ -851,6 +724,232 @@ std::string strip_archive_ext(const std::string &fname) {
 bool is_script_or_appimage(const fs::path &p) {
     std::string ext = to_lower_copy(p.extension().string());
     return ext == ".sh" || ext == ".appimage" || ext == ".run" || ext == ".bin";
+}
+
+bool open_store_for_missing_wine(GtkWindow *parent, const GError *launch_error) {
+    if (!g_error_matches(launch_error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND) || wine_is_available()) return false;
+    g_autoptr(GError) store_error = nullptr;
+    if (open_wine_store(parent, &store_error)) return true;
+    append_app_log("[Wine] 无法打开应用商店：" + std::string(store_error->message));
+    return false;
+}
+
+bool run_with_wine(FilesWin *fw, const fs::path &path) {
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GSubprocess) process = launch_windows_executable(path, &error);
+    if (!process) {
+        if (open_store_for_missing_wine(fw->win, error)) {
+            gtk_label_set_text(GTK_LABEL(fw->status_label), "请在应用商店安装 Wine，安装完成后重新打开此文件。");
+            return true;
+        }
+        show_error_alert(fw, "无法用 Wine 启动", error->message);
+        return false;
+    }
+
+    g_autofree char *name = g_filename_display_basename(path.c_str());
+    const std::string status = "已交给 Wine 启动 " + std::string(name) + "。首次运行会初始化虚拟 C 盘。";
+    gtk_label_set_text(GTK_LABEL(fw->status_label), status.c_str());
+
+    struct WineExit {
+        FilesWin *window;
+        std::shared_ptr<std::atomic<bool>> alive;
+    };
+    g_subprocess_wait_check_async(process, nullptr, +[](GObject *object, GAsyncResult *result, gpointer data) {
+        std::unique_ptr<WineExit> ctx(static_cast<WineExit *>(data));
+        g_autoptr(GError) wait_error = nullptr;
+        if (g_subprocess_wait_check_finish(G_SUBPROCESS(object), result, &wait_error) ||
+            !ctx->alive->load()) return;
+        if (wait_error->domain == G_SPAWN_EXIT_ERROR) {
+            // A Windows program can return a nonzero exit code after a normal cancellation.
+            const std::string status = "Windows 程序已退出（代码 " + std::to_string(wait_error->code) + "）。";
+            gtk_label_set_text(GTK_LABEL(ctx->window->status_label), status.c_str());
+            return;
+        }
+        show_error_alert(ctx->window, "Wine 运行失败",
+                         std::string(wait_error->message) + "\n日志位于 " + spinel_state_dir() + "/apps.log");
+    }, new WineExit{fw, fw->alive});
+    return true;
+}
+
+int run_external_wine(const fs::path &path) {
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GSubprocess) process = launch_windows_executable(path, &error);
+    if (process && g_subprocess_wait_check(process, nullptr, &error)) return 0;
+    if (!process && open_store_for_missing_wine(nullptr, error)) return 1;
+
+    const bool program_exited = process && g_subprocess_get_if_exited(process);
+    const int status = program_exited ? g_subprocess_get_exit_status(process) : 1;
+    g_autofree char *name = g_filename_display_basename(path.c_str());
+    const std::string title = program_exited ? "Windows 程序已退出" : "无法用 Wine 启动";
+    const std::string detail = std::string(name) + "\n" +
+        (program_exited ? "退出代码 " + std::to_string(status) : std::string(error->message)) +
+        "\n日志位于 " + spinel_state_dir() + "/apps.log";
+    append_app_log("[Wine] " + std::string(error->message));
+    g_printerr("%s\n%s\n", title.c_str(), detail.c_str());
+    g_autofree char *body = g_markup_escape_text(detail.c_str(), -1);
+    std::string output;
+    int notification_status = 0;
+    run_argv_capture({"notify-send", "--app-name=SpinelOS", "--icon=org.spinelos.WindowsApps",
+                      "--", title, body}, output, notification_status);
+    return status;
+}
+
+bool is_wine_open_app(GAppInfo *app) {
+    return app && g_strcmp0(g_app_info_get_id(app), wine_open_desktop_id) == 0;
+}
+
+bool launch_file_app(FilesWin *fw, GAppInfo *app, GFile *file) {
+    if (is_wine_open_app(app)) {
+        g_autofree char *path = g_file_get_path(file);
+        if (!path) {
+            show_error_alert(fw, "无法用 Wine 启动", "请先将此文件复制到本地，再用 Wine 打开。");
+            return false;
+        }
+        return run_with_wine(fw, path);
+    }
+    g_autoptr(GdkAppLaunchContext) context = gdk_display_get_app_launch_context(
+        gtk_widget_get_display(GTK_WIDGET(fw->win)));
+    GList files{file, nullptr, nullptr};
+    g_autoptr(GError) error = nullptr;
+    if (g_app_info_launch(app, &files, G_APP_LAUNCH_CONTEXT(context), &error)) return true;
+    show_error_alert(fw, "无法打开文件", error->message);
+    return false;
+}
+
+struct OpenWithDialog {
+    FilesWin *files;
+    GFile *file;
+    FileOpenType type;
+    GtkWindow *window;
+    GtkDropDown *apps_dropdown = nullptr;
+    GtkCheckButton *set_default = nullptr;
+    std::vector<GAppInfo *> apps;
+
+    ~OpenWithDialog() {
+        g_object_unref(file);
+        for (auto *app : apps) g_object_unref(app);
+    }
+};
+
+void choose_file_app(FilesWin *fw, GFile *file, const FileOpenType &type, GAppInfo *current_default) {
+    auto dialog = std::unique_ptr<OpenWithDialog>(
+        new OpenWithDialog{fw, G_FILE(g_object_ref(file)), type, nullptr, nullptr, nullptr, {}});
+    auto add_app = [&](GAppInfo *app) {
+        if (!app || (is_wine_open_app(app) && !type.windows_exe) ||
+            (!g_app_info_supports_files(app) && !g_app_info_supports_uris(app))) return;
+        for (auto *existing : dialog->apps) {
+            if (g_app_info_equal(existing, app)) return;
+        }
+        dialog->apps.push_back(G_APP_INFO(g_object_ref(app)));
+    };
+    add_app(current_default);
+    GList *recommended = g_app_info_get_recommended_for_type(type.content_type.c_str());
+    for (auto *entry = recommended; entry; entry = entry->next) {
+        auto *app = G_APP_INFO(entry->data);
+        if (g_app_info_should_show(app) || is_wine_open_app(app)) add_app(app);
+    }
+    g_list_free_full(recommended, g_object_unref);
+
+    GList *all = g_app_info_get_all();
+    for (auto *entry = all; entry; entry = entry->next) {
+        auto *app = G_APP_INFO(entry->data);
+        if (g_app_info_should_show(app)) add_app(app);
+    }
+    g_list_free_full(all, g_object_unref);
+    if (dialog->apps.empty()) {
+        show_error_alert(fw, "没有可用的打开方式", "系统里找不到可接收此文件的应用。");
+        return;
+    }
+
+    auto *window = GTK_WINDOW(gtk_window_new());
+    dialog->window = window;
+    gtk_window_set_title(window, "打开方式");
+    gtk_window_set_transient_for(window, fw->win);
+    gtk_window_set_destroy_with_parent(window, TRUE);
+    gtk_window_set_modal(window, TRUE);
+    gtk_window_set_default_size(window, 420, -1);
+    gtk_widget_add_css_class(GTK_WIDGET(window), "sf-win");
+
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(content, 16);
+    gtk_widget_set_margin_end(content, 16);
+    gtk_widget_set_margin_top(content, 16);
+    gtk_widget_set_margin_bottom(content, 16);
+    gtk_window_set_child(window, content);
+    g_autofree char *basename = g_file_get_basename(file);
+    g_autofree char *file_name = g_filename_display_name(basename);
+    GtkWidget *label = gtk_label_new(file_name);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_box_append(GTK_BOX(content), label);
+
+    GtkStringList *names = gtk_string_list_new(nullptr);
+    for (auto *app : dialog->apps) {
+        std::string name = g_app_info_get_display_name(app);
+        if (current_default && g_app_info_equal(app, current_default)) name += "（当前默认）";
+        gtk_string_list_append(names, name.c_str());
+    }
+    dialog->apps_dropdown = GTK_DROP_DOWN(gtk_drop_down_new(G_LIST_MODEL(names), nullptr));
+    gtk_drop_down_set_enable_search(dialog->apps_dropdown, TRUE);
+    gtk_box_append(GTK_BOX(content), GTK_WIDGET(dialog->apps_dropdown));
+
+    dialog->set_default = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("始终使用所选应用打开这类文件"));
+    gtk_widget_set_sensitive(GTK_WIDGET(dialog->set_default), type.can_set_default());
+    gtk_box_append(GTK_BOX(content), GTK_WIDGET(dialog->set_default));
+
+    GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+    GtkWidget *cancel = gtk_button_new_with_label("取消");
+    GtkWidget *open = gtk_button_new_with_label("打开");
+    gtk_widget_add_css_class(cancel, "sf-tool-btn");
+    gtk_widget_add_css_class(open, "sf-tool-btn");
+    gtk_widget_add_css_class(open, "is-on");
+    gtk_box_append(GTK_BOX(buttons), cancel);
+    gtk_box_append(GTK_BOX(buttons), open);
+    gtk_box_append(GTK_BOX(content), buttons);
+
+    g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(gtk_window_destroy), window);
+    g_signal_connect(open, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *ctx = static_cast<OpenWithDialog *>(data);
+        const auto selected = gtk_drop_down_get_selected(ctx->apps_dropdown);
+        if (selected >= ctx->apps.size()) return;
+        auto *app = ctx->apps[selected];
+        if (gtk_check_button_get_active(ctx->set_default)) {
+            g_autoptr(GError) error = nullptr;
+            if (!ctx->type.set_default(app, &error)) {
+                show_error_alert(ctx->files, "无法保存默认应用", error->message);
+                return;
+            }
+        }
+        if (launch_file_app(ctx->files, app, ctx->file)) gtk_window_destroy(ctx->window);
+    }), dialog.get());
+    g_object_set_data_full(G_OBJECT(window), "open-with-dialog", dialog.release(),
+                          +[](gpointer data) { delete static_cast<OpenWithDialog *>(data); });
+    gtk_window_set_default_widget(window, open);
+    gtk_window_present(window);
+}
+
+void open_item_action(FilesWin *fw, const fs::path &path, bool choose_app = false) {
+    std::error_code ec;
+    if (fs::is_directory(path, ec)) {
+        navigate_to(fw, path, true);
+        return;
+    }
+
+    g_autoptr(GFile) file = g_file_new_for_path(path.c_str());
+    g_autoptr(GError) error = nullptr;
+    const auto type = query_file_open_type(file, &error);
+    if (!type) {
+        show_error_alert(fw, "无法打开文件", error->message);
+        return;
+    }
+    g_autoptr(GAppInfo) app = g_app_info_get_default_for_type(type->content_type.c_str(), false);
+    if (is_wine_open_app(app) && !type->windows_exe) g_clear_object(&app);
+    if (choose_app || !app) {
+        choose_file_app(fw, file, *type, app);
+    } else {
+        launch_file_app(fw, app, file);
+    }
 }
 
 void execute_file_direct(FilesWin *fw, const fs::path &p) {
@@ -1409,8 +1508,11 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         fw->selected_path = item_path;
         std::error_code ec;
         bool is_dir = fs::is_directory(item_path, ec);
-        bool is_exec_file = !is_dir && (::access(item_path.c_str(), X_OK) == 0);
-        if (is_exec_file) {
+        bool is_windows_exe = is_windows_executable(item_path);
+        bool is_exec_file = !is_dir && !is_windows_exe && (::access(item_path.c_str(), X_OK) == 0);
+        if (is_windows_exe) {
+            add_btn("用 Wine 运行", false, [fw, item_path]() { run_with_wine(fw, item_path); });
+        } else if (is_exec_file) {
             add_btn("执行", false, [fw, item_path]() { execute_file_direct(fw, item_path); });
             add_btn("在终端中运行", false, [item_path]() { execute_file_in_terminal(item_path, false); });
         } else if (!is_dir && is_script_or_appimage(item_path)) {
@@ -1428,6 +1530,7 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
             }
         }
         add_btn("打开", false, [fw, item_path]() { open_item_action(fw, item_path); });
+        if (!is_dir) add_btn("打开方式…", false, [fw, item_path]() { open_item_action(fw, item_path, true); });
         if (is_dir) {
             add_btn("在此目录打开终端", false, [item_path]() { open_terminal_at(item_path); });
         } else if (is_archive_file(item_path)) {
@@ -2196,30 +2299,18 @@ void build_files_window(GtkApplication *app, const fs::path &start_dir, const fs
     gtk_box_append(GTK_BOX(fw->root), fw->status_label);
     gtk_window_set_child(win, fw->root);
 
-    apply_theme_css(fw);
+    bind_files_window_theme(win);
 
     GtkEventController *key_ctl = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(key_ctl, GTK_PHASE_CAPTURE);
     g_signal_connect(key_ctl, "key-pressed", G_CALLBACK(on_key_pressed), fw);
     gtk_widget_add_controller(GTK_WIDGET(win), key_ctl);
 
-    fw->theme_timer = g_timeout_add(1200, +[](gpointer d) -> gboolean {
-        apply_theme_css(static_cast<FilesWin *>(d));
-        return G_SOURCE_CONTINUE;
-    }, fw);
-
     g_signal_connect(win, "destroy", G_CALLBACK(+[](GtkWidget *, gpointer d) {
         auto *w = static_cast<FilesWin *>(d);
         w->alive->store(false);
         ++(*w->scan_gen);
-        if (w->theme_timer) g_source_remove(w->theme_timer);
         if (w->search_timer) g_source_remove(w->search_timer);
-        if (w->css) {
-            if (GdkDisplay *disp = gdk_display_get_default()) {
-                gtk_style_context_remove_provider_for_display(disp, GTK_STYLE_PROVIDER(w->css));
-            }
-            g_object_unref(w->css);
-        }
         delete w;
     }), fw);
 
@@ -2383,9 +2474,20 @@ int main(int argc, char **argv) {
     }
 
     ensure_display_env();
+    if (argc == 3 && std::string_view(argv[1]) == "--run-wine") {
+        return run_external_wine(argv[2]);
+    }
     const char *wlr = std::getenv("WLR_RENDERER");
     if (wlr && std::string(wlr) == "pixman") {
         setenv("GSK_RENDERER", "cairo", 0);
+    }
+
+    if (argc >= 2 && std::string_view(argv[1]) == "--windows-apps") {
+        g_autoptr(GtkApplication) app = gtk_application_new("org.spinelos.WindowsApps", G_APPLICATION_DEFAULT_FLAGS);
+        g_signal_connect(app, "activate", G_CALLBACK(+[](GtkApplication *gapp, gpointer) {
+            show_windows_apps_window(gapp);
+        }), nullptr);
+        return g_application_run(G_APPLICATION(app), 0, nullptr);
     }
 
     StartLaunchTarget target = resolve_start_target(argc, argv);

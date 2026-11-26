@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "native_shell.hpp"
 #include "system_control.hpp"
+#include "wine_launcher.hpp"
 
 #include <gtk/gtk.h>
 #include <dirent.h>
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -33,6 +35,7 @@ struct DesktopApp {
     std::string icon_uri;
     std::string category;
     bool terminal = false;
+    std::optional<WineShortcut> wine_shortcut;
 };
 
 std::string resolve_icon_path(const std::string &icon_raw) {
@@ -48,7 +51,7 @@ std::string resolve_icon_path(const std::string &icon_raw) {
     }
 
     const std::string home = home_dir();
-    const fs::path local_icons = fs::path(home) / ".local/share/icons/hicolor";
+    const fs::path local_icons = fs::path(g_get_user_data_dir()) / "icons/hicolor";
     const fs::path flatpak_user_icons = fs::path(home) / ".local/share/flatpak/exports/share/icons/hicolor";
     const fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
     const std::vector<fs::path> icon_roots = {
@@ -257,6 +260,8 @@ std::vector<DesktopApp> scan_all_apps() {
         fs::path("/usr/local/share/applications"),
         fs::path("/usr/share/applications")
     };
+    const fs::path user_applications = fs::path(g_get_user_data_dir()) / "applications";
+    if (user_applications != dirs.front()) dirs.insert(dirs.begin(), user_applications);
 
     std::map<std::string, DesktopApp> by_id;
     std::error_code ec;
@@ -269,6 +274,17 @@ std::vector<DesktopApp> scan_all_apps() {
                 by_id.try_emplace(app.id, std::move(app));
             }
         }
+    }
+    for (auto &shortcut : list_wine_shortcuts()) {
+        DesktopApp app;
+        app.id = shortcut.id;
+        app.name = shortcut.name;
+        app.category = "Windows 应用";
+        app.icon_name = shortcut.icon;
+        app.icon_path = resolve_icon_path(app.icon_name);
+        if (!app.icon_path.empty()) app.icon_uri = "file://" + app.icon_path;
+        app.wine_shortcut = std::move(shortcut);
+        by_id.try_emplace(app.id, std::move(app));
     }
 
     std::vector<DesktopApp> out;
@@ -325,6 +341,12 @@ void launch_desktop_app_id(const std::string &desktop_id) {
     if (desktop_id.empty()) return;
     for (const auto &app : scan_all_apps()) {
         if (app.id == desktop_id) {
+            if (app.wine_shortcut) {
+                g_autoptr(GError) error = nullptr;
+                g_autoptr(GSubprocess) process = launch_wine_shortcut(*app.wine_shortcut, &error);
+                if (!process && error) append_app_log("[Wine] " + std::string(error->message));
+                return;
+            }
             auto args = split_exec_args(app.exec);
             if (args.empty()) return;
             if (app.terminal) {

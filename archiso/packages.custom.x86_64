@@ -77,7 +77,7 @@ cups
 cups-pdf
 system-config-printer
 
-# Proton & Open-Source Gaming Utilities (Steam itself is installed on-demand via App Store for clean redistribution)
+# Open-Source Gaming Utilities (Steam and Wine are installed on demand via App Store)
 gamescope
 mangohud
 lib32-mangohud

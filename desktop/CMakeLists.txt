@@ -79,6 +79,8 @@ add_executable(spinel-shell
     src/sys/devices.cpp
     src/sys/doctor_logs.cpp
     src/desktop_apps.cpp
+    src/wine_launcher.cpp
+    src/temp_memory.cpp
     src/theme_manager.cpp
     src/shell/shell_core.cpp
     src/shell/top_bar.cpp
@@ -126,6 +128,8 @@ add_executable(spinel-webui
     src/sys/doctor_logs.cpp
     src/installer.cpp
     src/desktop_apps.cpp
+    src/wine_launcher.cpp
+    src/temp_memory.cpp
     src/app_store.cpp
     src/theme_manager.cpp
 )
@@ -163,7 +167,12 @@ target_compile_options(spinel-terminal PRIVATE
 
 add_executable(spinel-files
     src/spinel_files.cpp
+    src/file_associations.cpp
+    src/files_theme.cpp
+    src/windows_apps_window.cpp
     src/common.cpp
+    src/wine_launcher.cpp
+    src/temp_memory.cpp
 )
 
 target_compile_definitions(spinel-files PRIVATE
@@ -183,11 +192,15 @@ target_compile_options(spinel-files PRIVATE
 )
 
 enable_testing()
+configure_file(../archiso/airootfs/usr/local/bin/spinel-wine spinel-wine COPYONLY)
 
 add_executable(spinel-tests
     tests/spinel_tests.cpp
+    src/file_associations.cpp
     src/ipc_router.cpp
     src/common.cpp
+    src/wine_launcher.cpp
+    src/temp_memory.cpp
     src/theme_manager.cpp
     src/desktop_apps.cpp
     src/steam_library.cpp
@@ -201,6 +214,7 @@ add_executable(spinel-tests
 
 target_compile_definitions(spinel-tests PRIVATE
     SPINEL_HAS_WEBKIT=0
+    SPINEL_TEST_WINE_HELPER_DIR="${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_include_directories(spinel-tests PRIVATE
@@ -218,4 +232,11 @@ target_compile_options(spinel-tests PRIVATE
 add_test(NAME spinel_unit_tests COMMAND spinel-tests)
 
 install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files DESTINATION bin)
+install(PROGRAMS ../archiso/airootfs/usr/local/bin/spinel-wine DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)
+install(FILES
+    ../archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop
+    ../archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop
+    DESTINATION share/applications)
+install(FILES ../archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg
+    DESTINATION share/icons/hicolor/scalable/apps)

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Windows 应用
+Comment=启动和卸载通过 Wine 安装的 Windows 应用
+Exec=spinel-files --windows-apps
+Icon=org.spinelos.WindowsApps
+Terminal=false
+Categories=System;Utility;
+StartupWMClass=org.spinelos.WindowsApps

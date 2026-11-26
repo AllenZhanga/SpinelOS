@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -u
+
+wine="${1:?缺少 Wine 程序路径}"
+shift
+prefix="${WINEPREFIX:?缺少 SpinelOS Wine 环境路径}"
+marker="$prefix/.spinelos-cjk-fonts-v1"
+family='Noto Sans CJK SC'
+
+configure_fonts() (
+  flock -x 9 || exit 1
+  [[ ! -f "$marker" ]] || exit 0
+  [[ "$(fc-match -f '%{family[0]}' "$family" 9>&- 2>/dev/null)" == "$family" ]] || exit 0
+
+  key='HKCU\Software\Wine\Fonts\Replacements'
+  reg='C:\windows\system32\reg.exe'
+  export WINEDEBUG=-all
+  for name in SimSun NSimSun 'Microsoft YaHei' 'Microsoft YaHei UI'; do
+    if ! "$wine" "$reg" query "$key" /v "$name" 9>&- >/dev/null 2>&1; then
+      "$wine" "$reg" add "$key" /v "$name" /t REG_SZ /d "$family" /f 9>&- >/dev/null || exit 1
+    fi
+  done
+  : > "$marker"
+) 9>"$prefix.spinel-fonts.lock"
+
+if [[ ! -f "$marker" ]] && ! configure_fonts; then
+  printf '%s\n' '无法为 SpinelOS Wine 环境设置中文字体。' >&2
+fi
+exec "$wine" "$@"

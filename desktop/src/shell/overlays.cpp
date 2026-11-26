@@ -219,10 +219,13 @@ void rebuild_launcher_index(NativeShellState *ns) {
         std::string lid = to_lower_copy(app.id);
         if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal" ||
             lid == "spinel-files" || lid == "org.spinelos.files") continue;
+        const bool wine = app.id.starts_with("wine:");
+        const bool windows_manager = lid == "org.spinelos.windowsapps";
         ns->launcher_entries.push_back({
             app.name,
-            !app.category.empty() ? ("已安装应用 · " + app.category) : "已安装桌面应用",
-            app.id + " " + app.category,
+            windows_manager ? "启动和卸载 Wine 软件" : wine ? "Windows 应用 · Wine" :
+                (!app.category.empty() ? ("已安装应用 · " + app.category) : "已安装桌面应用"),
+            app.id + " " + app.category + (windows_manager ? " wine windows applications" : ""),
             "app:launch:" + app.id,
             app.icon_path,
             match_app_kind(app.id + " " + app.name)

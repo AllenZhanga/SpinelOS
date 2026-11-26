@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Wine
+Name[zh_CN]=Wine（Windows 程序）
+Exec=spinel-files --run-wine %f
+Icon=org.spinelos.WindowsApps
+Terminal=false
+StartupNotify=true
+NoDisplay=true
+MimeType=application/vnd.microsoft.portable-executable;application/x-msdownload;application/x-ms-dos-executable;application/x-dosexec;

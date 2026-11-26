@@ -121,6 +121,8 @@ constexpr StoreAppEntry kCatalog[] = {
      "跨平台加密即时通讯与开发者社区客户端", "telegram-desktop", "Pacman 原生", "", false},
     {"qbittorrent", "qBittorrent", "浏览器与实用", "pacman", "qbittorrent",
      "轻量开源、无广告的 BT 与磁力高速下载器", "qbittorrent", "Pacman 原生", "", false},
+    {"wine", "Wine 兼容层", "浏览器与实用", "pacman", "wine",
+     "运行 Windows 程序和安装包，安装后可通过「Windows 应用」管理", "spinel-files", "Pacman 原生", "", false},
 };
 
 bool is_valid_pacman_pkg(const std::string &pkg) {
@@ -1324,6 +1326,8 @@ void launch_store_app(AppState *state, const std::string &app_id) {
     }
     if (app_id == "steam") {
         launch_steam_client(state);
+    } else if (app_id == "wine") {
+        spawn_argv_logged({entry->launch_cmd, "--windows-apps"}, "Store:wine");
     } else if (app_id == "chromium" || app_id == "firefox" || app_id == "chrome") {
         launch_browser_command({entry->pkg}, "Store:" + app_id);
     } else if (app_id == "vscode") {

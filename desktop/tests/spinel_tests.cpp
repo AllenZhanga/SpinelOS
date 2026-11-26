@@ -1,15 +1,19 @@
 #include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "file_associations.hpp"
 #include "ipc_router.hpp"
 #include "native_shell.hpp"
 #include "shell/sni_tray.hpp"
 #include "steam_library.hpp"
 #include "system_control.hpp"
+#include "temp_memory.hpp"
 #include "theme_manager.hpp"
+#include "wine_launcher.hpp"
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +56,10 @@ void expect(bool cond, const char *expr, int line) {
 struct TempHomeGuard {
     std::string old_home;
     bool had_home = false;
+    std::string old_data_home;
+    bool had_data_home = false;
+    std::string old_config_home;
+    bool had_config_home = false;
     fs::path tmp_dir;
 
     TempHomeGuard() {
@@ -60,11 +68,21 @@ struct TempHomeGuard {
             had_home = true;
             old_home = h;
         }
+        if (const char *data_home = std::getenv("XDG_DATA_HOME")) {
+            had_data_home = true;
+            old_data_home = data_home;
+        }
+        if (const char *config_home = std::getenv("XDG_CONFIG_HOME")) {
+            had_config_home = true;
+            old_config_home = config_home;
+        }
         tmp_dir = fs::temp_directory_path() / ("spinel-test-" + std::to_string(::getpid()));
         std::error_code ec;
         fs::remove_all(tmp_dir, ec);
         fs::create_directories(tmp_dir, ec);
         setenv("HOME", tmp_dir.c_str(), 1);
+        setenv("XDG_DATA_HOME", (tmp_dir / "data").c_str(), 1);
+        setenv("XDG_CONFIG_HOME", (tmp_dir / "config").c_str(), 1);
     }
 
     ~TempHomeGuard() {
@@ -73,6 +91,10 @@ struct TempHomeGuard {
         } else {
             unsetenv("HOME");
         }
+        if (had_data_home) setenv("XDG_DATA_HOME", old_data_home.c_str(), 1);
+        else unsetenv("XDG_DATA_HOME");
+        if (had_config_home) setenv("XDG_CONFIG_HOME", old_config_home.c_str(), 1);
+        else unsetenv("XDG_CONFIG_HOME");
         std::error_code ec;
         fs::remove_all(tmp_dir, ec);
     }
@@ -94,6 +116,120 @@ void test_common_utils() {
     EXPECT(write_text_file(p.string(), "first line\nsecond line\n"));
     EXPECT(read_first_line(p.string(), "fallback") == "first line");
     EXPECT(read_first_line((fs::path(home_dir()) / "missing.conf").string(), "fallback") == "fallback");
+}
+
+void test_wine_launch() {
+    const fs::path base = fs::path(home_dir()) / "wine-test";
+    const fs::path program = base / "应用 1 & setup.ExE";
+    const fs::path runner = base / "bin" / "wine";
+    const fs::path font_matcher = base / "bin" / "fc-match";
+    const fs::path args_file = base / "launch.args";
+    const fs::path prefix = spinel_wine_prefix();
+    const fs::path registry = prefix / "mock-registry";
+    EXPECT(write_text_file(program.string(), "Windows program placeholder"));
+    EXPECT(write_text_file((registry / "SimSun").string(), "User-picked font\n"));
+    EXPECT(write_text_file(font_matcher.string(), "#!/bin/sh\nprintf '%s' 'Noto Sans CJK SC'\n"));
+    EXPECT(write_text_file(runner.string(),
+                           "#!/bin/sh\n"
+                           "test -d \"$(dirname -- \"$WINEPREFIX\")\" || exit 1\n"
+                           "if [ \"$1\" = 'C:\\windows\\system32\\reg.exe' ]; then\n"
+                           "  value=\"$WINEPREFIX/mock-registry/$5\"\n"
+                           "  case \"$2\" in\n"
+                           "    query) test -f \"$value\";;\n"
+                           "    add) printf '%s\\n' \"$9\" > \"$value\";;\n"
+                           "  esac\n"
+                           "  exit $?\n"
+                           "fi\n"
+                           "printf '%s\\n' \"$#\" \"$1\" \"$PWD\" \"$WINEPREFIX\" > launch.args\n"));
+    fs::permissions(runner, fs::perms::owner_exec, fs::perm_options::add);
+    fs::permissions(font_matcher, fs::perms::owner_exec, fs::perm_options::add);
+    fs::create_directory(base / "directory.exe");
+    EXPECT(is_windows_executable(program));
+    EXPECT(!is_windows_executable(base / "missing.exe"));
+    EXPECT(!is_windows_executable(base / "directory.exe"));
+    EXPECT(!is_windows_executable(runner));
+
+    const char *path_env = std::getenv("PATH");
+    const bool had_path = path_env != nullptr;
+    const std::string original_path = had_path ? path_env : "";
+    setenv("PATH", (runner.parent_path().string() + ":" SPINEL_TEST_WINE_HELPER_DIR ":/usr/bin").c_str(), 1);
+    g_autoptr(GError) spawn_error = nullptr;
+    g_autoptr(GSubprocess) process = launch_windows_executable(program, &spawn_error);
+    if (had_path) setenv("PATH", original_path.c_str(), 1);
+    else unsetenv("PATH");
+    EXPECT(process != nullptr);
+    if (!process) return;
+    EXPECT(g_subprocess_wait_check(process, nullptr, nullptr));
+
+    const fs::path canonical_program = fs::canonical(program);
+    const fs::path working_dir = canonical_program.parent_path();
+    std::ifstream args(args_file);
+    std::vector<std::string> actual;
+    for (std::string line; std::getline(args, line);) actual.push_back(std::move(line));
+    const std::vector<std::string> expected = {
+        "1", canonical_program.string(), working_dir.string(), prefix.string()
+    };
+    EXPECT(actual == expected);
+    EXPECT(read_first_line((registry / "SimSun").string(), "") == "User-picked font");
+    EXPECT(read_first_line((registry / "NSimSun").string(), "") == "Noto Sans CJK SC");
+    EXPECT(read_first_line((registry / "Microsoft YaHei UI").string(), "") == "Noto Sans CJK SC");
+    EXPECT(fs::is_regular_file(prefix / ".spinelos-cjk-fonts-v1"));
+}
+
+void test_fcitx_notification_defaults() {
+    const fs::path path = fs::path(g_get_user_config_dir()) / "fcitx5/conf/notifications.conf";
+    EXPECT(write_text_file(path.string(), "[HiddenNotifications]\n0=existing-tip\n"));
+    ensure_fcitx5_defaults(true);
+    ensure_fcitx5_defaults(true);
+
+    g_autoptr(GKeyFile) config = g_key_file_new();
+    EXPECT(g_key_file_load_from_file(config, path.c_str(), G_KEY_FILE_NONE, nullptr));
+    g_autofree char *original = g_key_file_get_string(config, "HiddenNotifications", "0", nullptr);
+    g_autofree char *hidden = g_key_file_get_string(config, "HiddenNotifications", "1", nullptr);
+    EXPECT(g_strcmp0(original, "existing-tip") == 0);
+    EXPECT(g_strcmp0(hidden, "wayland-diagnose-gnome") == 0);
+    EXPECT(!g_key_file_has_key(config, "HiddenNotifications", "2", nullptr));
+}
+
+void test_file_associations() {
+    const fs::path base = fs::path(home_dir()) / "associated-files";
+    EXPECT(write_text_file((base / "notes.txt").string(), "a plain text document\n"));
+    EXPECT(write_text_file((base / "second.txt").string(), "another document\n"));
+    EXPECT(write_text_file((base / "document.PDF").string(), "%PDF-1.4\n"));
+    EXPECT(write_text_file((base / "Application.EXE").string(), "fixture with an uppercase extension\n"));
+    auto query = [&](const char *name) {
+        g_autoptr(GFile) file = g_file_new_for_path((base / name).c_str());
+        return query_file_open_type(file, nullptr);
+    };
+    const auto text = query("notes.txt");
+    const auto pdf = query("document.PDF");
+    const auto exe = query("Application.EXE");
+    EXPECT(text && text->content_type == "text/plain" && !text->windows_exe && text->can_set_default());
+    EXPECT(pdf && pdf->content_type == "application/pdf" && !pdf->windows_exe);
+    EXPECT(exe && exe->content_type == "application/vnd.microsoft.portable-executable" && exe->windows_exe);
+    EXPECT(!query("."));
+    if (!text) return;
+
+    const fs::path apps_dir = fs::path(g_get_user_data_dir()) / "applications";
+    EXPECT(write_text_file((apps_dir / "spinel-test-editor.desktop").string(),
+        "[Desktop Entry]\nType=Application\nName=Test editor\nExec=/usr/bin/true %f\nMimeType=text/plain;\n"));
+    g_autoptr(GAppInfo) editor = nullptr;
+    GList *apps = g_app_info_get_all();
+    for (auto *entry = apps; entry; entry = entry->next) {
+        auto *candidate = G_APP_INFO(entry->data);
+        if (g_strcmp0(g_app_info_get_id(candidate), "spinel-test-editor.desktop") == 0) {
+            editor = G_APP_INFO(g_object_ref(candidate));
+            break;
+        }
+    }
+    g_list_free_full(apps, g_object_unref);
+    EXPECT(editor != nullptr);
+    if (!editor) return;
+    EXPECT(text->set_default(editor, nullptr));
+    const auto second = query("second.txt");
+    EXPECT(second && second->content_type == text->content_type);
+    g_autoptr(GAppInfo) default_editor = g_app_info_get_default_for_type(text->content_type.c_str(), false);
+    EXPECT(default_editor && g_app_info_equal(default_editor, editor));
 }
 
 void test_trash_restore() {
@@ -214,6 +350,56 @@ void test_desktop_apps() {
     }
     EXPECT(saw_demo);
     EXPECT(!saw_hidden);
+}
+
+void test_wine_app_catalog() {
+    const auto prefix = spinel_wine_prefix();
+    const auto drive = prefix / "drive_c";
+    const auto shortcut_dir = fs::path(g_get_user_data_dir()) / "applications/wine/Programs/7-Zip";
+    const auto link = drive / "ProgramData/Start Menu/7-Zip File Manager.lnk";
+    const auto shortcut = shortcut_dir / "7-Zip File Manager.desktop";
+    const std::string exec_tail = R"(" wine "C:\\\\ProgramData\\\\Start Menu\\\\7-Zip File Manager.lnk")";
+    const std::string contents = "[Desktop Entry]\nType=Application\nName=7-Zip File Manager\n"
+                                 "StartupWMClass=7zfm.exe\nExec=env \"WINEPREFIX=";
+    EXPECT(write_text_file(link.string(), "Wine start-menu shortcut"));
+    EXPECT(write_text_file(shortcut.string(), contents + prefix.string() + exec_tail + "\n"));
+    EXPECT(write_text_file((shortcut_dir / "Other Prefix.desktop").string(),
+                          contents + prefix.string() + "-other" + exec_tail + "\n"));
+
+    const auto installed = parse_wine_uninstall_registry(R"registry(Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\Software\Uninstall\7-Zip]
+"DisplayName"="7-Zip 26.06 (x64)"
+"UninstallString"="uninstall.exe"
+
+[HKEY_LOCAL_MACHINE\Software\Uninstall\应用]
+"DisplayName"="示例应用"
+"WindowsInstaller"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\Software\Uninstall\System]
+"DisplayName"="System component"
+"WindowsInstaller"=dword:00000001
+"SystemComponent"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\Software\Uninstall\7-Zip\Features]
+"DisplayName"="Not an installed application"
+"UninstallString"="uninstall.exe"
+)registry", R"(HKEY_LOCAL_MACHINE\Software\Uninstall)");
+    EXPECT(installed.size() == 2);
+    if (installed.size() != 2) return;
+    EXPECT(installed[1].name == "示例应用");
+    EXPECT(installed[1].key == "应用");
+    const auto shortcuts = list_wine_shortcuts();
+    EXPECT(shortcuts.size() == 1);
+    if (shortcuts.size() != 1) return;
+    EXPECT(shortcuts[0].link == fs::canonical(link));
+    EXPECT(find_wine_app_shortcut(installed[0], shortcuts) == &shortcuts[0]);
+    EXPECT(find_wine_app_shortcut(installed[1], shortcuts) == nullptr);
+    EXPECT(std::ranges::any_of(list_desktop_apps(), [&](const auto &app) {
+        return app.id == shortcuts[0].id && app.name == "7-Zip File Manager";
+    }));
+    fs::remove(link);
+    EXPECT(list_wine_shortcuts().empty());
 }
 
 void test_steam_library() {
@@ -481,6 +667,7 @@ void test_ipc_router() {
 
     AppState dummy;
     std::string reply;
+    EXPECT(dispatch_ipc_command(&dummy, "monitor:temp-clean", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, R"({"id":"r1","method":"settings.open","params":{"tab":"appearance"}})", mock_actions, &reply));
     EXPECT(last_tab == "appearance");
     EXPECT(reply.find("\"id\":\"r1\"") != std::string::npos);
@@ -732,18 +919,66 @@ void test_dock_quit_and_store_helpers() {
     EXPECT(snaps[1].id == 12 && !snaps[1].is_current && snaps[1].description == "Initial install");
 }
 
+void test_temp_memory_cleanup() {
+    char path[] = "/dev/shm/spinel-temp-memory-test.XXXXXX";
+    EXPECT(g_mkdtemp(path) != nullptr);
+    if (!tmpfs_used_bytes(path)) {
+        rmdir(path);
+        return;
+    }
+    const fs::path root(path);
+
+    auto make_directory = [&](const char *name) {
+        const fs::path dir = root / name;
+        fs::create_directory(dir);
+        fs::permissions(dir, fs::perms::owner_all);
+        std::ofstream(dir / "data") << std::string(2 * 1024 * 1024, 'x');
+        return dir;
+    };
+    const auto stale = make_directory("spinel-stale");
+    const auto busy = make_directory("spinel-in-use");
+    const auto unrelated = make_directory("spinel-unmarked");
+    fs::create_directory_symlink(unrelated, root / "spinel-link");
+    fs::create_directory_symlink(unrelated, stale / "external-link");
+
+    const int stale_lock = register_temp_directory(stale);
+    EXPECT(stale_lock >= 0);
+    if (stale_lock >= 0) close(stale_lock);
+    const int busy_lock = register_temp_directory(busy);
+    EXPECT(busy_lock >= 0);
+
+    const auto result = clean_temp_memory(root);
+    EXPECT(result.directories_removed == 1);
+    EXPECT(result.released_bytes && *result.released_bytes >= 2 * 1024 * 1024);
+    EXPECT(!result.incomplete);
+    EXPECT(!fs::exists(stale));
+    EXPECT(fs::exists(busy / "data"));
+    EXPECT(fs::exists(unrelated / "data"));
+    EXPECT(fs::is_symlink(root / "spinel-link"));
+
+    if (busy_lock >= 0) close(busy_lock);
+    EXPECT(clean_temp_memory(root).directories_removed == 1);
+    EXPECT(clean_temp_memory(root).directories_removed == 0);
+    fs::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
     TempHomeGuard guard;
     test_common_utils();
+    test_wine_launch();
+    test_fcitx_notification_defaults();
+    test_file_associations();
     test_trash_restore();
     test_theme_and_wallpaper();
     test_desktop_apps();
+    test_wine_app_catalog();
     test_steam_library();
     test_system_control_configs();
     test_ipc_router();
     test_dock_quit_and_store_helpers();
+    test_temp_memory_cleanup();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

@@ -334,7 +334,8 @@
       head.className = "store-card-head";
       const iconWrap = document.createElement("div");
       iconWrap.className = "store-card-icon";
-      fillIconContainer(iconWrap, findAppIconUri([app.id, app.pkg, app.name]), matchAppKind(`${app.id} ${app.pkg} ${app.name}`), app.name);
+      const iconKeys = app.id === "wine" ? ["org.spinelos.WindowsApps"] : [app.id, app.pkg, app.name];
+      fillIconContainer(iconWrap, findAppIconUri(iconKeys), matchAppKind(`${app.id} ${app.pkg} ${app.name}`), app.name);
 
       const info = document.createElement("div");
       info.className = "store-card-info";
@@ -580,13 +581,24 @@
       const targetId = state.pendingStoreFocus;
       state.pendingStoreFocus = "";
       const targetApp = (state.storeState.apps || []).find((a) => a.id === targetId);
-      if (targetApp && !targetApp.installed) {
-        requestStoreOp("install", {
-          id: targetApp.id,
-          name: targetApp.name,
-          backend: targetApp.backend,
-          pkg: targetApp.pkg
-        });
+      if (targetApp) {
+        if (storeCategory !== "all" && storeCategory !== targetApp.category) {
+          storeCategory = targetApp.category;
+          document.querySelectorAll("[data-store-cat]").forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.storeCat === storeCategory);
+          });
+          const search = document.getElementById("store-search-input");
+          if (search && search.value) search.value = "";
+          renderStoreApps();
+        }
+        if (!targetApp.installed) {
+          requestStoreOp("install", {
+            id: targetApp.id,
+            name: targetApp.name,
+            backend: targetApp.backend,
+            pkg: targetApp.pkg
+          });
+        }
       }
     }
   };

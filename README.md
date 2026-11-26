@@ -52,6 +52,7 @@
   - **NVIDIA**：`nvidia-open` + `nvidia-utils` + `lib32-nvidia-utils`（适配 RTX 20/30/40/50 及 GTX 16 系）
 - **游戏栈即装即玩（开源合规设计）**：ISO 预集成 `[multilib]`、Gamescope、MangoHud、GameMode、PipeWire 与蓝牙手柄支持；专有 `Steam` 客户端未预捆绑在商业发行镜像中，首次点击桌面/Dock/游戏中心图标可通过**应用商店一键在线安装**（ISO 构建同时导出 `spinelos-packages-licenses.tsv` 与 `NOTICE-THIRD-PARTY.txt`）。
 - **游戏与启动中心**：自动扫描本地 Steam 游戏库与封面图，可直接从桌面/游戏中心一键直达 **Steam 客户端** 或 **Gamescope 主机大屏模式**，并在设置页可视化开关 MangoHud HUD、GameMode 与渲染分辨率。
+- **运行本地 Windows 程序**：在应用商店按需下载安装 Wine。首次双击 `.exe` 或右键选择「用 Wine 运行」时，系统会在缺少 Wine 的情况下打开商店安装页。安装后重新打开文件即可运行。在 `Alt+Space` 搜索「Windows 应用」可安装 Wine、查看、启动和卸载已安装软件，也可以搜索 Wine 生成的应用快捷方式。虚拟 C 盘默认位于 `~/.local/share/spinelos/wine-prefix/drive_c`。Steam 游戏通过 Steam 自己管理的 Proton 运行。
 
 ### 3. 真正面向中文用户的日用体验
 - **中文输入法开箱可用**：内置 **Fcitx5 Wayland**、默认中文拼音（`fcitx5-chinese-addons`，禁用生僻 ExtB 字符并预置 `Noto Color Emoji` 彩色 Emoji 回退）及可选 **Rime 雾凇拼音**，配合 9-patch 磨砂浅/深色皮肤。
