@@ -11,6 +11,7 @@ HOSTNAME="spinelos"
 TIMEZONE="Asia/Shanghai"
 AUTOLOGIN="true"
 OS_PROBER="false"
+INSTALL_ROOT_MOUNTED=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -84,11 +85,12 @@ progress() {
 cleanup_on_error() {
   local rc=$?
   if [[ $rc -ne 0 ]]; then
-    echo "[ERROR] Installation failed (exit code $rc). Cleaning up mounts..."
-    umount -R /mnt 2>/dev/null || true
+    echo "[ERROR] Installation failed (exit code $rc)."
+    if [[ "$INSTALL_ROOT_MOUNTED" == "true" ]]; then
+      umount -R /mnt 2>/dev/null || true
+    fi
   fi
 }
-trap cleanup_on_error EXIT
 
 # Prevent overwriting active boot medium or current root
 BOOTMNT_SRC="$(findmnt -n -o SOURCE /run/archiso/bootmnt 2>/dev/null || true)"
@@ -123,12 +125,15 @@ mount_formatted_root() {
     fi
     mkfs.btrfs -f -L SPINEL_ROOT "$dev"
     mount "$dev" /mnt
+    INSTALL_ROOT_MOUNTED=true
     btrfs subvolume create /mnt/@
     btrfs subvolume create /mnt/@home
     btrfs subvolume create /mnt/@snapshots
     btrfs subvolume create /mnt/@var_log
     umount /mnt
+    INSTALL_ROOT_MOUNTED=false
     mount -o compress=zstd:3,noatime,subvol=@ "$dev" /mnt
+    INSTALL_ROOT_MOUNTED=true
     mkdir -p /mnt/{home,.snapshots,var/log}
     mount -o compress=zstd:3,noatime,subvol=@home "$dev" /mnt/home
     mount -o compress=zstd:3,noatime,subvol=@snapshots "$dev" /mnt/.snapshots
@@ -136,6 +141,7 @@ mount_formatted_root() {
   else
     mkfs.ext4 -F -L SPINEL_ROOT "$dev"
     mount "$dev" /mnt
+    INSTALL_ROOT_MOUNTED=true
   fi
 }
 
@@ -150,23 +156,73 @@ check_min_bytes() {
   fi
 }
 
-umount -R /mnt 2>/dev/null || true
+check_disk_idle() {
+  local disk="$1" mounts="$2" devices type dev_id mountpoints
+  if ! devices="$(lsblk --raw --noheadings --output TYPE,MAJ:MIN,MOUNTPOINTS -- "$disk")"; then
+    echo "[ERROR] 无法核验目标磁盘（$disk）。" >&2
+    return 1
+  fi
+
+  read -r type dev_id mountpoints <<< "$devices"
+  if [[ "$type" != "disk" || ! "$dev_id" =~ ^[0-9]+:[0-9]+$ ]]; then
+    echo "[ERROR] 整盘安装需要选择整块磁盘（$disk）。" >&2
+    return 1
+  fi
+
+  # Match the kernel mount table by device number, regardless of the source path.
+  # lsblk also reports Btrfs source mountpoints and active swap as [SWAP].
+  local -A mounted_at=()
+  while read -r dev_id mountpoints; do
+    mounted_at["$dev_id"]="$mountpoints"
+  done <<< "$mounts"
+  while read -r type dev_id mountpoints; do
+    if [[ ! "$dev_id" =~ ^[0-9]+:[0-9]+$ ]]; then
+      echo "[ERROR] 无法核验目标磁盘的分区或映射设备（$disk）。" >&2
+      return 1
+    fi
+    local in_use="${mounted_at[$dev_id]:-$mountpoints}"
+    if [[ -n "$in_use" ]]; then
+      echo "[ERROR] 目标磁盘或其关联设备正在使用（$disk，设备 $dev_id：$in_use）。请卸载目标分区并停用交换空间后重试。" >&2
+      return 1
+    fi
+  done <<< "$devices"
+}
 
 if [[ "$MODE" == "disk" ]]; then
+  # Use the canonical device name for checks and subsequent partition paths.
+  if ! canonical_disk="$(readlink -e -- "$DISK")"; then
+    echo "[ERROR] 无法解析目标磁盘的设备路径（$DISK）。" >&2
+    exit 1
+  fi
+  DISK="$canonical_disk"
   if [[ -n "$BOOTMNT_SRC" && ( "$DISK" == "$BOOTMNT_SRC" || "$DISK" == "$BOOTMNT_DISK" ) ]]; then
     echo "[ERROR] Refusing to overwrite the active Live ISO boot device ($DISK)." >&2
     exit 1
   fi
   check_min_bytes "$DISK"
+fi
 
+if ! install_mounts="$(findmnt --kernel --raw --noheadings --output MAJ:MIN,TARGET)" ||
+   [[ -z "$install_mounts" ]]; then
+  echo "[ERROR] 无法核验系统挂载状态。" >&2
+  exit 1
+fi
+while read -r _ mountpoint; do
+  if [[ "$mountpoint" == "/mnt" || "$mountpoint" == /mnt/* ]]; then
+    echo "[ERROR] 安装需要使用 /mnt，现有挂载点 $mountpoint 正在占用该目录。请手动卸载后重试。" >&2
+    exit 1
+  fi
+done <<< "$install_mounts"
+
+if [[ "$MODE" == "disk" ]]; then
+  check_disk_idle "$DISK" "$install_mounts"
+fi
+trap cleanup_on_error EXIT
+
+if [[ "$MODE" == "disk" ]]; then
   echo "==> Mode: Full Disk Wipe -> $DISK (UEFI=$IS_UEFI, FS=$FS_TYPE)"
   progress 8 "正在清理旧分区并创建分区表 (${FS_TYPE})..."
-  for part in $(lsblk -ln -o PATH "$DISK" 2>/dev/null | tail -n +2); do
-    swapoff "$part" 2>/dev/null || true
-    umount -f "$part" 2>/dev/null || true
-  done
-
-  wipefs -af "$DISK"
+  wipefs -af -- "$DISK"
 
   if [[ "$IS_UEFI" == "true" ]]; then
     parted -s "$DISK" mklabel gpt \

@@ -94,6 +94,48 @@ void test_common_utils() {
     EXPECT(read_first_line((fs::path(home_dir()) / "missing.conf").string(), "fallback") == "fallback");
 }
 
+void test_trash_restore() {
+    const fs::path base = fs::path(home_dir()) / "restore-test";
+    const fs::path source = base / "trash" / "report.txt";
+    const fs::path original = base / "documents" / "report.txt";
+    EXPECT(write_text_file(source.string(), "trashed content"));
+    EXPECT(write_text_file(original.string(), "existing content"));
+    const fs::path dangling_link = original.parent_path() / "report (恢复 2).txt";
+    fs::create_symlink("missing.txt", dangling_link);
+
+    std::string error;
+    fs::path target = original;
+    EXPECT(restore_trashed_path(source, target, error));
+    EXPECT(target == original.parent_path() / "report (恢复 3).txt");
+    EXPECT(read_first_line(target.string()) == "trashed content");
+    EXPECT(read_first_line(original.string()) == "existing content");
+    EXPECT(fs::is_symlink(dangling_link));
+    EXPECT(!fs::exists(source));
+
+    EXPECT(write_text_file(source.string(), "next trashed content"));
+    for (int i = 4; i < 100; ++i) {
+        fs::path occupied = original.parent_path() / ("report (恢复 " + std::to_string(i) + ").txt");
+        EXPECT(write_text_file(occupied.string(), "occupied"));
+    }
+    target = original;
+    EXPECT(!restore_trashed_path(source, target, error));
+    EXPECT(!error.empty());
+    EXPECT(read_first_line(source.string()) == "next trashed content");
+    EXPECT(read_first_line(original.string()) == "existing content");
+    EXPECT(read_first_line((original.parent_path() / "report (恢复 99).txt").string()) == "occupied");
+
+    const fs::path source_dir = base / "trash" / "my.dir";
+    const fs::path original_dir = base / "documents" / "my.dir";
+    EXPECT(write_text_file((source_dir / "payload").string(), "trashed directory content"));
+    EXPECT(write_text_file((original_dir / "payload").string(), "existing directory content"));
+    target = original_dir;
+    EXPECT(restore_trashed_path(source_dir, target, error));
+    EXPECT(target == original_dir.parent_path() / "my.dir (恢复 2)");
+    EXPECT(read_first_line((target / "payload").string()) == "trashed directory content");
+    EXPECT(read_first_line((original_dir / "payload").string()) == "existing directory content");
+    EXPECT(!fs::exists(source_dir));
+}
+
 void test_theme_and_wallpaper() {
     auto themes = list_available_themes();
     EXPECT(themes.size() >= 4);
@@ -610,6 +652,7 @@ void test_ipc_router() {
 int main() {
     TempHomeGuard guard;
     test_common_utils();
+    test_trash_restore();
     test_theme_and_wallpaper();
     test_desktop_apps();
     test_steam_library();

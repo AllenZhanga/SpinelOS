@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,9 @@ void ensure_display_env();
 std::string spinel_state_dir();
 std::string read_first_line(const std::string &path, const std::string &fallback = "");
 bool write_text_file(const std::string &path, const std::string &content);
+bool restore_trashed_path(const std::filesystem::path &source,
+                          std::filesystem::path &target,
+                          std::string &error);
 std::string run_cmd_capture(const char *cmd);
 bool run_argv_capture(const std::vector<std::string> &args, std::string &out, int &exit_code);
 bool run_argv_stdin_capture(const std::vector<std::string> &args,

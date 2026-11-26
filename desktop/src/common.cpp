@@ -216,6 +216,48 @@ bool run_argv_capture(const std::vector<std::string> &args, std::string &out, in
     return run_argv_stdin_capture(args, "", out, exit_code);
 }
 
+bool restore_trashed_path(const fs::path &source, fs::path &target, std::string &error) {
+    const fs::path parent = target.parent_path();
+    std::error_code ec;
+    const bool is_dir = fs::is_directory(fs::symlink_status(source, ec));
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+    fs::create_directories(parent, ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+
+    const std::string stem = is_dir ? target.filename().string() : target.stem().string();
+    const std::string extension = is_dir ? "" : target.extension().string();
+    fs::path candidate = target;
+    for (int attempt = 1; attempt < 100; ++attempt) {
+        if (attempt > 1) {
+            candidate = parent / (stem + " (恢复 " + std::to_string(attempt) + ")" + extension);
+        }
+        // Dangling symlinks also occupy a destination name.
+        if (fs::symlink_status(candidate, ec).type() != fs::file_type::not_found) {
+            if (!ec) continue;
+            error = ec.message();
+            return false;
+        }
+
+        // Refuse a destination created after the check, including on another filesystem.
+        int rc = 1;
+        if (!run_argv_capture({"mv", "--update=none-fail", "--no-target-directory", "--",
+                               source.string(), candidate.string()}, error, rc) || rc != 0) {
+            if (error.empty()) error = "无法移动回收站项目。";
+            return false;
+        }
+        target = std::move(candidate);
+        return true;
+    }
+    error = "目标位置已有同名项目，且备用名称均已被占用。";
+    return false;
+}
+
 bool has_executable(const std::string &cmd) {
     if (cmd.empty()) return false;
     if (cmd.find('/') != std::string::npos) {

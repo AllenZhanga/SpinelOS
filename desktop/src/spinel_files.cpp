@@ -688,25 +688,9 @@ void do_restore_from_trash(FilesWin *fw, const std::vector<fs::path> &trashed_it
         if (target.empty()) {
             target = fs::path(home_dir()) / "Desktop" / trashed_item.filename();
         }
-        fs::create_directories(target.parent_path(), ec);
-        if (fs::exists(target, ec)) {
-            std::string stem = target.stem().string();
-            std::string ext = target.extension().string();
-            for (int i = 2; i < 100 && fs::exists(target, ec); ++i) {
-                target = target.parent_path() / (stem + " (恢复 " + std::to_string(i) + ")" + ext);
-            }
-        }
-
-        fs::rename(trashed_item, target, ec);
-        if (ec) {
-            std::string out;
-            int rc = 1;
-            if (run_argv_capture({"mv", "-f", trashed_item.string(), target.string()}, out, rc) && rc == 0) {
-                ec.clear();
-            }
-        }
-        if (ec) {
-            show_error_alert(fw, "还原失败", ec.message());
+        std::string error;
+        if (!restore_trashed_path(trashed_item, target, error)) {
+            show_error_alert(fw, "还原失败", error);
             refresh_current_dir(fw);
             return;
         }

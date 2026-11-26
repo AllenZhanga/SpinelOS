@@ -120,26 +120,16 @@ void open_desktop_entry(const std::string &path, bool is_dir, bool is_exec, bool
 
 void trash_desktop_entry(NativeShellState *ns, const std::string &path) {
     if (path.empty()) return;
-    std::string out;
-    int rc = 1;
-    if (has_executable("gio") && run_argv_capture({"gio", "trash", path}, out, rc) && rc == 0) {
+    g_autoptr(GFile) file = g_file_new_for_path(path.c_str());
+    g_autoptr(GError) error = nullptr;
+    if (g_file_trash(file, nullptr, &error)) {
         if (ns) rebuild_desktop_shortcuts(ns);
         return;
     }
-    std::error_code ec;
-    fs::path p(path);
-    fs::path trash_files = fs::path(home_dir()) / ".local/share/Trash/files";
-    fs::create_directories(trash_files, ec);
-    fs::path dst = trash_files / p.filename();
-    int idx = 2;
-    while (fs::exists(dst, ec) && idx < 100) {
-        dst = trash_files / (p.stem().string() + "_" + std::to_string(idx++) + p.extension().string());
-    }
-    fs::rename(p, dst, ec);
-    if (ec) {
-        fs::remove_all(p, ec);
-    }
-    if (ns) rebuild_desktop_shortcuts(ns);
+
+    g_autoptr(GtkAlertDialog) dialog = gtk_alert_dialog_new("无法移到回收站");
+    gtk_alert_dialog_set_detail(dialog, error ? error->message : "无法回收此项目。");
+    gtk_alert_dialog_show(dialog, nullptr);
 }
 
 void on_desktop_shortcut_pressed(GtkGestureClick *gesture, int n_press, double, double, gpointer user_data) {
