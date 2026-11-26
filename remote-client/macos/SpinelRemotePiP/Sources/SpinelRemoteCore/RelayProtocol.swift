@@ -646,6 +646,7 @@ public enum RelayRPC {
             "device_name": cfg.deviceName,
             "pub_key_hex": pubHex,
             "allow_remote": false,
+            "ephemeral": true,
             "lan_addrs": lan,
             "ipv6_addrs": v6
         ]
@@ -827,6 +828,7 @@ public final class E2eeTunnel: @unchecked Sendable {
             "device_name": cfg.deviceName,
             "pub_key_hex": pubHex,
             "allow_remote": false,
+            "ephemeral": true,
             "lan_addrs": lan,
             "ipv6_addrs": v6
         ]

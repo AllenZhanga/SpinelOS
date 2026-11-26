@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -185,5 +186,92 @@ func TestUDPStunLoop(t *testing.T) {
 	}
 	if string(buf[:12]) != "SPINELOK1234" || n <= 12 {
 		t.Fatalf("unexpected stun reply: %q", string(buf[:n]))
+	}
+}
+
+func TestEphemeralRpcPreservesHostOnline(t *testing.T) {
+	srv, err := NewRelayServer(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dial := func() (net.Conn, *bufio.Reader, *bufio.Writer) {
+		a, b := net.Pipe()
+		go srv.handleConn(a)
+		return b, bufio.NewReader(b), bufio.NewWriter(b)
+	}
+
+	// Hostd registers & heartbeats on persistent connection
+	hc, hbr, hbw := dial()
+	defer hc.Close()
+	sendCtrl(t, hbw, ControlMsg{
+		Type: "register", ReqID: "r1", Account: "alice", Password: "secret123",
+		DeviceID: "spinelos", DeviceName: "spinelos", AllowRemote: true, Role: "hostd",
+	})
+	resp := readResp(t, hbr)
+	if resp["ok"] != true {
+		t.Fatalf("host register failed: %+v", resp)
+	}
+	tok, _ := resp["token"].(string)
+	sendCtrl(t, hbw, ControlMsg{Type: "heartbeat", ReqID: "hb", DeviceID: "spinelos", AllowRemote: true})
+	_ = readResp(t, hbr)
+
+	// Same device opens short-lived ephemeral pair_create RPC and closes
+	rc, rbr, rbw := dial()
+	sendCtrl(t, rbw, ControlMsg{
+		Type: "login", ReqID: "p1", Account: "alice", Token: tok,
+		DeviceID: "spinelos", AllowRemote: true, Ephemeral: true,
+	})
+	if r := readResp(t, rbr); r["ok"] != true {
+		t.Fatalf("ephemeral login failed: %+v", r)
+	}
+	sendCtrl(t, rbw, ControlMsg{Type: "pair_create", ReqID: "p2"})
+	pr := readResp(t, rbr)
+	code, _ := pr["pair_code"].(string)
+	_ = rc.Close()
+
+	// Initiator claims pair code and lists devices -> spinelos MUST still be online: true
+	mc, mbr, mbw := dial()
+	defer mc.Close()
+	sendCtrl(t, mbw, ControlMsg{
+		Type: "pair_claim", ReqID: "c1", PairCode: code,
+		DeviceID: "mac-1", DeviceName: "Mac", Ephemeral: true,
+	})
+	cr := readResp(t, mbr)
+	if cr["ok"] != true {
+		t.Fatalf("claim failed: %+v", cr)
+	}
+	devs, _ := cr["devices"].([]any)
+	foundOnline := false
+	for _, item := range devs {
+		m, _ := item.(map[string]any)
+		if m["device_id"] == "spinelos" && m["online"] == true {
+			foundOnline = true
+		}
+	}
+	if !foundOnline {
+		t.Fatalf("expected spinelos online=true after ephemeral RPC close, got %+v", devs)
+	}
+
+	// Verify punch_offer -> punch_answer works even when initiator is ephemeral
+	sid := "0123456789abcdef0123456789abcdef"
+	sendCtrl(t, mbw, ControlMsg{
+		Type: "punch_offer", ReqID: "o1", TargetDeviceID: "spinelos", SessionID: sid, EphemeralPub: "aa",
+	})
+	_, offerRaw, err := readFrame(hbr)
+	if err != nil || !strings.Contains(string(offerRaw), `"type":"punch_offer"`) {
+		t.Fatalf("host did not receive punch_offer: err=%v raw=%q", err, string(offerRaw))
+	}
+	if or := readResp(t, mbr); or["ok"] != true {
+		t.Fatalf("punch_offer failed: %+v", or)
+	}
+	sendCtrl(t, hbw, ControlMsg{
+		Type: "punch_answer", ReqID: "a1", TargetDeviceID: "mac-1", SessionID: sid, EphemeralPub: "bb",
+	})
+	_, ansRaw, err := readFrame(mbr)
+	if err != nil || !strings.Contains(string(ansRaw), `"type":"punch_answer"`) {
+		t.Fatalf("ephemeral initiator did not receive punch_answer: err=%v raw=%q", err, string(ansRaw))
+	}
+	if ar := readResp(t, hbr); ar["ok"] != true {
+		t.Fatalf("punch_answer failed: %+v", ar)
 	}
 }

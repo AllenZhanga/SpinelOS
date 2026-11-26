@@ -68,12 +68,14 @@ type PersistedState struct {
 }
 
 type ClientConn struct {
-	mu       sync.Mutex
-	conn     net.Conn
-	bw       *bufio.Writer
-	deviceID string
-	account  string
-	relaySid string
+	mu          sync.Mutex
+	conn        net.Conn
+	bw          *bufio.Writer
+	deviceID    string
+	account     string
+	relaySid    string
+	ephemeral   bool
+	isHeartbeat bool
 }
 
 func (c *ClientConn) SendControl(v any) error {
@@ -110,13 +112,14 @@ type RelayPair struct {
 }
 
 type RelayServer struct {
-	mu        sync.RWMutex
-	dataDir   string
-	accounts  map[string]*Account
-	devices   map[string]*DeviceRecord
-	pairCodes map[string]*PairCode
-	online    map[string]*ClientConn
-	tunnels   map[string]*RelayPair
+	mu           sync.RWMutex
+	dataDir      string
+	accounts     map[string]*Account
+	devices      map[string]*DeviceRecord
+	pairCodes    map[string]*PairCode
+	online       map[string]*ClientConn
+	tunnels      map[string]*RelayPair
+	punchWaiters map[string]*ClientConn
 }
 
 func NewRelayServer(dataDir string) (*RelayServer, error) {
@@ -124,12 +127,13 @@ func NewRelayServer(dataDir string) (*RelayServer, error) {
 		return nil, err
 	}
 	s := &RelayServer{
-		dataDir:   dataDir,
-		accounts:  make(map[string]*Account),
-		devices:   make(map[string]*DeviceRecord),
-		pairCodes: make(map[string]*PairCode),
-		online:    make(map[string]*ClientConn),
-		tunnels:   make(map[string]*RelayPair),
+		dataDir:      dataDir,
+		accounts:     make(map[string]*Account),
+		devices:      make(map[string]*DeviceRecord),
+		pairCodes:    make(map[string]*PairCode),
+		online:       make(map[string]*ClientConn),
+		tunnels:      make(map[string]*RelayPair),
+		punchWaiters: make(map[string]*ClientConn),
 	}
 	_ = s.loadState()
 	return s, nil
@@ -227,6 +231,8 @@ type ControlMsg struct {
 	Candidates     []string `json:"candidates,omitempty"`
 	EphemeralPub   string   `json:"ephemeral_pub,omitempty"`
 	Signature      string   `json:"signature,omitempty"`
+	Ephemeral      bool     `json:"ephemeral,omitempty"`
+	Role           string   `json:"role,omitempty"`
 }
 
 func readFrame(r *bufio.Reader) (byte, []byte, error) {
@@ -306,6 +312,11 @@ func (s *RelayServer) cleanupConn(cc *ClientConn) {
 	defer s.mu.Unlock()
 	if cc.deviceID != "" && s.online[cc.deviceID] == cc {
 		delete(s.online, cc.deviceID)
+	}
+	for sid, waiter := range s.punchWaiters {
+		if waiter == cc {
+			delete(s.punchWaiters, sid)
+		}
 	}
 	if cc.relaySid != "" {
 		if p, ok := s.tunnels[cc.relaySid]; ok {
@@ -399,7 +410,13 @@ func (s *RelayServer) bindDeviceLocked(cc *ClientConn, account string, msg *Cont
 	if cc.deviceID == msg.DeviceID || cc.deviceID == "" {
 		cc.deviceID = msg.DeviceID
 		cc.account = account
-		s.online[msg.DeviceID] = cc
+		cc.ephemeral = msg.Ephemeral
+		if !msg.Ephemeral {
+			existing := s.online[msg.DeviceID]
+			if existing == nil || existing == cc || !existing.isHeartbeat || msg.Role == "hostd" {
+				s.online[msg.DeviceID] = cc
+			}
+		}
 	}
 	_ = s.saveStateLocked()
 	return d.Token
@@ -509,6 +526,9 @@ func (s *RelayServer) handleControl(cc *ClientConn, msg *ControlMsg) {
 			return
 		}
 		s.mu.Lock()
+		cc.ephemeral = false
+		cc.isHeartbeat = true
+		s.online[cc.deviceID] = cc
 		d := s.devices[cc.deviceID]
 		if d != nil {
 			if msg.DeviceName != "" {
@@ -573,14 +593,27 @@ func (s *RelayServer) handleControl(cc *ClientConn, msg *ControlMsg) {
 			s.sendResp(cc, msg.ReqID, false, "未登录或目标设备为空", nil)
 			return
 		}
-		s.mu.RLock()
+		s.mu.Lock()
 		target := s.devices[msg.TargetDeviceID]
-		peerConn := s.online[msg.TargetDeviceID]
-		s.mu.RUnlock()
+		var peerConn *ClientConn
+		if msg.Type == "punch_answer" && msg.SessionID != "" {
+			if w := s.punchWaiters[msg.SessionID]; w != nil {
+				peerConn = w
+				delete(s.punchWaiters, msg.SessionID)
+			}
+		}
+		if peerConn == nil {
+			peerConn = s.online[msg.TargetDeviceID]
+		}
 		if target == nil || target.Account != cc.account || peerConn == nil {
+			s.mu.Unlock()
 			s.sendResp(cc, msg.ReqID, false, "目标设备当前不在线", nil)
 			return
 		}
+		if msg.Type == "punch_offer" && msg.SessionID != "" {
+			s.punchWaiters[msg.SessionID] = cc
+		}
+		s.mu.Unlock()
 		fwd := map[string]any{
 			"type":           msg.Type,
 			"from_device_id": cc.deviceID,

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-PKG_DIR="${ROOT_DIR}/macos/SpinelRemotePiP"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+PKG_DIR="${ROOT_DIR}/remote-client/macos/SpinelRemotePiP"
 OUT_APP="${ROOT_DIR}/out/SpinelRemotePiP.app"
 
 swift run --package-path "${PKG_DIR}" --build-system native SpinelRemoteSelfTest

@@ -464,8 +464,16 @@ private:
         size_t off = 0;
         while (off < n) {
             int r = SSL_read(ssl_, buf + off, static_cast<int>(n - off));
-            if (r <= 0) return false;
-            off += static_cast<size_t>(r);
+            if (r > 0) {
+                off += static_cast<size_t>(r);
+                continue;
+            }
+            int ssl_err = SSL_get_error(ssl_, r);
+            if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+                struct pollfd pfd{sock_, POLLIN, 0};
+                if (::poll(&pfd, 1, 1000) > 0) continue;
+            }
+            return false;
         }
         return true;
     }
@@ -1003,7 +1011,7 @@ bool relay_login_or_register(bool is_register,
     if (!conn.connect_server(cfg, out_error)) return false;
 
     std::string extra = "\"account\":\"" + json_escape(trim_copy(account)) +
-                        "\",\"password\":\"" + json_escape(password) + "\"";
+                        "\",\"password\":\"" + json_escape(password) + "\",\"ephemeral\":true";
     std::string req = build_device_meta_json(is_register ? "register" : "login", "auth1", cfg, pub_hex, extra);
     JsonVal resp;
     if (!conn.rpc(req, resp, out_error)) return false;
@@ -1026,7 +1034,7 @@ bool relay_create_pair_code(std::string &out_code, long long &out_expires, std::
     TlsRelayConn conn;
     if (!conn.connect_server(cfg, out_error)) return false;
 
-    std::string login_extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\"";
+    std::string login_extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"ephemeral\":true";
     JsonVal r;
     if (!conn.rpc(build_device_meta_json("login", "p1", cfg, pub_hex, login_extra), r, out_error)) return false;
     if (!conn.rpc("{\"type\":\"pair_create\",\"req_id\":\"p2\"}", r, out_error)) return false;
@@ -1052,7 +1060,7 @@ bool relay_claim_pair_code(const std::string &server_addr,
     TlsRelayConn conn;
     if (!conn.connect_server(cfg, out_error)) return false;
 
-    std::string extra = "\"pair_code\":\"" + json_escape(trim_copy(pair_code)) + "\"";
+    std::string extra = "\"pair_code\":\"" + json_escape(trim_copy(pair_code)) + "\",\"ephemeral\":true";
     JsonVal r;
     if (!conn.rpc(build_device_meta_json("pair_claim", "pc1", cfg, pub_hex, extra), r, out_error)) return false;
 
@@ -1074,7 +1082,7 @@ bool relay_fetch_devices(std::vector<RelayPeerDevice> &out_devices, std::string 
     TlsRelayConn conn;
     if (!conn.connect_server(cfg, out_error)) return false;
 
-    std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\"";
+    std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"ephemeral\":true";
     JsonVal r;
     if (!conn.rpc(build_device_meta_json("login", "dl1", cfg, pub_hex, extra), r, out_error)) return false;
     out_devices = parse_devices_array(r);
@@ -1092,7 +1100,7 @@ bool relay_remove_device(const std::string &target_device_id, std::string &out_e
 
     TlsRelayConn conn;
     if (!conn.connect_server(cfg, out_error)) return false;
-    std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\"";
+    std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"ephemeral\":true";
     JsonVal r;
     if (!conn.rpc(build_device_meta_json("login", "dr1", cfg, pub_hex, extra), r, out_error)) return false;
     if (!conn.rpc("{\"type\":\"device_remove\",\"req_id\":\"dr2\",\"target_device_id\":\"" +
@@ -1442,7 +1450,7 @@ std::unique_ptr<E2eeTunnel> E2eeTunnel::dial_remote_host(const std::string &targ
     TlsRelayConn ctrl;
     if (!ctrl.connect_server(cfg, out_error)) return nullptr;
 
-    std::string login_ex = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\"";
+    std::string login_ex = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"ephemeral\":true";
     JsonVal login_resp;
     if (!ctrl.rpc(build_device_meta_json("login", "d1", cfg, my_pub_hex, login_ex), login_resp, out_error)) {
         return nullptr;
@@ -1687,13 +1695,14 @@ void run_relay_host_signaling(const std::atomic<bool> &stop_flag, const RelaySes
             continue;
         }
 
-        std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\"";
+        std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"role\":\"hostd\"";
         JsonVal resp;
         if (!ctrl.rpc(build_device_meta_json("login", "hl1", cfg, pub_hex, extra), resp, err)) {
             append_app_log("[RelayHostd] login failed: " + err);
             std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
         }
+        (void)ctrl.send_control(build_device_meta_json("heartbeat", "hb0", cfg, pub_hex));
 
         append_app_log("[RelayHostd] connected to " + cfg.server_addr + " as " + cfg.device_name);
         auto last_hb = std::chrono::steady_clock::now();
