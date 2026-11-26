@@ -371,8 +371,9 @@
   };
 
   /* ---------------- Process Monitor ---------------- */
-  const tempMemoryButton = document.getElementById("btn-clear-temp-memory");
-  let tempCleanupRequested = false;
+  const memoryCleanupButton = document.getElementById("btn-clear-memory");
+  let memoryCleanupRequested = false;
+  let memoryCleanupStartTimer = 0;
 
   function formatTempBytes(bytes) {
     if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
@@ -397,9 +398,9 @@
       tmpfsChip.classList.toggle("hidden", !hasTmpfs);
       if (hasTmpfs) tmpfsChip.textContent = `/tmp：${formatTempBytes(tmpfsBytes)}`;
     }
-    if (tempMemoryButton) {
-      tempMemoryButton.classList.toggle("hidden", !hasTmpfs);
-      tempMemoryButton.disabled = tempCleanupRequested || Boolean(lastProcPayload.tmpfs_cleanup_running);
+    if (memoryCleanupButton) {
+      memoryCleanupButton.classList.toggle("hidden", typeof lastProcPayload.memory_cleanup_running !== "boolean");
+      memoryCleanupButton.disabled = memoryCleanupRequested || Boolean(lastProcPayload.memory_cleanup_running);
     }
     if (cntChip) cntChip.textContent = `进程: ${lastProcPayload.total_procs ?? "--"}`;
 
@@ -475,23 +476,31 @@
     renderProcessList();
   };
   window.__spinelProcsFeedback = (ok, msg) => showFeedback("procs-feedback", msg || "", !ok);
-  tempMemoryButton?.addEventListener("click", () => {
-    tempCleanupRequested = true;
-    tempMemoryButton.disabled = true;
-    showFeedback("procs-feedback", "正在清理临时文件…");
-    sendCommand("monitor:temp-clean");
+  memoryCleanupButton?.addEventListener("click", () => {
+    memoryCleanupRequested = true;
+    memoryCleanupButton.disabled = true;
+    showFeedback("procs-feedback", "正在清理内存…");
+    memoryCleanupStartTimer = setTimeout(() => {
+      memoryCleanupRequested = false;
+      memoryCleanupButton.disabled = Boolean(lastProcPayload?.memory_cleanup_running);
+      if (!memoryCleanupButton.disabled) showFeedback("procs-feedback", "未收到清理结果，请重试。", true);
+    }, 6000);
+    sendCommand("monitor:memory-clean");
   });
-  window.__spinelTempCleanup = (directories, bytes, incomplete) => {
-    tempCleanupRequested = false;
-    if (lastProcPayload) lastProcPayload.tmpfs_cleanup_running = false;
-    if (tempMemoryButton) tempMemoryButton.disabled = false;
+  window.__spinelMemoryCleanup = (directories, bytes, incomplete, cacheCleared, heapReleased) => {
+    clearTimeout(memoryCleanupStartTimer);
+    memoryCleanupRequested = false;
+    if (lastProcPayload) lastProcPayload.memory_cleanup_running = false;
+    if (memoryCleanupButton) memoryCleanupButton.disabled = false;
     const messages = [];
+    if (cacheCleared) messages.push("已清理 SpinelOS 界面缓存。");
+    else messages.push("界面缓存清理失败。");
+    if (heapReleased) messages.push("已归还监视器进程的空闲内存。");
     if (directories > 0) messages.push(`已清理 ${directories} 个临时目录。`);
     if (bytes > 0 && (directories > 0 || incomplete)) messages.push(`/tmp 占用减少 ${formatTempBytes(bytes)}。`);
-    if (incomplete) messages.push("清理未全部完成，可稍后重试。");
-    else if (bytes === null) messages.push("无法读取 /tmp 的占用量。");
-    else if (directories === 0) messages.push("当前没有可清理的 SpinelOS 临时目录。");
-    showFeedback("procs-feedback", messages.join(""), incomplete || bytes === null);
+    if (incomplete) messages.push("部分临时文件未能清理。");
+    else if (directories === 0 && bytes !== null) messages.push("当前没有可清理的 SpinelOS 临时目录。");
+    showFeedback("procs-feedback", messages.join(""), incomplete || !cacheCleared);
     sendCommand("monitor:procs-get");
   };
 

@@ -132,7 +132,7 @@ void update_shortcuts_config(AppState *state, const std::string &payload);
 void reset_shortcuts_config(AppState *state);
 
 void push_process_list(AppState *state);
-void cleanup_monitor_temp_memory(AppState *state);
+void cleanup_monitor_memory(AppState *state);
 void kill_process_by_pid(AppState *state, int pid, bool force);
 
 bool is_valid_block_dev_path(const std::string &path);

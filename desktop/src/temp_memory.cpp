@@ -80,6 +80,7 @@ TempMemoryCleanup clean_temp_memory(const fs::path &root) {
             })) continue;
         g_autofd int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         if (fd < 0 || !is_marked_private_directory(fd, mount_root.st_dev) || flock(fd, LOCK_EX | LOCK_NB) != 0) continue;
+        // The owner may have removed the marker while finishing the job and releasing its lock.
         if (!is_marked_private_directory(fd, mount_root.st_dev)) continue;
         const std::string prefix = path.string() + '/';
         if (std::ranges::any_of(submounts, [&](const std::string &mount) {

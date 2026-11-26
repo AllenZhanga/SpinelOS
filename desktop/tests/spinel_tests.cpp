@@ -668,6 +668,8 @@ void test_ipc_router() {
     AppState dummy;
     std::string reply;
     EXPECT(dispatch_ipc_command(&dummy, "monitor:temp-clean", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, R"({"id":"mem","method":"monitor.memory-clean"})", mock_actions, &reply));
+    EXPECT(reply.find("\"id\":\"mem\"") != std::string::npos && reply.find("\"ok\":true") != std::string::npos);
     EXPECT(dispatch_ipc_command(&dummy, R"({"id":"r1","method":"settings.open","params":{"tab":"appearance"}})", mock_actions, &reply));
     EXPECT(last_tab == "appearance");
     EXPECT(reply.find("\"id\":\"r1\"") != std::string::npos);
