@@ -646,6 +646,7 @@
     set("desk-kernel", data.kernel);
     set("about-gpu", data.gpu);
     set("about-kernel", data.kernel);
+    set("about-spinel-version", data.spinel_version);
 
     if (typeof data.low_fx === "boolean") {
       document.body.classList.toggle("low-fx", data.low_fx);
@@ -666,11 +667,75 @@
     }
   };
 
+  window.__spinelOtaStatus = (res) => {
+    const aboutVer = document.getElementById("about-spinel-version");
+    const aboutBanner = document.getElementById("about-ota-feedback");
+    const loginBtn = document.getElementById("btn-about-ota-login");
+    const storeChip = document.getElementById("store-ota-chip");
+    const otaBtn = document.getElementById("btn-spinel-ota");
+    if (!res || !res.ok) {
+      const errCode = res && res.error ? res.error : "";
+      if (res && res.current_version && aboutVer) {
+        aboutVer.textContent = res.current_version;
+      }
+      const needLogin = errCode === "account_required";
+      const errText = needLogin
+        ? "未登录远程账号：在线更新仅对已登录设备开放，请先登录账号，或使用「离线包升级」。"
+        : (errCode === "updater_missing"
+            ? "当前尚未安装 spinel-update"
+            : "检查在线更新失败（请确认已登录账号与网络连通）");
+      if (loginBtn) loginBtn.classList.toggle("hidden", !needLogin);
+      if (aboutBanner) {
+        aboutBanner.className = needLogin ? "feedback-banner" : "feedback-banner err";
+        aboutBanner.textContent = errText;
+        aboutBanner.classList.remove("hidden");
+      }
+      if (storeChip) {
+        storeChip.textContent = needLogin ? "未登录账号 · 仅支持离线升级" : "Spinel OS 在线更新不可用";
+        storeChip.classList.remove("ok");
+        storeChip.classList.toggle("warn", needLogin);
+      }
+      if (otaBtn) {
+        otaBtn.disabled = needLogin;
+        otaBtn.title = needLogin ? "请先在设置中登录远程账号后使用在线更新" : "";
+      }
+      return;
+    }
+    if (loginBtn) loginBtn.classList.add("hidden");
+    const cur = res.current_version || "--";
+    const lat = res.latest_version || "--";
+    const sizeMb = res.size_bytes ? `${(Number(res.size_bytes) / 1048576).toFixed(2)} MB` : "";
+    const hasNew = Boolean(res.update_available);
+    if (aboutVer) aboutVer.textContent = cur;
+    if (aboutBanner) {
+      aboutBanner.className = hasNew ? "feedback-banner ok" : "feedback-banner";
+      aboutBanner.textContent = hasNew
+        ? `发现新版本 ${lat}${sizeMb ? ` (${sizeMb})` : ""}${res.notes ? ` · ${res.notes}` : ""} —— 请点击「升级系统本体」执行 --full 升级。`
+        : `当前已是最新 Spinel OS 版本 (${cur})。`;
+      aboutBanner.classList.remove("hidden");
+    }
+    if (storeChip) {
+      storeChip.textContent = hasNew
+        ? `Spinel OS ${cur} → ${lat} (${sizeMb || "可升级"})`
+        : `Spinel OS ${cur} (最新)`;
+      storeChip.classList.toggle("ok", !hasNew);
+      storeChip.classList.toggle("warn", hasNew);
+    }
+    if (otaBtn) {
+      otaBtn.disabled = false;
+      otaBtn.title = "";
+      otaBtn.textContent = hasNew ? `升级 Spinel OS 到 ${lat} (--full)` : "在线重装/同步 Spinel OS (--full)";
+    }
+  };
+
   syncAllCustomSelects();
   if (mode === "settings") hooks.switchSettingsTab?.(initialTab);
   if (mode === "monitor") hooks.switchMonitorTab?.(initialTab);
   if (mode === "doctor") sendCommand("settings:doctor-scan");
-  if (mode === "store") sendCommand("store:refresh");
+  if (mode === "store") {
+    sendCommand("store:refresh");
+    sendCommand("ota:check");
+  }
   if (mode === "installer") sendCommand("installer:scan-disks");
   if (mode === "games") sendCommand("steam:scan-caches");
   if (mode === "welcome") setWelcomeStep(1);

@@ -19,12 +19,15 @@ struct TelemetrySnapshot {
     std::string mem;
     std::string net;
     std::string kernel;
+    std::string spinel_version;
     int mem_used_mb = 0;
     int battery_pct = -1;
     bool battery_charging = false;
     bool is_live = false;
     bool low_fx = true;
 };
+
+void check_spinelos_ota_async(AppState *state);
 
 struct MediaSnapshot {
     int volume = 75;

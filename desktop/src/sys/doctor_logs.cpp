@@ -2467,3 +2467,38 @@ void relay_connect_remote_ipc(AppState *state, const std::string &device_id) {
     native_shell_sync_sandbox(state, "remote:" + device_id);
     emit_relay_feedback(state, true, "正在建立端到端加密隧道并开启远程平行沙箱画中画…");
 }
+
+void check_spinelos_ota_async(AppState *state) {
+    if (!state || state->shutting_down.load()) return;
+    std::thread([state]() {
+        std::string bin = has_executable("spinel-update") ? "spinel-update" : "";
+        if (bin.empty() && fs::exists("/usr/local/bin/spinel-update")) {
+            bin = "/usr/local/bin/spinel-update";
+        }
+        std::string payload = "{\"ok\":false,\"error\":\"updater_missing\"}";
+        if (!bin.empty()) {
+            std::string out;
+            int rc = 1;
+            if (run_argv_capture({bin, "check", "--json"}, out, rc)) {
+                std::string trimmed = trim_copy(out);
+                if (!trimmed.empty() && trimmed.front() == '{' && trimmed.back() == '}') {
+                    payload = trimmed;
+                }
+            }
+        }
+        if (state->shutting_down.load()) return;
+        struct OtaCbMsg {
+            AppState *st;
+            std::string json;
+        };
+        auto *msg = new OtaCbMsg{state, std::move(payload)};
+        g_idle_add(+[](gpointer data) -> gboolean {
+            std::unique_ptr<OtaCbMsg> m(static_cast<OtaCbMsg *>(data));
+            if (m->st->shutting_down.load()) return G_SOURCE_REMOVE;
+            std::string js = "window.__spinelOtaStatus && window.__spinelOtaStatus(" + m->json + ");";
+            if (m->st->settings_view) eval_js(m->st->settings_view, js);
+            if (m->st->store_view) eval_js(m->st->store_view, js);
+            return G_SOURCE_REMOVE;
+        }, msg);
+    }).detach();
+}

@@ -77,6 +77,16 @@ if [ "$MODE" != "ui" ]; then
   sudo install -Dm755 /tmp/spinel-dev/spinel-terminal /usr/local/bin/spinel-terminal
   sudo install -Dm755 /tmp/spinel-dev/spinel-files /usr/local/bin/spinel-files
   sudo install -Dm755 /tmp/spinel-dev/spinel-sandbox /usr/local/bin/spinel-sandbox
+  if [ -f /tmp/spinel-dev/spinel-update ]; then
+    sudo install -Dm755 /tmp/spinel-dev/spinel-update /usr/local/bin/spinel-update
+  fi
+  sudo mkdir -p /etc/spinelos
+  if [ -f /tmp/spinel-dev/ota.conf ]; then
+    sudo install -Dm644 /tmp/spinel-dev/ota.conf /etc/spinelos/ota.conf
+  fi
+  if [ -f /tmp/spinel-dev/ota-pubkey.pem ]; then
+    sudo install -Dm644 /tmp/spinel-dev/ota-pubkey.pem /etc/spinelos/ota-pubkey.pem
+  fi
   if [ -f /tmp/spinel-dev/spinel-files.svg ]; then
     sudo install -Dm644 /tmp/spinel-dev/spinel-files.svg /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
   fi
@@ -323,9 +333,14 @@ if [[ "${MODE}" != "ui" ]]; then
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" \
+    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-update" \
+    "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota.conf" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" \
     "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" \
     "${DEV_HOST}:/tmp/spinel-dev/"
+  if [[ -f "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota-pubkey.pem" ]]; then
+    rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota-pubkey.pem" "${DEV_HOST}:/tmp/spinel-dev/ota-pubkey.pem"
+  fi
 fi
 rsync -avz --delete -e "${SSH_CMD}" "${ROOT_DIR}/desktop/ui/" "${DEV_HOST}:/tmp/spinel-dev/ui/"
 rsync -avz -e "${SSH_CMD}" "${APPLY_SCRIPT}" "${DEV_HOST}:/tmp/spinel-dev/apply.sh"

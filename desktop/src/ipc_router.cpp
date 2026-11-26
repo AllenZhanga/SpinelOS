@@ -304,7 +304,7 @@ bool dispatch_ipc_command(AppState *state,
         };
         static const char *kSandboxBlockedPrefix[] = {
             "settings:", "store:", "monitor:", "doctor:", "sandbox:", "devices:",
-            "relay:", "power:", "steam:", "theme:", "system:screenshot"
+            "relay:", "power:", "steam:", "theme:", "ota:", "system:screenshot"
         };
         bool blocked = false;
         for (const char *ex : kSandboxBlockedExact) {
@@ -438,6 +438,21 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"store:sys-update", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             if (a.store_action) a.store_action(s, "sys-update", r.legacy_raw);
+        }},
+        {"store:spinel-ota", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "spinel-ota", r.legacy_raw);
+        }},
+        {"store:spinel-ota-full", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "spinel-ota-full", r.legacy_raw);
+        }},
+        {"store:spinel-ota-offline", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
+            if (a.store_action) a.store_action(s, "spinel-ota-offline", r.legacy_raw);
+        }},
+        {"ota:check", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            check_spinelos_ota_async(s);
+        }},
+        {"ota:pick-offline", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
+            if (a.pick_offline_ota) a.pick_offline_ota(s);
         }},
         {"store:mirror-test", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             if (a.store_action) a.store_action(s, "mirror-test", r.legacy_raw);

@@ -83,6 +83,13 @@ install -Dm755 "${BUILD_DIR}/spinel-webui" "${PROFILE_DIR}/airootfs/usr/local/bi
 install -Dm755 "${BUILD_DIR}/spinel-terminal" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-terminal"
 install -Dm755 "${BUILD_DIR}/spinel-files" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-files"
 install -Dm755 "${BUILD_DIR}/spinel-sandbox" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-sandbox"
+[ -f "${WORKSPACE}/archiso/airootfs/usr/local/bin/spinel-update" ] && \
+  chmod 755 "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-update"
+mkdir -p "${PROFILE_DIR}/airootfs/etc/spinelos"
+if [ -d "${WORKSPACE}/.git" ] && command -v git >/dev/null 2>&1; then
+  ISO_VER="0.1.$(git -C "${WORKSPACE}" rev-list --count HEAD 2>/dev/null || echo 0)-$(git -C "${WORKSPACE}" rev-parse --short HEAD 2>/dev/null || echo rolling)"
+  printf '%s\n' "${ISO_VER}" > "${PROFILE_DIR}/airootfs/etc/spinelos/version"
+fi
 mkdir -p "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui"
 cp -a "${WORKSPACE}/desktop/ui/." "${PROFILE_DIR}/airootfs/usr/share/spinel-shell/ui/"
 

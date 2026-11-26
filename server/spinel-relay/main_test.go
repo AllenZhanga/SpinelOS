@@ -6,7 +6,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -273,5 +277,113 @@ func TestEphemeralRpcPreservesHostOnline(t *testing.T) {
 	}
 	if ar := readResp(t, hbr); ar["ok"] != true {
 		t.Fatalf("punch_answer failed: %+v", ar)
+	}
+}
+
+func TestRelayOTAHTTPMultiplex(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := NewRelayServer(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otaDir := filepath.Join(dir, "ota")
+	if err := srv.SetOTADir(otaDir, false); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"version":"0.2.0","bundle":"spinelos-ota-0.2.0.tar.zst"}`
+	if err := os.WriteFile(filepath.Join(otaDir, "latest.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cert, _, err := ensureTLSCert(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go srv.handleConn(c)
+		}
+	}()
+
+	// Register an account + device first so we can verify account-gated OTA access.
+	c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	bw := bufio.NewWriter(c)
+	br := bufio.NewReader(c)
+	sendCtrl(t, bw, ControlMsg{
+		Type: "register", ReqID: "1", Account: "otauser", Password: "secret123", DeviceID: "d1",
+	})
+	regResp := readResp(t, br)
+	if regResp["ok"] != true {
+		t.Fatalf("binary control register failed: %+v", regResp)
+	}
+	tok, _ := regResp["token"].(string)
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	baseURL := "https://" + ln.Addr().String()
+
+	// 1. Unauthenticated /ota/latest.json must fail with 401
+	unauthResp, err := httpClient.Get(baseURL + "/ota/latest.json")
+	if err != nil {
+		t.Fatalf("GET unauth failed: %v", err)
+	}
+	_ = unauthResp.Body.Close()
+	if unauthResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated /ota/latest.json, got %d", unauthResp.StatusCode)
+	}
+
+	// 2. Device token auth succeeds
+	req, _ := http.NewRequest(http.MethodGet, baseURL+"/ota/latest.json", nil)
+	req.Header.Set("X-Spinel-Device-ID", "d1")
+	req.Header.Set("X-Spinel-Token", tok)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /ota/latest.json with device token failed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != manifest {
+		t.Fatalf("unexpected /ota/latest.json response status=%d body=%q", resp.StatusCode, string(body))
+	}
+
+	// 3. Basic Auth with account credentials also succeeds
+	basicReq, _ := http.NewRequest(http.MethodGet, baseURL+"/ota/latest.json", nil)
+	basicReq.SetBasicAuth("otauser", "secret123")
+	basicResp, err := httpClient.Do(basicReq)
+	if err != nil {
+		t.Fatalf("GET /ota/latest.json with Basic Auth failed: %v", err)
+	}
+	_ = basicResp.Body.Close()
+	if basicResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for Basic Auth /ota/latest.json, got %d", basicResp.StatusCode)
+	}
+
+	// 4. Directory listing must return 404 even when authorized
+	dirReq, _ := http.NewRequest(http.MethodGet, baseURL+"/ota/", nil)
+	dirReq.Header.Set("X-Spinel-Device-ID", "d1")
+	dirReq.Header.Set("X-Spinel-Token", tok)
+	dirResp, err := httpClient.Do(dirReq)
+	if err != nil {
+		t.Fatalf("GET /ota/ failed: %v", err)
+	}
+	_ = dirResp.Body.Close()
+	if dirResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for /ota/ dir listing, got %d", dirResp.StatusCode)
 	}
 }

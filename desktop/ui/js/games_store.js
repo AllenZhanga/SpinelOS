@@ -545,10 +545,28 @@
   document.querySelectorAll("[data-store-sys]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const action = btn.getAttribute("data-store-sys");
-      const names = { "sys-update": "一键更新系统", "mirror-test": "测速优选国内镜像", "keyring-fix": "修复签名密钥环" };
+      const names = {
+        "sys-update": "一键更新软件包",
+        "spinel-ota-full": "在线完整升级 Spinel OS (--full)",
+        "spinel-ota": "在线升级 Spinel OS",
+        "spinel-ota-offline": "离线包升级 Spinel OS (--full)",
+        "mirror-test": "测速优选国内镜像",
+        "keyring-fix": "修复签名密钥环"
+      };
       requestStoreOp(action, { id: action, name: names[action] || action, backend: "pacman", pkg: action });
     });
   });
+
+  window.__spinelStartOfflineOta = (bundlePath) => {
+    const p = String(bundlePath || "").trim();
+    if (!p) return;
+    requestStoreOp("spinel-ota-offline", {
+      id: "spinel-ota-offline",
+      name: `离线更新包 (${p.split("/").pop() || p})`,
+      backend: "pacman",
+      pkg: p
+    });
+  };
 
   document.getElementById("store-pass-box")?.addEventListener("click", (ev) => {
     if (ev.target.id === "store-pass-box") {
@@ -630,6 +648,10 @@
       setStoreProgress(false);
     } else {
       setStoreProgress(true, 100, `操作完成: ${targetId}`);
+    }
+    if (ok && (action === "spinel-ota-full" || action === "spinel-ota" || action === "spinel-ota-offline")) {
+      document.getElementById("btn-store-reboot")?.classList.remove("hidden");
+      sendCommand("ota:check");
     }
     if (logTitle) {
       if (action === "cancel") {

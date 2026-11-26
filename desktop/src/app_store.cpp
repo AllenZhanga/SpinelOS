@@ -680,7 +680,8 @@ void start_store_action(AppState *state, const std::string &action, const std::s
         app_id = pkg;
     }
 
-    bool is_sys_maint = (action == "sys-update" || action == "mirror-test" || action == "keyring-fix");
+    bool is_sys_maint = (action == "sys-update" || action == "spinel-ota" || action == "spinel-ota-full" ||
+                         action == "spinel-ota-offline" || action == "mirror-test" || action == "keyring-fix");
     bool is_svc_op = (action == "svc-start" || action == "svc-stop");
     bool is_webapp_op = (action == "webapp-pin" || action == "webapp-unpin");
 
@@ -823,6 +824,43 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 if (rc == 0 && !state->store_cancel_requested.load() && has_flatpak_cli()) {
                     emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");
                     run_streaming_command(state, {"flatpak", "update", "-y", "--noninteractive"}, "", proxy_envs);
+                }
+            } else if (action == "spinel-ota" || action == "spinel-ota-full" || action == "spinel-ota-offline") {
+                std::string updater = has_executable("spinel-update") ? "spinel-update" : "";
+                if (updater.empty() && fs::exists("/usr/local/bin/spinel-update")) {
+                    updater = "/usr/local/bin/spinel-update";
+                }
+                if (updater.empty()) {
+                    emit_store_line(state, "[ERROR] 未检测到 spinel-update 在线更新器，请先使用 dev-deploy.sh 或 bootstrap.sh 初始化。");
+                    rc = 1;
+                } else if (action == "spinel-ota-offline") {
+                    std::error_code ec;
+                    bool valid_path = !pkg.empty() && pkg.find('\n') == std::string::npos &&
+                                      pkg.find('\r') == std::string::npos &&
+                                      fs::is_regular_file(pkg, ec);
+                    if (!valid_path) {
+                        emit_store_line(state, "[ERROR] 离线更新包路径无效或文件不存在: " + pkg);
+                        rc = 1;
+                    } else {
+                        std::vector<std::string> cmd = base_sudo;
+                        append_proxy_env_prefix(cmd);
+                        cmd.insert(cmd.end(), {updater, "offline", pkg, "--full", "--yes", "--no-kill-webui"});
+                        emit_store_line(state, "==> 正在使用离线包执行 Spinel OS 完整升级 (--full): " + pkg);
+                        rc = run_streaming_command(state, cmd, pwd_in);
+                    }
+                } else {
+                    std::vector<std::string> cmd = base_sudo;
+                    append_proxy_env_prefix(cmd);
+                    cmd.insert(cmd.end(), {updater, "upgrade",
+                                           action == "spinel-ota-full" ? "--full" : "--app",
+                                           "--yes", "--no-kill-webui"});
+                    emit_store_line(state, action == "spinel-ota-full"
+                                               ? "==> 正在执行 Spinel OS 完整在线升级 (--full)..."
+                                               : "==> 正在执行 Spinel OS 组件与桌面在线升级...");
+                    rc = run_streaming_command(state, cmd, pwd_in);
+                }
+                if (rc == 0 && !state->store_cancel_requested.load()) {
+                    emit_store_line(state, "==> Spinel OS 升级完成！桌面外壳已热更新；若包含内核/引导改动可点击上方重启系统。");
                 }
             } else if (action == "mirror-test") {
                 if (!has_executable("reflector")) {

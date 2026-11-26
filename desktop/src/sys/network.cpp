@@ -570,6 +570,7 @@ TelemetrySnapshot collect_telemetry() {
     snap.mem = sys_internal::detect_mem_usage(&snap.mem_used_mb);
     snap.net = detect_network_status();
     snap.kernel = cached_kernel;
+    snap.spinel_version = trim_copy(read_first_line("/etc/spinelos/version", "0.0.0-dev"));
     snap.is_live = cached_live;
     snap.low_fx = cached_low_fx;
 
@@ -653,6 +654,7 @@ void push_telemetry_to_view(WebKitWebView *view) {
     std::string mem = json_escape(snap.mem);
     std::string net = json_escape(snap.net);
     std::string kernel = json_escape(snap.kernel);
+    std::string spinel_ver = json_escape(snap.spinel_version);
 
     std::ostringstream js;
     js << "window.__spinelUpdateTelemetry && window.__spinelUpdateTelemetry({"
@@ -660,6 +662,7 @@ void push_telemetry_to_view(WebKitWebView *view) {
        << "\"mem\":\"" << mem << "\","
        << "\"net\":\"" << net << "\","
        << "\"kernel\":\"" << kernel << "\","
+       << "\"spinel_version\":\"" << spinel_ver << "\","
        << "\"is_live\":" << (snap.is_live ? "true" : "false") << ","
        << "\"low_fx\":" << (snap.low_fx ? "true" : "false")
        << "});";

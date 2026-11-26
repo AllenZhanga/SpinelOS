@@ -604,6 +604,44 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
             }, s);
         g_object_unref(dlg);
     };
+    actions.pick_offline_ota = +[](AppState *s) {
+        GtkFileDialog *dlg = gtk_file_dialog_new();
+        gtk_file_dialog_set_title(dlg, "选择 Spinel OS 离线更新包 (.tar.zst)");
+        GtkFileFilter *flt = gtk_file_filter_new();
+        gtk_file_filter_set_name(flt, "Spinel OS 离线更新包 (*.tar.zst, *.tar)");
+        gtk_file_filter_add_pattern(flt, "*.tar.zst");
+        gtk_file_filter_add_pattern(flt, "*.tar");
+        GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+        g_list_store_append(filters, flt);
+        gtk_file_dialog_set_filters(dlg, G_LIST_MODEL(filters));
+        gtk_file_dialog_set_default_filter(dlg, flt);
+        g_object_unref(flt);
+        g_object_unref(filters);
+
+        fs::path dl_dir = fs::path(home_dir()) / "Downloads";
+        std::error_code ec;
+        GFile *init_folder = g_file_new_for_path(
+            fs::is_directory(dl_dir, ec) ? dl_dir.c_str() : home_dir().c_str());
+        gtk_file_dialog_set_initial_folder(dlg, init_folder);
+        g_object_unref(init_folder);
+
+        gtk_file_dialog_open(dlg, s->store_win, nullptr,
+            +[](GObject *src, GAsyncResult *res, gpointer data) {
+                auto *st = static_cast<AppState *>(data);
+                GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, nullptr);
+                if (file) {
+                    char *path = g_file_get_path(file);
+                    if (path && *path && st && !st->shutting_down.load() && st->store_view) {
+                        std::string js = "window.__spinelStartOfflineOta && window.__spinelStartOfflineOta(\"" +
+                                         json_escape(path) + "\");";
+                        eval_js(st->store_view, js);
+                    }
+                    g_free(path);
+                    g_object_unref(file);
+                }
+            }, s);
+        g_object_unref(dlg);
+    };
 #else
     actions.notify_webui_sync = +[](const char *action) {
         notify_dbus_action("org.spinelos.webui", "/org/spinelos/webui", action);

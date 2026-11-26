@@ -1,0 +1,657 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OTA_CONF="/etc/spinelos/ota.conf"
+OTA_BASE_URL="${SPINEL_OTA_URL:-}"
+OTA_PUBKEY="${SPINEL_OTA_PUBKEY:-/etc/spinelos/ota-pubkey.pem}"
+OTA_CURL_INSECURE="true"
+VERSION_FILE="/etc/spinelos/version"
+
+if [[ -f "${OTA_CONF}" ]]; then
+  # shellcheck disable=SC1090
+  source "${OTA_CONF}"
+  OTA_BASE_URL="${SPINEL_OTA_URL:-${OTA_BASE_URL:-}}"
+  OTA_PUBKEY="${SPINEL_OTA_PUBKEY:-${OTA_PUBKEY}}"
+fi
+
+SUBCMD="upgrade"
+MODE="app" # app | ui | full
+YES=0
+FORCE=0
+JSON_OUT=0
+NO_KILL_WEBUI=0
+OFFLINE_BUNDLE=""
+EXPECTED_SHA=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    check) SUBCMD="check"; shift ;;
+    upgrade) SUBCMD="upgrade"; shift ;;
+    offline)
+      SUBCMD="offline"
+      if [[ $# -ge 2 && "$2" != -* ]]; then
+        OFFLINE_BUNDLE="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --full) MODE="full"; shift ;;
+    --ui-only) MODE="ui"; shift ;;
+    --app) MODE="app"; shift ;;
+    -y|--yes) YES=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --json) JSON_OUT=1; shift ;;
+    --no-kill-webui) NO_KILL_WEBUI=1; shift ;;
+    --url) OTA_BASE_URL="${2%/}"; shift 2 ;;
+    --sha256) EXPECTED_SHA="${2:-}"; shift 2 ;;
+    -h|--help)
+      cat <<'EOF'
+Usage:
+  spinel-update check [--json] [--url <base_url>]
+  sudo spinel-update [upgrade] [--app | --ui-only | --full] [--yes] [--force] [--no-kill-webui] [--url <base_url>]
+  sudo spinel-update offline <bundle.tar.zst> [--app | --ui-only | --full] [--sha256 <hex>] [--yes] [--no-kill-webui]
+
+Notes:
+  - Online updates require a logged-in remote account (~/.config/spinelos/relay.conf)
+    or an explicit private mirror via --url / SPINEL_OTA_URL / /etc/spinelos/ota.conf.
+  - Unauthenticated or air-gapped machines can upgrade with a local bundle via `offline`.
+EOF
+      exit 0
+      ;;
+    *)
+      if [[ "${SUBCMD}" == "offline" && -z "${OFFLINE_BUNDLE}" && "$1" != -* ]]; then
+        OFFLINE_BUNDLE="$1"
+        shift
+      else
+        echo "[ERROR] Unknown argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+resolve_desktop_user() {
+  local cand="${SUDO_USER:-}"
+  if [[ -z "${cand}" && -n "${PKEXEC_UID:-}" ]]; then
+    cand="$(id -un "${PKEXEC_UID}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${cand}" && "${cand}" != "root" ]]; then
+    printf '%s' "${cand}"
+    return 0
+  fi
+  if [[ "${EUID}" -ne 0 ]]; then
+    id -un 2>/dev/null || true
+    return 0
+  fi
+  for sock in /run/user/*/wayland-*; do
+    [[ -S "${sock}" ]] || continue
+    local uid_cand
+    uid_cand="$(basename "$(dirname "${sock}")")"
+    [[ "${uid_cand}" =~ ^[0-9]+$ ]] || continue
+    cand="$(id -un "${uid_cand}" 2>/dev/null || true)"
+    if [[ -n "${cand}" && "${cand}" != "root" ]]; then
+      printf '%s' "${cand}"
+      return 0
+    fi
+  done
+}
+
+TARGET_USER="$(resolve_desktop_user)"
+TARGET_HOME="${HOME:-}"
+if [[ -n "${TARGET_USER}" && "${TARGET_USER}" != "root" ]]; then
+  TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6 || echo "${HOME:-}")"
+fi
+
+RELAY_CONF="${TARGET_HOME}/.config/spinelos/relay.conf"
+RELAY_SERVER=""
+RELAY_ACCOUNT=""
+RELAY_DEVICE_ID=""
+RELAY_TOKEN=""
+if [[ -n "${TARGET_HOME}" && -f "${RELAY_CONF}" ]]; then
+  while IFS='=' read -r k v; do
+    k="$(printf '%s' "${k}" | tr -d ' \t\r\n')"
+    v="$(printf '%s' "${v}" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    case "${k}" in
+      server_addr) RELAY_SERVER="${v}" ;;
+      account) RELAY_ACCOUNT="${v}" ;;
+      device_id) RELAY_DEVICE_ID="${v}" ;;
+      token) RELAY_TOKEN="${v}" ;;
+    esac
+  done < "${RELAY_CONF}"
+fi
+
+IS_LOGGED_IN=0
+if [[ -n "${RELAY_SERVER}" && -n "${RELAY_DEVICE_ID}" && -n "${RELAY_TOKEN}" ]]; then
+  IS_LOGGED_IN=1
+fi
+
+if [[ -z "${OTA_BASE_URL}" && "${IS_LOGGED_IN}" -eq 1 ]]; then
+  OTA_BASE_URL="https://${RELAY_SERVER}/ota"
+fi
+OTA_BASE_URL="${OTA_BASE_URL%/}"
+
+curl_fetch() {
+  local url="$1"
+  local out="$2"
+  local show_prog="${3:-0}"
+  local args=(-fSL --connect-timeout 12 --max-time 300)
+  if [[ "${OTA_CURL_INSECURE}" == "true" ]]; then
+    args+=(-k)
+  fi
+  if [[ "${IS_LOGGED_IN}" -eq 1 ]]; then
+    args+=(-H "X-Spinel-Device-ID: ${RELAY_DEVICE_ID}" -H "X-Spinel-Token: ${RELAY_TOKEN}")
+  fi
+  if [[ "${show_prog}" == "1" ]]; then
+    args+=(--progress-bar)
+  else
+    args+=(-s)
+  fi
+  curl "${args[@]}" -o "${out}" "${url}"
+}
+
+json_field() {
+  local file="$1"
+  local key="$2"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$key" <<'PY'
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    d = json.load(f)
+val = d.get(sys.argv[2], "")
+if isinstance(val, bool):
+    print("true" if val else "false")
+elif val is None:
+    print("")
+else:
+    print(str(val))
+PY
+  else
+    sed -n "s/^[[:space:]]*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p; s/^[[:space:]]*\"${key}\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$file" | head -n1
+  fi
+}
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/ }"
+  printf '%s' "$s"
+}
+
+get_local_version() {
+  if [[ -f "${VERSION_FILE}" ]]; then
+    tr -d ' \t\r\n' < "${VERSION_FILE}"
+  else
+    echo "0.0.0-dev"
+  fi
+}
+
+apply_stage_and_restart() {
+  local stage_dir="$1"
+  local ver="$2"
+  local manifest_path="${3:-}"
+
+  if [[ "${MODE}" != "ui" ]]; then
+    if ! pacman -Qq vte4 >/dev/null 2>&1; then
+      echo "==> Installing vte4 runtime for Spinel Terminal..."
+      pacman -Sy --noconfirm --needed vte4
+    fi
+    for bin in spinel-wine spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-update; do
+      if [[ -f "${stage_dir}/bin/${bin}" ]]; then
+        install -Dm755 "${stage_dir}/bin/${bin}" "/usr/local/bin/${bin}"
+      fi
+    done
+    if [[ -f "${stage_dir}/assets/spinel-files.svg" ]]; then
+      install -Dm644 "${stage_dir}/assets/spinel-files.svg" /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
+    fi
+    if [[ -f "${stage_dir}/assets/org.spinelos.WindowsApps.svg" ]]; then
+      install -Dm644 "${stage_dir}/assets/org.spinelos.WindowsApps.svg" /usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg
+    fi
+    gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+    for dfile in org.spinelos.files.desktop org.spinelos.WindowsApps.desktop org.spinelos.WineOpen.desktop; do
+      if [[ -f "${stage_dir}/assets/${dfile}" ]]; then
+        install -Dm644 "${stage_dir}/assets/${dfile}" "/usr/share/applications/${dfile}"
+      fi
+    done
+    if [[ -f "${stage_dir}/assets/org.spinelos.FileManager1.service" ]]; then
+      install -Dm644 "${stage_dir}/assets/org.spinelos.FileManager1.service" /usr/share/dbus-1/services/org.spinelos.FileManager1.service
+    fi
+    if [[ -f "${stage_dir}/assets/mimeapps.list" ]]; then
+      install -Dm644 "${stage_dir}/assets/mimeapps.list" /etc/xdg/mimeapps.list
+    fi
+    mkdir -p /etc/spinelos
+    if [[ -f "${stage_dir}/etc/spinelos/ota-pubkey.pem" ]]; then
+      install -Dm644 "${stage_dir}/etc/spinelos/ota-pubkey.pem" /etc/spinelos/ota-pubkey.pem
+    fi
+    if [[ ! -f /etc/spinelos/ota.conf && -f "${stage_dir}/etc/spinelos/ota.conf" ]]; then
+      install -Dm644 "${stage_dir}/etc/spinelos/ota.conf" /etc/spinelos/ota.conf
+    fi
+    for old_fm in thunar-archive-plugin thunar; do
+      if pacman -Qq "$old_fm" >/dev/null 2>&1; then
+        echo "==> Removing legacy file manager $old_fm (replaced by Spinel Files)..."
+        pacman -Rns --noconfirm "$old_fm" 2>/dev/null || pacman -Rdd --noconfirm "$old_fm" 2>/dev/null || true
+      fi
+    done
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+  fi
+
+  if [[ -d "${stage_dir}/ui" ]]; then
+    mkdir -p /usr/share/spinel-shell/ui
+    rm -rf /usr/share/spinel-shell/ui/*
+    cp -a "${stage_dir}/ui/." /usr/share/spinel-shell/ui/
+  fi
+
+  if [[ "${MODE}" == "full" ]]; then
+    echo "==> Updating system packages, SpinelDark theme, Plymouth splash, labwc & system scripts (--full)..."
+    pacman -Syu --noconfirm --needed \
+      flatpak bubblewrap ffmpeg vte4 zstd curl openssl plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
+      zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
+      spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
+      wlr-randr wl-clipboard wl-clip-persist os-prober \
+      polkit-gnome xdg-desktop-portal-gtk noto-fonts-cjk noto-fonts-emoji \
+      fcitx5 fcitx5-rime fcitx5-gtk
+    fc-cache -f >/dev/null 2>&1 || true
+    for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp fcitx5-chinese-addons fcitx5-configtool fcitx5-qt; do
+      if pacman -Qq "$legacy_ime" >/dev/null 2>&1; then
+        echo "==> Removing legacy/heavy IME package $legacy_ime..."
+        pacman -Rns --noconfirm "$legacy_ime" 2>/dev/null || pacman -Rdd --noconfirm "$legacy_ime" 2>/dev/null || true
+      fi
+    done
+    if [[ -e /dev/virtio-ports/com.redhat.spice.0 ]]; then
+      systemctl enable --now spice-vdagentd.service 2>/dev/null || true
+    fi
+    systemctl enable --now power-profiles-daemon.service 2>/dev/null || true
+    systemctl enable --now cups.service 2>/dev/null || true
+
+    mkdir -p /etc/xdg/labwc /etc/xdg/xdg-desktop-portal /etc/udev/rules.d /etc/polkit-1/rules.d /etc/plymouth /usr/share/themes/SpinelDark /usr/share/themes/SpinelLight /usr/share/fcitx5/themes /usr/share/plymouth/themes/spinelos /usr/share/grub/themes/spinelos /boot/grub/themes/spinelos /usr/share/pixmaps /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/scalable/apps
+    [[ -d "${stage_dir}/full/labwc" ]] && cp -a "${stage_dir}/full/labwc/." /etc/xdg/labwc/
+    [[ -d "${stage_dir}/full/portals" ]] && cp -a "${stage_dir}/full/portals/." /etc/xdg/xdg-desktop-portal/
+    [[ -d "${stage_dir}/full/SpinelDark" ]] && cp -a "${stage_dir}/full/SpinelDark/." /usr/share/themes/SpinelDark/
+    [[ -d "${stage_dir}/full/SpinelLight" ]] && cp -a "${stage_dir}/full/SpinelLight/." /usr/share/themes/SpinelLight/
+    [[ -d "${stage_dir}/full/fcitx5-themes" ]] && cp -a "${stage_dir}/full/fcitx5-themes/." /usr/share/fcitx5/themes/
+    [[ -d "${stage_dir}/full/plymouth-theme" ]] && cp -a "${stage_dir}/full/plymouth-theme/." /usr/share/plymouth/themes/spinelos/
+    if [[ -d "${stage_dir}/full/grub-theme" ]]; then
+      cp -a "${stage_dir}/full/grub-theme/." /usr/share/grub/themes/spinelos/
+      cp -a "${stage_dir}/full/grub-theme/." /boot/grub/themes/spinelos/
+    fi
+    [[ -f "${stage_dir}/full/plymouthd.conf" ]] && install -Dm644 "${stage_dir}/full/plymouthd.conf" /etc/plymouth/plymouthd.conf
+    [[ -f "${stage_dir}/full/faillock.conf" ]] && install -Dm644 "${stage_dir}/full/faillock.conf" /etc/security/faillock.conf
+    if [[ -f "${stage_dir}/full/spinelos.png" ]]; then
+      install -Dm644 "${stage_dir}/full/spinelos.png" /usr/share/pixmaps/spinelos.png
+      install -Dm644 "${stage_dir}/full/spinelos.png" /usr/share/icons/hicolor/256x256/apps/spinelos.png
+    fi
+    [[ -f "${stage_dir}/full/spinelos.svg" ]] && install -Dm644 "${stage_dir}/full/spinelos.svg" /usr/share/icons/hicolor/scalable/apps/spinelos.svg
+    gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
+    if [[ -f /etc/mkinitcpio.conf ]] && ! grep -q '\bplymouth\b' /etc/mkinitcpio.conf; then
+      echo "==> Enabling Plymouth boot splash in /etc/mkinitcpio.conf..."
+      sed -i 's/\budev\b/udev plymouth/' /etc/mkinitcpio.conf
+      mkinitcpio -P
+    elif [[ -f /etc/mkinitcpio.conf ]]; then
+      mkinitcpio -P
+    fi
+    if [[ -f /etc/default/grub ]]; then
+      echo "==> Updating GRUB boot config & Plymouth args..."
+      set_grub_val() {
+        sed -i "/^#*\s*${1}=/d" /etc/default/grub
+        echo "${1}=${2}" >> /etc/default/grub
+      }
+      set_grub_val GRUB_DISTRIBUTOR '"SpinelOS"'
+      set_grub_val GRUB_TIMEOUT_STYLE 'hidden'
+      set_grub_val GRUB_TIMEOUT '1'
+      set_grub_val GRUB_GFXMODE 'auto'
+      set_grub_val GRUB_GFXPAYLOAD_LINUX 'keep'
+      set_grub_val GRUB_THEME '"/boot/grub/themes/spinelos/theme.txt"'
+      if ! grep -q '\bsplash\b' /etc/default/grub; then
+        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 splash vt.global_cursor_default=0"/' /etc/default/grub
+      elif ! grep -q 'vt\.global_cursor_default=0' /etc/default/grub; then
+        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 vt.global_cursor_default=0"/' /etc/default/grub
+      fi
+      grub-mkconfig -o /boot/grub/grub.cfg
+    fi
+    [[ -f "${stage_dir}/full/zram-generator.conf" ]] && install -Dm644 "${stage_dir}/full/zram-generator.conf" /etc/systemd/zram-generator.conf
+    [[ -f "${stage_dir}/full/90-spinel-backlight.rules" ]] && install -Dm644 "${stage_dir}/full/90-spinel-backlight.rules" /etc/udev/rules.d/90-spinel-backlight.rules
+    [[ -f "${stage_dir}/full/49-spinelos-udisks.rules" ]] && install -Dm644 "${stage_dir}/full/49-spinelos-udisks.rules" /etc/polkit-1/rules.d/49-spinelos-udisks.rules
+    systemctl reload-or-restart polkit.service 2>/dev/null || true
+    [[ -f "${stage_dir}/full/75-spinel-fonts.conf" ]] && install -Dm644 "${stage_dir}/full/75-spinel-fonts.conf" /etc/fonts/conf.d/75-spinel-fonts.conf
+    if [[ -f /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf ]]; then
+      ln -sf /usr/share/fontconfig/conf.avail/70-no-bitmaps-except-emoji.conf /etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf
+    fi
+    fc-cache -f >/dev/null 2>&1 || true
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=backlight 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl start systemd-zram-setup@zram0.service 2>/dev/null || true
+    for sbin in start-spinel-desktop spinel-install spinel-screenshot spinel-lock; do
+      if [[ -f "${stage_dir}/full/${sbin}" ]]; then
+        install -Dm755 "${stage_dir}/full/${sbin}" "/usr/local/bin/${sbin}"
+      fi
+    done
+  fi
+
+  mkdir -p /etc/spinelos
+  printf '%s\n' "${ver}" > "${VERSION_FILE}"
+  chmod 644 "${VERSION_FILE}"
+  if [[ -n "${manifest_path}" && -f "${manifest_path}" ]]; then
+    cp -f "${manifest_path}" /etc/spinelos/release.json
+    chmod 644 /etc/spinelos/release.json
+  fi
+
+  echo "==> 正在热重启桌面会话组件..."
+  if [[ -n "${TARGET_USER}" && "${TARGET_USER}" != "root" && -n "${TARGET_HOME}" ]]; then
+    local target_uid
+    target_uid="$(id -u "${TARGET_USER}")"
+    runuser -u "${TARGET_USER}" -- env -i \
+      HOME="${TARGET_HOME}" \
+      USER="${TARGET_USER}" \
+      LOGNAME="${TARGET_USER}" \
+      PATH="/usr/local/bin:/usr/bin:/bin" \
+      XDG_RUNTIME_DIR="/run/user/${target_uid}" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${target_uid}/bus" \
+      XDG_SESSION_TYPE="wayland" \
+      GDK_BACKEND="wayland" \
+      XDG_CURRENT_DESKTOP="SpinelOS:GNOME" \
+      GTK_THEME="Adwaita" \
+      XMODIFIERS="@im=fcitx" \
+      QT_IM_MODULE="fcitx" \
+      SDL_IM_MODULE="fcitx" \
+      SPINEL_OTA_MODE="${MODE}" \
+      SPINEL_NO_KILL_WEBUI="${NO_KILL_WEBUI}" \
+      bash -s <<'RESTART_EOF'
+set -u
+if command -v xdg-mime >/dev/null 2>&1; then
+  xdg-mime default org.spinelos.files.desktop inode/directory >/dev/null 2>&1 || true
+fi
+WAYLAND_SOCK="$(ls "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n1 || true)"
+if [[ -z "${WAYLAND_SOCK}" ]]; then
+  echo "[WARN] 未检测到活跃的 Wayland 桌面会话，文件已更新，下次登录桌面即生效。"
+  exit 0
+fi
+export WAYLAND_DISPLAY="$(basename "${WAYLAND_SOCK}")"
+SYS_DISP="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^DISPLAY=//p' | head -n1 || true)"
+if [[ -n "${SYS_DISP}" ]]; then
+  export DISPLAY="${SYS_DISP}"
+elif [[ -S /tmp/.X11-unix/X0 ]]; then
+  export DISPLAY=":0"
+fi
+if [[ -d /sys/module/nvidia ]] || lspci -n 2>/dev/null | grep -qi "10de:"; then
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
+elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt -q; then
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
+fi
+LABWC_PID="$(pgrep -x labwc | head -n1 || true)"
+if [[ -n "${LABWC_PID}" && -r "/proc/${LABWC_PID}/environ" ]]; then
+  if tr '\0' '\n' < "/proc/${LABWC_PID}/environ" | grep -qx "WLR_RENDERER=pixman"; then
+    export WLR_RENDERER=pixman
+    export GSK_RENDERER=cairo
+    export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    export LIBGL_ALWAYS_SOFTWARE=1
+  fi
+fi
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE GTK_THEME XMODIFIERS QT_IM_MODULE SDL_IM_MODULE WLR_RENDERER GSK_RENDERER WEBKIT_DISABLE_DMABUF_RENDERER WEBKIT_DISABLE_COMPOSITING_MODE LIBGL_ALWAYS_SOFTWARE 2>/dev/null || true
+
+launch_bg() {
+  if command -v systemd-run >/dev/null 2>&1 && systemctl --user is-active default.target >/dev/null 2>&1; then
+    systemd-run --user --collect --quiet "$@" </dev/null >/dev/null 2>&1 || setsid -f "$@" </dev/null >/dev/null 2>&1 || true
+  else
+    setsid -f "$@" </dev/null >/dev/null 2>&1 || true
+  fi
+}
+
+if [[ "${SPINEL_OTA_MODE}" == "full" ]]; then
+  pkill -HUP -x labwc 2>/dev/null || true
+  if [[ -e /dev/virtio-ports/com.redhat.spice.0 ]] && command -v spice-vdagent >/dev/null 2>&1; then
+    pkill -x spice-vdagent 2>/dev/null || true
+    launch_bg spice-vdagent
+  fi
+  if [[ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]]; then
+    pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true
+    sleep 0.1
+    launch_bg sh -c 'exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 </dev/null >/tmp/spinel-polkit.log 2>&1'
+  fi
+  if command -v swayidle >/dev/null 2>&1; then
+    pkill -x swayidle 2>/dev/null || true
+    if grep -qx "idle_lock=true" "${HOME}/.config/spinelos/power.conf" 2>/dev/null; then
+      launch_bg sh -c "exec swayidle -w timeout 900 'spinel-lock' before-sleep 'spinel-lock' </dev/null >/tmp/spinel-idle.log 2>&1"
+    else
+      launch_bg sh -c "exec swayidle -w before-sleep 'spinel-lock' </dev/null >/tmp/spinel-idle.log 2>&1"
+    fi
+  fi
+  dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP GTK_THEME 2>/dev/null || true
+  systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr >/dev/null 2>&1 || true
+fi
+
+if command -v fcitx5 >/dev/null 2>&1; then
+  pkill -x fcitx5 2>/dev/null || true
+  sleep 0.15
+fi
+if [[ "${SPINEL_NO_KILL_WEBUI}" != "1" ]]; then
+  pkill -x spinel-webui 2>/dev/null || true
+fi
+pkill -u "${USER}" -f '^/usr/local/bin/spinel-shell$' 2>/dev/null || true
+for _spid in $(pgrep -u "${USER}" -x spinel-shell 2>/dev/null || true); do
+  if ! tr '\0' ' ' < "/proc/${_spid}/cmdline" 2>/dev/null | grep -q -- '--sandbox'; then
+    kill "${_spid}" 2>/dev/null || true
+  fi
+done
+pkill -u "${USER}" -f 'spinel-sandbox hostd' 2>/dev/null || true
+sleep 0.25
+launch_bg sh -c 'exec /usr/local/bin/spinel-shell </dev/null >/tmp/spinel-shell.log 2>&1'
+if grep -qx 'allow_remote=true' "${HOME}/.config/spinelos/relay.conf" 2>/dev/null; then
+  launch_bg sh -c 'exec /usr/local/bin/spinel-sandbox hostd </dev/null >/tmp/spinel-sandbox-hostd.log 2>&1'
+fi
+if command -v mako >/dev/null 2>&1; then
+  pkill -u "${USER}" -x mako 2>/dev/null || true
+  launch_bg sh -c 'exec mako </dev/null >/tmp/spinel-mako.log 2>&1'
+fi
+if command -v wl-clip-persist >/dev/null 2>&1; then
+  pkill -u "${USER}" -x wl-clip-persist 2>/dev/null || true
+  launch_bg sh -c 'exec wl-clip-persist --clipboard regular </dev/null >/tmp/spinel-clip.log 2>&1'
+fi
+if command -v fcitx5 >/dev/null 2>&1; then
+  sleep 0.35
+  launch_bg sh -c 'exec fcitx5 </dev/null >/tmp/spinel-fcitx5.log 2>&1'
+fi
+RESTART_EOF
+  fi
+
+  echo "==> 升级完成！当前 SpinelOS 版本: ${ver}"
+  if [[ "${MODE}" == "full" ]]; then
+    echo "    提示：若本次包含 Plymouth/GRUB/内核更新，建议方便时重启一次系统使底层配置完全生效。"
+  fi
+}
+
+WORK_DIR="$(mktemp -d /tmp/spinel-ota-XXXXXX)"
+cleanup() {
+  rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+if [[ "${SUBCMD}" == "offline" ]]; then
+  if [[ -z "${OFFLINE_BUNDLE}" || ! -f "${OFFLINE_BUNDLE}" ]]; then
+    echo "[ERROR] 请提供有效的离线更新包路径: sudo spinel-update offline /path/to/spinelos-ota-*.tar.zst --full" >&2
+    exit 1
+  fi
+  if [[ "${EUID}" -ne 0 ]]; then
+    REEXEC_ARGS=(offline "${OFFLINE_BUNDLE}" "--${MODE/app/app}")
+    [[ "${MODE}" == "full" ]] && REEXEC_ARGS=(offline "${OFFLINE_BUNDLE}" "--full")
+    [[ "${MODE}" == "ui" ]] && REEXEC_ARGS=(offline "${OFFLINE_BUNDLE}" "--ui-only")
+    [[ "${YES}" -eq 1 ]] && REEXEC_ARGS+=("--yes")
+    [[ "${NO_KILL_WEBUI}" -eq 1 ]] && REEXEC_ARGS+=("--no-kill-webui")
+    [[ -n "${EXPECTED_SHA}" ]] && REEXEC_ARGS+=("--sha256" "${EXPECTED_SHA}")
+    echo "==> 需要管理员权限应用离线更新包，正在调用 sudo..."
+    exec sudo "$0" "${REEXEC_ARGS[@]}"
+  fi
+  if [[ -n "${EXPECTED_SHA}" ]]; then
+    GOT_SHA="$(sha256sum "${OFFLINE_BUNDLE}" | awk '{print $1}')"
+    if [[ "${GOT_SHA}" != "${EXPECTED_SHA}" ]]; then
+      echo "[ERROR] 离线包 SHA256 校验失败! 期望=${EXPECTED_SHA} 实际=${GOT_SHA}" >&2
+      exit 1
+    fi
+  fi
+  STAGE_DIR="${WORK_DIR}/stage"
+  mkdir -p "${STAGE_DIR}"
+  echo "==> 正在解压离线更新包 ${OFFLINE_BUNDLE} (模式: ${MODE})..."
+  if [[ "${OFFLINE_BUNDLE}" == *.tar.zst ]]; then
+    tar --zstd -xf "${OFFLINE_BUNDLE}" -C "${STAGE_DIR}"
+  else
+    tar -xf "${OFFLINE_BUNDLE}" -C "${STAGE_DIR}"
+  fi
+  OFFLINE_VER="$(basename "${OFFLINE_BUNDLE}" | sed 's/^spinelos-ota-//; s/\.tar\.zst$//; s/\.tar$//')"
+  if [[ -f "${STAGE_DIR}/etc/spinelos/bundle-version" ]]; then
+    OFFLINE_VER="$(tr -d ' \t\r\n' < "${STAGE_DIR}/etc/spinelos/bundle-version")"
+  fi
+  apply_stage_and_restart "${STAGE_DIR}" "${OFFLINE_VER}" ""
+  exit 0
+fi
+
+# Online commands require either logged-in relay account OR explicit OTA_BASE_URL
+CUR_VER="$(get_local_version)"
+if [[ -z "${OTA_BASE_URL}" ]]; then
+  if [[ "${JSON_OUT}" -eq 1 ]]; then
+    printf '{"ok":false,"error":"account_required","current_version":"%s"}\n' "$(json_escape "${CUR_VER}")"
+  else
+    echo "[INFO] 尚未登录远程中继账号，且未配置私有 OTA 源，仅可使用离线更新。" >&2
+    echo "       请先在「系统设置 → 云接力与远程沙箱」登录账号，或使用离线包升级：" >&2
+    echo "       sudo spinel-update offline /path/to/spinelos-ota-*.tar.zst --full" >&2
+  fi
+  exit 2
+fi
+
+MANIFEST="${WORK_DIR}/latest.json"
+MANIFEST_SIG="${WORK_DIR}/latest.json.sig"
+
+if ! curl_fetch "${OTA_BASE_URL}/latest.json" "${MANIFEST}" 0; then
+  if [[ "${JSON_OUT}" -eq 1 ]]; then
+    printf '{"ok":false,"error":"fetch_manifest_failed","current_version":"%s"}\n' "$(json_escape "${CUR_VER}")"
+  else
+    echo "[ERROR] 无法从已登录服务器获取在线更新清单（请确认账号有效及网络连通）。" >&2
+  fi
+  exit 1
+fi
+
+SIG_VERIFIED="unconfigured"
+if [[ -f "${OTA_PUBKEY}" ]] && command -v openssl >/dev/null 2>&1; then
+  if ! curl_fetch "${OTA_BASE_URL}/latest.json.sig" "${MANIFEST_SIG}" 0; then
+    if [[ "${JSON_OUT}" -eq 1 ]]; then
+      echo '{"ok":false,"error":"fetch_signature_failed"}'
+    else
+      echo "[ERROR] 缺少版本清单签名文件。" >&2
+    fi
+    exit 1
+  fi
+  if ! openssl dgst -sha256 -verify "${OTA_PUBKEY}" -signature "${MANIFEST_SIG}" "${MANIFEST}" >/dev/null 2>&1; then
+    if [[ "${JSON_OUT}" -eq 1 ]]; then
+      echo '{"ok":false,"error":"signature_invalid"}'
+    else
+      echo "[ERROR] OTA 清单签名校验失败，拒绝安装不受信任的更新包！" >&2
+    fi
+    exit 1
+  fi
+  SIG_VERIFIED="verified"
+fi
+
+LATEST_VER="$(json_field "${MANIFEST}" "version")"
+LATEST_COMMIT="$(json_field "${MANIFEST}" "commit")"
+BUILT_AT="$(json_field "${MANIFEST}" "built_at")"
+BUNDLE_NAME="$(json_field "${MANIFEST}" "bundle")"
+BUNDLE_SHA="$(json_field "${MANIFEST}" "sha256")"
+BUNDLE_SIZE="$(json_field "${MANIFEST}" "size_bytes")"
+NOTES="$(json_field "${MANIFEST}" "notes")"
+
+if [[ -z "${LATEST_VER}" || -z "${BUNDLE_NAME}" || -z "${BUNDLE_SHA}" ]]; then
+  if [[ "${JSON_OUT}" -eq 1 ]]; then
+    echo '{"ok":false,"error":"invalid_manifest"}'
+  else
+    echo "[ERROR] OTA 清单内容无效。" >&2
+  fi
+  exit 1
+fi
+
+if [[ "${BUNDLE_NAME}" == *"/"* || "${BUNDLE_NAME}" == *".."* ]]; then
+  echo "[ERROR] 非法的 bundle 文件名: ${BUNDLE_NAME}" >&2
+  exit 1
+fi
+
+UPD_AVAIL=false
+if [[ "${CUR_VER}" != "${LATEST_VER}" ]]; then
+  UPD_AVAIL=true
+fi
+
+if [[ "${SUBCMD}" == "check" ]]; then
+  if [[ "${JSON_OUT}" -eq 1 ]]; then
+    printf '{"ok":true,"current_version":"%s","latest_version":"%s","commit":"%s","built_at":"%s","update_available":%s,"size_bytes":%s,"signature":"%s","notes":"%s","account":"%s"}\n' \
+      "$(json_escape "${CUR_VER}")" \
+      "$(json_escape "${LATEST_VER}")" \
+      "$(json_escape "${LATEST_COMMIT}")" \
+      "$(json_escape "${BUILT_AT}")" \
+      "${UPD_AVAIL}" \
+      "${BUNDLE_SIZE:-0}" \
+      "${SIG_VERIFIED}" \
+      "$(json_escape "${NOTES}")" \
+      "$(json_escape "${RELAY_ACCOUNT}")"
+  else
+    echo "账号:       ${RELAY_ACCOUNT:-私有源}"
+    echo "当前版本:   ${CUR_VER}"
+    echo "最新版本:   ${LATEST_VER} (commit ${LATEST_COMMIT}, ${BUILT_AT})"
+    echo "签名状态:   ${SIG_VERIFIED}"
+    echo "更新包大小: ${BUNDLE_SIZE:-0} bytes"
+    [[ -n "${NOTES}" ]] && echo "更新说明:   ${NOTES}"
+    if [[ "${UPD_AVAIL}" == "true" ]]; then
+      echo "状态: 发现新版本，可运行 sudo spinel-update --full 升级。"
+    else
+      echo "状态: 已是最新版本（如需同步系统包与主题可运行 sudo spinel-update --full）。"
+    fi
+  fi
+  exit 0
+fi
+
+if [[ "${UPD_AVAIL}" == "false" && "${FORCE}" -eq 0 && "${MODE}" != "full" ]]; then
+  echo "==> 当前已是最新版本 (${CUR_VER})，无需更新（如需强制同步系统环境请加 --full 或 --force）。"
+  exit 0
+fi
+
+if [[ "${EUID}" -ne 0 ]]; then
+  REEXEC_ARGS=(upgrade "--${MODE/app/app}" "--url" "${OTA_BASE_URL}")
+  [[ "${MODE}" == "full" ]] && REEXEC_ARGS=(upgrade "--full" "--url" "${OTA_BASE_URL}")
+  [[ "${MODE}" == "ui" ]] && REEXEC_ARGS=(upgrade "--ui-only" "--url" "${OTA_BASE_URL}")
+  [[ "${YES}" -eq 1 ]] && REEXEC_ARGS+=("--yes")
+  [[ "${FORCE}" -eq 1 ]] && REEXEC_ARGS+=("--force")
+  [[ "${NO_KILL_WEBUI}" -eq 1 ]] && REEXEC_ARGS+=("--no-kill-webui")
+  echo "==> 需要管理员权限安装系统更新，正在调用 sudo..."
+  exec sudo "$0" "${REEXEC_ARGS[@]}"
+fi
+
+if [[ "${YES}" -eq 0 ]]; then
+  echo "即将把 SpinelOS 从 ${CUR_VER} 升级至 ${LATEST_VER}（模式: ${MODE}）"
+  read -r -p "确认继续安装？[y/N] " ans
+  case "${ans}" in
+    y|Y|yes|YES) ;;
+    *) echo "已取消。"; exit 0 ;;
+  esac
+fi
+
+BUNDLE_FILE="${WORK_DIR}/${BUNDLE_NAME}"
+echo "==> [1/4] 正在下载更新包 ${BUNDLE_NAME} (${LATEST_VER})..."
+curl_fetch "${OTA_BASE_URL}/${BUNDLE_NAME}" "${BUNDLE_FILE}" 1
+
+echo "==> [2/4] 正在校验 SHA256 完整性..."
+GOT_SHA="$(sha256sum "${BUNDLE_FILE}" | awk '{print $1}')"
+if [[ "${GOT_SHA}" != "${BUNDLE_SHA}" ]]; then
+  echo "[ERROR] SHA256 校验失败! 期望=${BUNDLE_SHA} 实际=${GOT_SHA}" >&2
+  exit 1
+fi
+echo "    SHA256 验证通过 (${GOT_SHA})"
+
+STAGE_DIR="${WORK_DIR}/stage"
+mkdir -p "${STAGE_DIR}"
+echo "==> [3/4] 正在解压并部署文件 (模式: ${MODE})..."
+if [[ "${BUNDLE_NAME}" == *.tar.zst ]]; then
+  tar --zstd -xf "${BUNDLE_FILE}" -C "${STAGE_DIR}"
+else
+  tar -xf "${BUNDLE_FILE}" -C "${STAGE_DIR}"
+fi
+
+echo "==> [4/4] 正在应用系统组件与桌面重启..."
+apply_stage_and_restart "${STAGE_DIR}" "${LATEST_VER}" "${MANIFEST}"

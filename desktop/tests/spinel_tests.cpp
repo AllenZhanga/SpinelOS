@@ -1149,6 +1149,18 @@ void test_parallel_sandbox() {
     EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":101,\"method\":\"power:shutdown\"}", {}, &ipc_rep));
     EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
     ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":103,\"method\":\"ota:check\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":104,\"method\":\"store:spinel-ota-full\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":105,\"method\":\"ota:pick-offline\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
+    EXPECT(!dispatch_ipc_command(&sb_state, "{\"id\":106,\"method\":\"store:spinel-ota-offline\"}", {}, &ipc_rep));
+    EXPECT(ipc_rep.find("sandbox_mode_restricted") != std::string::npos);
+    ipc_rep.clear();
     EXPECT(dispatch_ipc_command(&sb_state, "{\"id\":102,\"method\":\"launcher:toggle\"}", {}, &ipc_rep));
     EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
 }

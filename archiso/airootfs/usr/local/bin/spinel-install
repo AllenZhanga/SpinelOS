@@ -310,6 +310,11 @@ if [[ -f "$SFS_PATH" ]]; then
   [[ -x /usr/local/bin/spinel-files ]] && cp -f /usr/local/bin/spinel-files /mnt/usr/local/bin/spinel-files
   [[ -x /usr/local/bin/spinel-sandbox ]] && cp -f /usr/local/bin/spinel-sandbox /mnt/usr/local/bin/spinel-sandbox
   [[ -x /usr/local/bin/spinel-wine ]] && cp -f /usr/local/bin/spinel-wine /mnt/usr/local/bin/spinel-wine
+  [[ -x /usr/local/bin/spinel-update ]] && cp -f /usr/local/bin/spinel-update /mnt/usr/local/bin/spinel-update
+  if [[ -d /etc/spinelos ]]; then
+    mkdir -p /mnt/etc/spinelos
+    cp -a /etc/spinelos/. /mnt/etc/spinelos/
+  fi
   for asset in /etc/xdg/mimeapps.list \
     /usr/share/applications/org.spinelos.WindowsApps.desktop \
     /usr/share/applications/org.spinelos.WineOpen.desktop \

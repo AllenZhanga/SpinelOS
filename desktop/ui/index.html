@@ -1011,11 +1011,16 @@
               <div class="muted-hint">Wayland + labwc + GTK4 Native Shell + WebKitGTK6</div>
             </div>
           </div>
-          <div><strong>系统版本：</strong>Spinel OS (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
+          <div><strong>系统架构：</strong>Spinel OS (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
+          <div><strong>Spinel 版本：</strong><span id="about-spinel-version">--</span></div>
           <div><strong>当前模式：</strong><span id="about-mode">--</span></div>
           <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
+          <div id="about-ota-feedback" class="feedback-banner hidden" style="margin-top: 8px;"></div>
           <div class="footer-actions" style="margin-top: 8px;">
+            <button type="button" class="btn small primary" id="btn-about-ota-check" data-cmd="ota:check">检查在线更新</button>
+            <button type="button" class="btn small hidden" id="btn-about-ota-login" data-cmd="settings:tab:relay">登录远程账号</button>
+            <button type="button" class="btn small" data-cmd="store:open">升级系统本体</button>
             <button class="btn small" data-cmd="welcome:open">首次开机向导</button>
             <button class="btn small" data-cmd="monitor:open:logs">打开系统监视器</button>
             <button class="btn small" data-cmd="doctor:open">Spinel Doctor 体检</button>
@@ -1481,10 +1486,13 @@
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span class="status-chip" id="store-driver-chip">驱动检测中...</span>
           <span class="status-chip" id="store-update-chip">索引检查中</span>
+          <span class="status-chip" id="store-ota-chip">Spinel OS 版本检查中...</span>
           <button type="button" class="btn small danger hidden" id="btn-store-reboot" data-cmd="power:reboot">更新完成，立即重启生效</button>
         </div>
         <div class="footer-actions">
-          <button type="button" class="btn small primary" id="btn-sys-update" data-store-sys="sys-update">一键更新系统</button>
+          <button type="button" class="btn small primary" id="btn-spinel-ota" data-store-sys="spinel-ota-full">在线升级 Spinel OS (--full)</button>
+          <button type="button" class="btn small" id="btn-spinel-ota-offline" data-cmd="ota:pick-offline">离线包升级 (--full)</button>
+          <button type="button" class="btn small" id="btn-sys-update" data-store-sys="sys-update">一键更新软件包</button>
           <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>
           <button type="button" class="btn small" id="btn-keyring-fix" data-store-sys="keyring-fix">修复密钥环</button>
         </div>

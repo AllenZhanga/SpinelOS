@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/spinel-relay -listen :7443 -udp :7444 -data /var/lib/spinel-relay
+ExecStart=/usr/local/bin/spinel-relay -listen :7443 -udp :7444 -data /var/lib/spinel-relay -ota /var/lib/spinel-relay/ota
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

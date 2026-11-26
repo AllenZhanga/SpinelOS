@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -21,8 +22,10 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -114,6 +117,9 @@ type RelayPair struct {
 type RelayServer struct {
 	mu           sync.RWMutex
 	dataDir      string
+	otaDir       string
+	otaPublic    bool
+	httpHandler  http.Handler
 	accounts     map[string]*Account
 	devices      map[string]*DeviceRecord
 	pairCodes    map[string]*PairCode
@@ -137,6 +143,101 @@ func NewRelayServer(dataDir string) (*RelayServer, error) {
 	}
 	_ = s.loadState()
 	return s, nil
+}
+
+func (s *RelayServer) authorizeOTARequest(r *http.Request) bool {
+	if s.otaPublic {
+		return true
+	}
+	devID := strings.TrimSpace(r.Header.Get("X-Spinel-Device-ID"))
+	devTok := strings.TrimSpace(r.Header.Get("X-Spinel-Token"))
+	if devID != "" && devTok != "" {
+		s.mu.RLock()
+		d := s.devices[devID]
+		ok := d != nil && subtle.ConstantTimeCompare([]byte(d.Token), []byte(devTok)) == 1
+		s.mu.RUnlock()
+		if ok {
+			return true
+		}
+	}
+	if auth := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(auth, "Basic ") {
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(auth, "Basic ")))
+		if err == nil {
+			parts := strings.SplitN(string(raw), ":", 2)
+			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+				s.mu.RLock()
+				acc := s.accounts[parts[0]]
+				ok := acc != nil && subtle.ConstantTimeCompare([]byte(acc.PasswordHash), []byte(hashPassword(parts[1], acc.SaltHex))) == 1
+				s.mu.RUnlock()
+				if ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// SetOTADir configures the static OTA bundle directory served at https://<host>:7443/ota/.
+func (s *RelayServer) SetOTADir(dir string, publicAccess bool) error {
+	if dir == "" {
+		return nil
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		return err
+	}
+	s.otaDir = absDir
+	s.otaPublic = publicAccess
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ota/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = fmt.Fprintf(w, "{\"ok\":true,\"auth_required\":%v}\n", !s.otaPublic)
+	})
+	mux.HandleFunc("/ota/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !s.authorizeOTARequest(r) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="SpinelOS OTA"`)
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		rel := strings.TrimPrefix(r.URL.Path, "/ota/")
+		if rel == "" || strings.Contains(rel, "..") || strings.Contains(rel, "\\") {
+			http.NotFound(w, r)
+			return
+		}
+		cleanRel := filepath.Clean(filepath.FromSlash(rel))
+		if cleanRel == "." || filepath.IsAbs(cleanRel) || strings.HasPrefix(cleanRel, "..") {
+			http.NotFound(w, r)
+			return
+		}
+		fullPath := filepath.Join(absDir, cleanRel)
+		info, err := os.Stat(fullPath)
+		if err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(cleanRel, ".json") || strings.HasSuffix(cleanRel, ".sig") || strings.HasSuffix(cleanRel, ".sh") {
+			w.Header().Set("Cache-Control", "no-store")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
+		http.ServeFile(w, r, fullPath)
+	})
+	s.httpHandler = mux
+	return nil
 }
 
 func (s *RelayServer) statePath() string {
@@ -253,7 +354,80 @@ func readFrame(r *bufio.Reader) (byte, []byte, error) {
 	return hdr[0], buf, nil
 }
 
+type peekedConn struct {
+	net.Conn
+	br *bufio.Reader
+}
+
+func (p *peekedConn) Read(b []byte) (int, error) {
+	return p.br.Read(b)
+}
+
+type singleConnListener struct {
+	mu   sync.Mutex
+	conn net.Conn
+	addr net.Addr
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	c := l.conn
+	l.conn = nil
+	l.mu.Unlock()
+	if c == nil {
+		return nil, net.ErrClosed
+	}
+	return c, nil
+}
+
+func (l *singleConnListener) Close() error   { return nil }
+func (l *singleConnListener) Addr() net.Addr { return l.addr }
+
+func serveSingleHTTPConn(conn net.Conn, br *bufio.Reader, handler http.Handler) {
+	done := make(chan struct{})
+	var closeOnce sync.Once
+	markDone := func() {
+		closeOnce.Do(func() { close(done) })
+	}
+	srv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      180 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		ConnState: func(_ net.Conn, st http.ConnState) {
+			if st == http.StateClosed || st == http.StateHijacked {
+				markDone()
+			}
+		},
+	}
+	ln := &singleConnListener{
+		conn: &peekedConn{Conn: conn, br: br},
+		addr: conn.LocalAddr(),
+	}
+	_ = srv.Serve(ln)
+	<-done
+}
+
 func (s *RelayServer) handleConn(conn net.Conn) {
+	br := bufio.NewReaderSize(conn, 64*1024)
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+	first, err := br.Peek(1)
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+
+	// Non-binary connections (ASCII HTTP requests such as GET/HEAD) serve the static /ota endpoint.
+	if first[0] != FrameControl && first[0] != FrameRelay {
+		if s.httpHandler != nil {
+			serveSingleHTTPConn(conn, br, s.httpHandler)
+		} else {
+			_ = conn.Close()
+		}
+		return
+	}
+
 	cc := &ClientConn{
 		conn: conn,
 		bw:   bufio.NewWriterSize(conn, 64*1024),
@@ -263,7 +437,6 @@ func (s *RelayServer) handleConn(conn net.Conn) {
 		_ = conn.Close()
 	}()
 
-	br := bufio.NewReaderSize(conn, 64*1024)
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 		ftype, payload, err := readFrame(br)
@@ -759,14 +932,23 @@ func runUDPStunLoop(pc net.PacketConn) {
 }
 
 func main() {
-	listenAddr := flag.String("listen", ":7443", "TLS control & relay listen address")
+	listenAddr := flag.String("listen", ":7443", "TLS control, relay & HTTPS OTA listen address")
 	udpAddr := flag.String("udp", ":7444", "UDP STUN probe listen address")
 	dataDir := flag.String("data", "/var/lib/spinel-relay", "Data and TLS certificate directory")
+	otaDir := flag.String("ota", "", "Static OTA bundle directory served at /ota/ (defaults to <data>/ota)")
+	otaPublic := flag.Bool("ota-public", false, "Allow unauthenticated /ota downloads (default false: logged-in device/account required)")
 	flag.Parse()
 
 	srv, err := NewRelayServer(*dataDir)
 	if err != nil {
 		log.Fatalf("init relay server: %v", err)
+	}
+	resolvedOTA := *otaDir
+	if resolvedOTA == "" {
+		resolvedOTA = filepath.Join(*dataDir, "ota")
+	}
+	if err := srv.SetOTADir(resolvedOTA, *otaPublic); err != nil {
+		log.Fatalf("init ota dir: %v", err)
 	}
 
 	cert, fp, err := ensureTLSCert(
