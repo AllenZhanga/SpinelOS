@@ -19,6 +19,7 @@ extern "C" {
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 struct SandboxPipState {
@@ -963,12 +964,17 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
         pip->minimized = true;
     } else if (action == "toggle") {
         if (!st.running) {
-            std::string err;
-            if (start_sandbox_session(err)) {
-                pip->last_running = true;
-                pip->visible = true;
-                pip->minimized = false;
-            }
+            std::thread([ns]() {
+                std::string err;
+                if (start_sandbox_session(err)) {
+                    g_idle_add(+[](gpointer d) -> gboolean {
+                        auto *n = static_cast<NativeShellState *>(d);
+                        if (n && n->sandbox_pip) sandbox_pip_sync_action(n, "show");
+                        return G_SOURCE_REMOVE;
+                    }, ns);
+                }
+            }).detach();
+            return;
         } else if (pip->visible && !pip->minimized) {
             pip->takeover = false;
             pip->minimized = true;

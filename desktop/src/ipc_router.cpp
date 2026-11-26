@@ -15,6 +15,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -735,10 +736,18 @@ bool dispatch_ipc_command(AppState *state,
         {"sandbox:launch:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             native_shell_set_cc_visible(s, false);
             std::string target_cmd = arg_or_param(r, "sandbox:launch:", {"cmd", "id"});
-            std::string err;
-            if (launch_cmd_in_sandbox(target_cmd, err)) {
-                native_shell_sync_sandbox(s, "show");
-            }
+            std::thread([s, target_cmd]() {
+                std::string err;
+                if (launch_cmd_in_sandbox(target_cmd, err)) {
+                    g_idle_add(+[](gpointer d) -> gboolean {
+                        auto *st = static_cast<AppState *>(d);
+                        if (st && !st->shutting_down.load()) native_shell_sync_sandbox(st, "show");
+                        return G_SOURCE_REMOVE;
+                    }, s);
+                } else {
+                    append_app_log("[Sandbox] launch failed (" + target_cmd + "): " + err);
+                }
+            }).detach();
         }},
         {"store:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);

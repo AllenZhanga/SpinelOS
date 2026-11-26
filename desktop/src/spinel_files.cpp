@@ -1535,26 +1535,27 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
         if (is_dir) {
             add_btn("在此目录打开终端", false, [item_path]() { open_terminal_at(item_path); });
             add_btn("在平行沙箱中打开工作区", false, [fw, item_path]() {
-                std::string err;
-                if (launch_in_sandbox({"spinel-terminal"}, item_path.string(), err)) {
-                    if (has_executable("gdbus")) {
-                        std::string out;
-                        int rc = 1;
-                        run_argv_capture({
-                            "gdbus", "call", "--session",
-                            "--dest", "org.spinelos.shell",
-                            "--object-path", "/org/spinelos/shell",
-                            "--method", "org.gtk.Actions.Activate",
-                            "sync-sandbox", "['show']", "{}"
-                        }, out, rc);
-                    }
-                    if (fw && fw->status_label) {
-                        gtk_label_set_text(GTK_LABEL(fw->status_label),
-                                           ("已在平行沙箱打开工作区: " + item_path.string()).c_str());
-                    }
-                } else if (fw && fw->status_label) {
-                    gtk_label_set_text(GTK_LABEL(fw->status_label), ("打开平行沙箱失败: " + err).c_str());
+                if (fw && fw->status_label) {
+                    gtk_label_set_text(GTK_LABEL(fw->status_label), "正在拉起平行沙箱桌面...");
                 }
+                std::thread([item_path]() {
+                    std::string err;
+                    if (launch_in_sandbox({"spinel-terminal"}, item_path.string(), err)) {
+                        if (has_executable("gdbus")) {
+                            std::string out;
+                            int rc = 1;
+                            run_argv_capture({
+                                "gdbus", "call", "--session",
+                                "--dest", "org.spinelos.shell",
+                                "--object-path", "/org/spinelos/shell",
+                                "--method", "org.gtk.Actions.Activate",
+                                "sync-sandbox", "['show']", "{}"
+                            }, out, rc);
+                        }
+                    } else {
+                        append_app_log("[Files Sandbox] failed: " + err);
+                    }
+                }).detach();
             });
         } else if (is_archive_file(item_path)) {
             add_btn("解压到当前目录", false, [fw, item_path]() { do_extract_archive(fw, item_path, false); });

@@ -50,7 +50,84 @@ int read_pid_file(const std::string &path) {
 
 bool is_pid_alive(int pid) {
     if (pid <= 1) return false;
+    int st = 0;
+    pid_t reaped = ::waitpid(pid, &st, WNOHANG);
+    if (reaped == pid) return false;
     return ::kill(pid, 0) == 0 || errno == EPERM;
+}
+
+bool spawn_headless_compositor_attempt(const std::string &rt_dir,
+                                       const std::string &cfg_dir,
+                                       const SandboxConfig &cfg,
+                                       bool use_systemd_run,
+                                       bool force_pixman,
+                                       pid_t &out_pid) {
+    std::vector<std::string> cmd;
+    if (use_systemd_run && has_executable("systemd-run")) {
+        bool host_prio = (cfg.perf_mode != "balanced");
+        cmd = {
+            "systemd-run", "--user", "--scope",
+            "--slice=spinel-sandbox.slice",
+            std::string("-pCPUWeight=") + (host_prio ? "20" : "50"),
+            std::string("-pIOWeight=") + (host_prio ? "20" : "50"),
+            std::string("-pMemoryHigh=") + (host_prio ? "8G" : "12G"),
+            "--"
+        };
+    }
+
+    cmd.push_back("/usr/bin/env");
+    cmd.push_back("-u");
+    cmd.push_back("WAYLAND_DISPLAY");
+    cmd.push_back("-u");
+    cmd.push_back("DISPLAY");
+    cmd.push_back("XDG_RUNTIME_DIR=" + rt_dir);
+    cmd.push_back("WLR_BACKENDS=headless");
+    cmd.push_back("WLR_LIBINPUT_NO_DEVICES=1");
+    cmd.push_back("WLR_HEADLESS_OUTPUTS=1");
+    cmd.push_back("LABWC_CONFIG_DIR=" + cfg_dir);
+    cmd.push_back("XCURSOR_THEME=Adwaita");
+    if (force_pixman) {
+        cmd.push_back("WLR_RENDERER=pixman");
+        cmd.push_back("WLR_NO_HARDWARE_CURSORS=1");
+        cmd.push_back("LIBGL_ALWAYS_SOFTWARE=1");
+    }
+    cmd.push_back("labwc");
+    cmd.push_back("-C");
+    cmd.push_back(cfg_dir);
+
+    std::string log_path = rt_dir + "/labwc.log";
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        ::setsid();
+        int log_fd = ::open(log_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+        if (log_fd >= 0) {
+            ::dup2(log_fd, STDOUT_FILENO);
+            ::dup2(log_fd, STDERR_FILENO);
+            if (log_fd > STDERR_FILENO) ::close(log_fd);
+        }
+        std::vector<char *> cargs;
+        for (auto &a : cmd) cargs.push_back(const_cast<char *>(a.c_str()));
+        cargs.push_back(nullptr);
+        ::execvp(cargs[0], cargs.data());
+        _exit(127);
+    }
+    if (pid < 0) return false;
+    out_pid = pid;
+    write_text_file(sandbox_pid_file(), std::to_string(pid) + "\n");
+
+    std::error_code ec;
+    std::string sock_path = rt_dir + "/" + sandbox_socket_name();
+    for (int i = 0; i < 60; ++i) {
+        if (fs::exists(sock_path, ec)) return true;
+        if (!is_pid_alive(pid)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ::kill(-pid, SIGTERM);
+    ::kill(pid, SIGTERM);
+    int st = 0;
+    ::waitpid(pid, &st, WNOHANG);
+    fs::remove(sandbox_pid_file(), ec);
+    return false;
 }
 
 std::string host_runtime_dir() {
@@ -663,66 +740,27 @@ bool start_sandbox_session(std::string &error_out) {
 
     start_sandbox_dbus_daemon(rt_dir);
 
-    std::vector<std::pair<std::string, std::string>> env = {
-        {"XDG_RUNTIME_DIR", rt_dir},
-        {"WLR_BACKENDS", "headless"},
-        {"WLR_LIBINPUT_NO_DEVICES", "1"},
-        {"WLR_HEADLESS_OUTPUTS", "1"},
-        {"LABWC_CONFIG_DIR", cfg_dir},
-        {"XCURSOR_THEME", "Adwaita"},
-        {"WAYLAND_DISPLAY", ""},
-        {"DISPLAY", ""},
-    };
-
-    std::vector<std::string> labwc_cmd;
-    if (has_executable("systemd-run")) {
-        bool host_prio = (cfg.perf_mode != "balanced");
-        labwc_cmd = {
-            "systemd-run", "--user", "--scope",
-            "--slice=spinel-sandbox.slice",
-            std::string("-pCPUWeight=") + (host_prio ? "20" : "50"),
-            std::string("-pIOWeight=") + (host_prio ? "20" : "50"),
-            std::string("-pMemoryHigh=") + (host_prio ? "8G" : "12G"),
-            "--",
-            "labwc", "-C", cfg_dir
-        };
-    } else {
-        labwc_cmd = {"labwc", "-C", cfg_dir};
-    }
-
-    pid_t pid = ::fork();
-    if (pid == 0) {
-        ::setsid();
-        for (const auto &[k, v] : env) {
-            if (v.empty()) ::unsetenv(k.c_str());
-            else ::setenv(k.c_str(), v.c_str(), 1);
-        }
-        std::vector<char *> cargs;
-        for (auto &a : labwc_cmd) cargs.push_back(const_cast<char *>(a.c_str()));
-        cargs.push_back(nullptr);
-        ::execvp(cargs[0], cargs.data());
-        _exit(127);
-    }
-    if (pid < 0) {
-        error_out = "无法创建平行桌面合成器进程";
-        return false;
-    }
-    write_text_file(sandbox_pid_file(), std::to_string(pid) + "\n");
-
-    std::string sock_path = rt_dir + "/" + sandbox_socket_name();
+    const char *host_renderer = std::getenv("WLR_RENDERER");
+    bool host_pixman = (host_renderer && std::string(host_renderer) == "pixman");
+    bool has_systemd = has_executable("systemd-run");
+    pid_t pid = -1;
     bool ready = false;
-    for (int i = 0; i < 60; ++i) {
-        if (!is_pid_alive(pid)) break;
-        if (fs::exists(sock_path, ec)) {
-            ready = true;
-            break;
+
+    if (has_systemd) {
+        ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, true, host_pixman, pid);
+        if (!ready && !host_pixman) {
+            ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, true, true, pid);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     if (!ready) {
-        ::kill(pid, SIGTERM);
-        fs::remove(sandbox_pid_file(), ec);
-        error_out = "平行桌面 headless 合成器启动超时";
+        ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, false, host_pixman, pid);
+        if (!ready && !host_pixman) {
+            ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, false, true, pid);
+        }
+    }
+    if (!ready) {
+        std::string err_line = trim_copy(read_first_line(rt_dir + "/labwc.log"));
+        error_out = err_line.empty() ? "平行桌面 headless 合成器启动超时" : ("平行桌面启动失败: " + err_line);
         return false;
     }
 

@@ -2051,33 +2051,50 @@ void remove_sandbox_dir(AppState *state, const std::string &payload) {
 }
 
 void sandbox_session_action(AppState *state, const std::string &action) {
-    std::string err;
-    bool ok = true;
-    std::string msg;
-    if (action == "start") {
-        ok = start_sandbox_session(err);
-        if (ok) {
-            native_shell_sync_sandbox(state, "show");
-            msg = "平行沙箱桌面已启动，已在右下角显示实时画中画悬浮窗。";
-        } else {
-            msg = err;
-        }
-    } else if (action == "stop") {
-        stop_sandbox_session(err);
-        native_shell_sync_sandbox(state, "sync");
-        msg = "已停止平行沙箱桌面，白名单目录文件已安全保留。";
-    } else if (action == "reset") {
-        ok = reset_sandbox_home(err);
-        native_shell_sync_sandbox(state, "sync");
-        msg = ok ? "已清空沙箱临时环境并恢复出厂干净状态（白名单目录不受影响）。" : err;
-    } else if (action == "toggle-pip") {
-        if (!query_sandbox_status().running) {
+    std::thread([state, action]() {
+        std::string err;
+        bool ok = true;
+        std::string msg;
+        std::string shell_act;
+        if (action == "start") {
             ok = start_sandbox_session(err);
-            if (ok) native_shell_sync_sandbox(state, "show");
-        } else {
-            native_shell_sync_sandbox(state, "toggle");
+            if (ok) {
+                shell_act = "show";
+                msg = "平行沙箱桌面已启动，已在右下角显示实时画中画悬浮窗。";
+            } else {
+                msg = err;
+            }
+        } else if (action == "stop") {
+            stop_sandbox_session(err);
+            shell_act = "sync";
+            msg = "已停止平行沙箱桌面，白名单目录文件已安全保留。";
+        } else if (action == "reset") {
+            ok = reset_sandbox_home(err);
+            shell_act = "sync";
+            msg = ok ? "已清空沙箱临时环境并恢复出厂干净状态（白名单目录不受影响）。" : err;
+        } else if (action == "toggle-pip") {
+            if (!query_sandbox_status().running) {
+                ok = start_sandbox_session(err);
+                if (ok) shell_act = "show";
+            } else {
+                shell_act = "toggle";
+            }
         }
-    }
-    if (!msg.empty()) emit_sandbox_feedback(state, ok, msg);
-    push_sandbox_state(state);
+        struct UiUpdate {
+            AppState *state;
+            bool ok;
+            std::string msg;
+            std::string shell_act;
+        };
+        auto *u = new UiUpdate{state, ok, std::move(msg), std::move(shell_act)};
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<UiUpdate> up(static_cast<UiUpdate *>(d));
+            if (up->state && !up->state->shutting_down.load()) {
+                if (!up->shell_act.empty()) native_shell_sync_sandbox(up->state, up->shell_act);
+                if (!up->msg.empty()) emit_sandbox_feedback(up->state, up->ok, up->msg);
+                push_sandbox_state(up->state);
+            }
+            return G_SOURCE_REMOVE;
+        }, u);
+    }).detach();
 }
