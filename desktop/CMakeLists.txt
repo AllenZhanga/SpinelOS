@@ -252,6 +252,7 @@ target_compile_options(spinel-terminal PRIVATE
 
 add_executable(spinel-files
     src/spinel_files.cpp
+    src/files_ops.cpp
     src/file_associations.cpp
     src/files_theme.cpp
     src/windows_apps_window.cpp
@@ -357,6 +358,7 @@ add_executable(spinel-tests
     tests/test_core.cpp
     tests/test_sys.cpp
     tests/test_sandbox_ai.cpp
+    src/files_ops.cpp
     src/file_associations.cpp
     src/ipc_router.cpp
     src/common.cpp

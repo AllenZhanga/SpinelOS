@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/manifest.env"
+
 if [[ -f "${ROOT_DIR}/.env.local" ]]; then
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/.env.local"
@@ -81,21 +84,19 @@ rm -rf "${STAGE_ABS}" "${OTA_LOCAL_DIR}"
 mkdir -p "${STAGE_ABS}/bin" "${STAGE_ABS}/assets" "${STAGE_ABS}/ui" "${STAGE_ABS}/etc/spinelos" "${STAGE_ABS}/full" "${OTA_LOCAL_DIR}"
 
 echo "==> [2/4] Staging binaries, UI assets & full system configs..."
-for bin in spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl spinel-os-mcp; do
+for bin in "${SPINEL_NATIVE_BINS[@]}"; do
   cp -f "${ROOT_DIR}/build/linux-amd64/${bin}" "${STAGE_ABS}/bin/${bin}"
 done
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" "${STAGE_ABS}/bin/spinel-wine"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-update" "${STAGE_ABS}/bin/spinel-update"
+for helper in "${SPINEL_HELPER_BINS[@]}"; do
+  cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/${helper}" "${STAGE_ABS}/bin/${helper}"
+done
 
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Store.desktop" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Games.desktop" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Store.svg" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Games.svg" "${STAGE_ABS}/assets/"
-cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" "${STAGE_ABS}/assets/"
+for df in "${SPINEL_DESKTOP_FILES[@]}"; do
+  cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/${df}" "${STAGE_ABS}/assets/"
+done
+for svg in "${SPINEL_ICON_SVGS[@]}"; do
+  cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/${svg}" "${STAGE_ABS}/assets/"
+done
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" "${STAGE_ABS}/assets/"
 
@@ -128,12 +129,13 @@ cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-screenshot" "${STAGE_AB
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-lock" "${STAGE_ABS}/full/"
 find "${STAGE_ABS}" -name '.DS_Store' -delete
 
+STRIP_TARGETS=("${SPINEL_NATIVE_BINS[@]/#/${STAGE_REL}/bin/}")
 echo "==> [3/4] Stripping ELF binaries and creating ${BUNDLE_NAME}..."
 docker run --rm --platform linux/amd64 \
   -v "${ROOT_DIR}:/workspace" \
   -w /workspace \
   spinelos-builder \
-  bash -c "strip --strip-unneeded ${STAGE_REL}/bin/spinel-shell ${STAGE_REL}/bin/spinel-webui ${STAGE_REL}/bin/spinel-terminal ${STAGE_REL}/bin/spinel-files ${STAGE_REL}/bin/spinel-sandbox ${STAGE_REL}/bin/spinel-agent-ctl ${STAGE_REL}/bin/spinel-os-mcp && tar --zstd -cf out/ota/${BUNDLE_NAME} -C ${STAGE_REL} ."
+  bash -c "strip --strip-unneeded ${STRIP_TARGETS[*]} && tar --zstd -cf out/ota/${BUNDLE_NAME} -C ${STAGE_REL} ."
 
 rm -rf "${STAGE_ABS}"
 

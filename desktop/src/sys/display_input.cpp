@@ -703,8 +703,7 @@ void set_ime_engine(AppState *state, const std::string &engine) {
 
 void install_rime_ice_dict(AppState *state) {
     if (!state) return;
-    sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"正在下载雾凇拼音 (rime-ice) 词库，请稍候...\");", false);
-    std::thread([state]() {
+    if (!launch_async_task("ime:rime-ice", [state]() {
         fs::path rime_dir = fs::path(home_dir()) / ".local/share/fcitx5/rime";
         std::error_code ec;
         fs::create_directories(rime_dir, ec);
@@ -735,7 +734,10 @@ void install_rime_ice_dict(AppState *state) {
             if (!st->shutting_down.load()) push_ime_state(st);
             return G_SOURCE_REMOVE;
         }, state);
-    }).detach();
+    })) {
+        return;
+    }
+    sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"正在下载雾凇拼音 (rime-ice) 词库，请稍候...\");", false);
 }
 
 ShortcutConfig load_shortcuts_config() {

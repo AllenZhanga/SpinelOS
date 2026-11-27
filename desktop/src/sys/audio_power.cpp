@@ -247,15 +247,28 @@ void push_audio_power_state(AppState *state) {
 
     int mic_vol = 100;
     bool mic_muted = false;
-    std::string mic_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null");
-    auto pos = mic_out.find("Volume:");
-    if (pos != std::string::npos) {
-        double v = std::atof(mic_out.c_str() + pos + 7);
-        mic_vol = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+    if (has_executable("wpctl")) {
+        std::string mic_out;
+        int mic_rc = 1;
+        if (run_argv_capture({"wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"}, mic_out, mic_rc) && mic_rc == 0) {
+            auto pos = mic_out.find("Volume:");
+            if (pos != std::string::npos) {
+                double v = std::atof(mic_out.c_str() + pos + 7);
+                mic_vol = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+            }
+            mic_muted = (mic_out.find("MUTED") != std::string::npos);
+        }
     }
-    mic_muted = (mic_out.find("MUTED") != std::string::npos);
 
-    bool zram_active = !trim_copy(run_cmd_capture("swapon --noheadings --show=NAME 2>/dev/null")).empty();
+    bool zram_active = false;
+    {
+        std::ifstream sw_ifs("/proc/swaps");
+        std::string sw_line;
+        std::getline(sw_ifs, sw_line);  // header
+        if (std::getline(sw_ifs, sw_line) && !trim_copy(sw_line).empty()) {
+            zram_active = true;
+        }
+    }
     bool ppd_available = !media.power_profile.empty();
     bool idle_lock = get_idle_lock_enabled();
 

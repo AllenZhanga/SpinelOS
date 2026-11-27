@@ -750,6 +750,7 @@ int main(int argc, char **argv) {
     if (state.store_refresh_thread.joinable()) {
         state.store_refresh_thread.join();
     }
+    wait_all_async_tasks(2000);
     g_object_unref(app);
     return status;
 #else
@@ -774,6 +775,7 @@ int main(int argc, char **argv) {
     }
     shutdown_window_tracker();
     shutdown_native_shell(&state);
+    wait_all_async_tasks(2000);
     g_object_unref(app);
     return status;
 #endif

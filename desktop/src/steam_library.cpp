@@ -429,9 +429,31 @@ bool is_steam_bootstrapping(std::string &progress_line) {
     if (!updating && (!steam_proc || fs::exists(steamui, ec))) {
         return false;
     }
-    std::string raw = run_cmd_capture("tail -n 3 ~/.local/share/Steam/logs/bootstrap_log.txt 2>/dev/null | tr '\\r' '\\n' | grep -v '^$' | tail -n 1");
+    fs::path boot_log = fs::path(home_dir()) / ".local/share/Steam/logs/bootstrap_log.txt";
+    std::string raw;
+    std::ifstream bfs(boot_log, std::ios::binary);
+    if (bfs.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(bfs)), std::istreambuf_iterator<char>());
+        if (content.size() > 4096) content = content.substr(content.size() - 4096);
+        for (char &c : content) {
+            if (c == '\r') c = '\n';
+        }
+        for (const auto &line : split_lines(content)) {
+            std::string trimmed = trim_copy(line);
+            if (!trimmed.empty()) raw = trimmed;
+        }
+    }
     progress_line = raw.empty() ? "正在初始化 Steam 运行环境与下载客户端更新..." : raw;
     return true;
+}
+
+void stop_steam_processes_for_proxy() {
+    if (!has_executable("pkill")) return;
+    std::string out;
+    int rc = 0;
+    run_argv_capture({"pkill", "-f", "ubuntu12_32/steam"}, out, rc);
+    run_argv_capture({"pkill", "-f", "steam.sh"}, out, rc);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
 }
 
 void append_nvidia_steam_envs(std::vector<std::pair<std::string, std::string>> &envs) {
@@ -453,7 +475,7 @@ void launch_steam_client(AppState *state) {
     }
     if (steam_running_without_proxy()) {
         append_app_log("[Steam] 检测到旧 Steam 进程未加载新代理，正在重启 Steam 以应用系统代理...");
-        run_cmd_capture("pkill -f 'ubuntu12_32/steam' 2>/dev/null; pkill -f 'steam.sh' 2>/dev/null; sleep 0.3");
+        stop_steam_processes_for_proxy();
     }
     std::string prog;
     if (is_steam_bootstrapping(prog)) {
@@ -508,7 +530,7 @@ void launch_steam_gamepadui(AppState *state, const PerfConfig &perf) {
     }
     if (steam_running_without_proxy()) {
         append_app_log("[GamepadUI] 检测到旧 Steam 进程未加载新代理，正在重启以应用系统代理...");
-        run_cmd_capture("pkill -f 'ubuntu12_32/steam' 2>/dev/null; pkill -f 'steam.sh' 2>/dev/null; sleep 0.3");
+        stop_steam_processes_for_proxy();
     }
     std::string prog;
     if (is_steam_bootstrapping(prog)) {

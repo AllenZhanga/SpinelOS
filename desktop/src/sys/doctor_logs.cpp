@@ -339,7 +339,7 @@ void push_system_logs(AppState *state, const std::string &source) {
     std::string src = (source == "shell" || source == "compositor" || source == "system" || source == "mcp")
                           ? source
                           : "apps";
-    std::thread([state, src]() {
+    launch_async_task("logs:fetch", [state, src]() {
         std::string txt = collect_logs_bundle_text(src);
         std::ostringstream js;
         js << "window.__spinelLogsData && window.__spinelLogsData({"
@@ -347,7 +347,7 @@ void push_system_logs(AppState *state, const std::string &source) {
            << "\"text\":\"" << json_escape(txt) << "\""
            << "});";
         post_js_to_main(state, js.str(), false);
-    }).detach();
+    });
 }
 
 void clear_system_logs(AppState *state, const std::string &source) {

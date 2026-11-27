@@ -8,11 +8,16 @@
 
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
+#include <thread>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -324,11 +329,49 @@ void append_app_log(const std::string &line) {
     }
 }
 
-void spawn_detached(const std::string &cmd) {
-    ensure_display_env();
-    std::string wrapped = "nohup " + cmd + " >/dev/null 2>&1 &";
-    int rc = std::system(wrapped.c_str());
-    (void)rc;
+namespace {
+
+std::mutex g_async_mu;
+std::condition_variable g_async_cv;
+int g_async_active = 0;
+std::unordered_set<std::string> g_async_keys;
+
+}  // namespace
+
+bool launch_async_task(const std::string &dedup_key, std::function<void()> fn) {
+    if (!fn) return false;
+    {
+        std::lock_guard<std::mutex> lock(g_async_mu);
+        if (!dedup_key.empty() && g_async_keys.count(dedup_key) > 0) {
+            return false;
+        }
+        if (!dedup_key.empty()) {
+            g_async_keys.insert(dedup_key);
+        }
+        ++g_async_active;
+    }
+
+    std::thread([dedup_key, task = std::move(fn)]() {
+        struct Guard {
+            std::string key;
+            ~Guard() {
+                std::lock_guard<std::mutex> lock(g_async_mu);
+                if (!key.empty()) g_async_keys.erase(key);
+                if (g_async_active > 0) --g_async_active;
+                if (g_async_active == 0) g_async_cv.notify_all();
+            }
+        } guard{dedup_key};
+        task();
+    }).detach();
+    return true;
+}
+
+void wait_all_async_tasks(int timeout_ms) {
+    std::unique_lock<std::mutex> lock(g_async_mu);
+    if (timeout_ms <= 0) return;
+    g_async_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), []() {
+        return g_async_active == 0;
+    });
 }
 
 void spawn_argv_detached(const std::vector<std::string> &args,

@@ -56,7 +56,7 @@ void push_relay_state(AppState *state, bool fetch_peers) {
     RelayConfig cfg = load_relay_config();
     if (cfg.server_addr.empty() || cfg.account.empty() || cfg.token.empty()) return;
 
-    std::thread([state]() {
+    launch_async_task("relay:peers", [state]() {
         std::vector<RelayPeerDevice> devs;
         std::string err;
         bool ok = relay_fetch_devices(devs, err);
@@ -82,7 +82,7 @@ void push_relay_state(AppState *state, bool fetch_peers) {
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_auth_ipc(AppState *state, const std::string &payload, bool is_register) {
@@ -99,7 +99,7 @@ void relay_auth_ipc(AppState *state, const std::string &payload, bool is_registe
         else if (k == "account") acc = v;
         else if (k == "password") pwd = v;
     }
-    std::thread([state, is_register, server, udp, fp, acc, pwd]() {
+    launch_async_task("relay:auth", [state, is_register, server, udp, fp, acc, pwd]() {
         std::string err;
         bool ok = relay_login_or_register(is_register, server, udp, fp, acc, pwd, err);
         if (ok && load_relay_config().allow_remote) ensure_relay_hostd_running(true);
@@ -121,11 +121,11 @@ void relay_auth_ipc(AppState *state, const std::string &payload, bool is_registe
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_pair_create_ipc(AppState *state) {
-    std::thread([state]() {
+    launch_async_task("relay:pair", [state]() {
         std::string code, err;
         long long exp = 0;
         bool ok = relay_create_pair_code(code, exp, err);
@@ -150,7 +150,7 @@ void relay_pair_create_ipc(AppState *state) {
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_pair_claim_ipc(AppState *state, const std::string &payload) {
@@ -166,7 +166,7 @@ void relay_pair_claim_ipc(AppState *state, const std::string &payload) {
         else if (k == "fp") fp = v;
         else if (k == "code") code = v;
     }
-    std::thread([state, server, udp, fp, code]() {
+    launch_async_task("relay:pair", [state, server, udp, fp, code]() {
         std::string err;
         bool ok = relay_claim_pair_code(server, udp, fp, code, err);
         struct ClaimCtx {
@@ -183,7 +183,7 @@ void relay_pair_claim_ipc(AppState *state, const std::string &payload) {
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_set_allow_remote_ipc(AppState *state, const std::string &payload) {
@@ -215,7 +215,7 @@ void relay_set_device_name_ipc(AppState *state, const std::string &payload) {
             name = trim_copy(line.substr(eq + 1));
         }
     }
-    std::thread([state, name]() {
+    launch_async_task("relay:rename", [state, name]() {
         std::string err;
         bool ok = relay_set_device_name(name, err);
         struct RenameCtx {
@@ -236,7 +236,7 @@ void relay_set_device_name_ipc(AppState *state, const std::string &payload) {
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_device_remove_ipc(AppState *state, const std::string &payload) {
@@ -247,7 +247,7 @@ void relay_device_remove_ipc(AppState *state, const std::string &payload) {
         if (trim_copy(line.substr(0, eq)) == "device_id") id = trim_copy(line.substr(eq + 1));
     }
     if (id.empty()) return;
-    std::thread([state, id]() {
+    launch_async_task("relay:remove", [state, id]() {
         std::string err;
         bool ok = relay_remove_device(id, err);
         struct RmCtx {
@@ -264,7 +264,7 @@ void relay_device_remove_ipc(AppState *state, const std::string &payload) {
             }
             return G_SOURCE_REMOVE;
         }, ctx);
-    }).detach();
+    });
 }
 
 void relay_reset_fp_ipc(AppState *state) {
@@ -289,7 +289,7 @@ void relay_connect_remote_ipc(AppState *state, const std::string &device_id) {
 
 void check_spinelos_ota_async(AppState *state) {
     if (!state || state->shutting_down.load()) return;
-    std::thread([state]() {
+    launch_async_task("ota:check", [state]() {
         std::string bin = has_executable("spinel-update") ? "spinel-update" : "";
         if (bin.empty() && fs::exists("/usr/local/bin/spinel-update")) {
             bin = "/usr/local/bin/spinel-update";
@@ -321,5 +321,5 @@ void check_spinelos_ota_async(AppState *state) {
             if (m->st->store_view) eval_js(m->st->store_view, js);
             return G_SOURCE_REMOVE;
         }, msg);
-    }).detach();
+    });
 }

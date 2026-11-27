@@ -150,7 +150,7 @@ std::vector<SnapperSnapshotInfo> parse_snapper_csv(const std::string &csv) {
 
 void push_snapshots_state(AppState *state) {
     if (!state) return;
-    std::thread([state]() {
+    launch_async_task("snap:list", [state]() {
         std::string root_fs = "unknown";
         std::string f_out;
         int f_rc = 1;
@@ -207,7 +207,7 @@ void push_snapshots_state(AppState *state) {
         js << "]});";
 
         post_js_to_main(state, js.str(), false);
-    }).detach();
+    });
 }
 
 void create_system_snapshot(AppState *state, const std::string &payload) {
@@ -224,7 +224,7 @@ void create_system_snapshot(AppState *state, const std::string &payload) {
     std::string clean_desc = sanitize_snapper_desc(desc);
     if (clean_desc.empty()) clean_desc = "SpinelOS 手动还原点";
 
-    std::thread([state, clean_desc, password]() {
+    if (!launch_async_task("snap:op", [state, clean_desc, password]() {
         if (!has_executable("snapper")) {
             emit_snapshots_feedback(state, false, "系统未安装 snapper。");
             return;
@@ -240,7 +240,9 @@ void create_system_snapshot(AppState *state, const std::string &payload) {
             emit_snapshots_feedback(state, true, "已成功创建 Btrfs 系统快照：「" + clean_desc + "」");
         }
         push_snapshots_state(state);
-    }).detach();
+    })) {
+        emit_snapshots_feedback(state, false, "已有快照操作正在执行中，请稍候。");
+    }
 }
 
 void rollback_system_snapshot(AppState *state, const std::string &payload) {
@@ -260,7 +262,7 @@ void rollback_system_snapshot(AppState *state, const std::string &payload) {
         return;
     }
 
-    std::thread([state, snap_id, password]() {
+    if (!launch_async_task("snap:op", [state, snap_id, password]() {
         std::string out;
         int rc = 1;
         std::string id_s = std::to_string(snap_id);
@@ -273,7 +275,9 @@ void rollback_system_snapshot(AppState *state, const std::string &payload) {
                 "已准备回滚到快照 #" + id_s + "！请立即重启电脑以切换到回滚后的系统状态。", true);
         }
         push_snapshots_state(state);
-    }).detach();
+    })) {
+        emit_snapshots_feedback(state, false, "已有快照操作正在执行中，请稍候。");
+    }
 }
 
 void delete_system_snapshot(AppState *state, const std::string &payload) {
@@ -293,7 +297,7 @@ void delete_system_snapshot(AppState *state, const std::string &payload) {
         return;
     }
 
-    std::thread([state, snap_id, password]() {
+    if (!launch_async_task("snap:op", [state, snap_id, password]() {
         std::string out;
         int rc = 1;
         std::string id_s = std::to_string(snap_id);
@@ -304,7 +308,9 @@ void delete_system_snapshot(AppState *state, const std::string &payload) {
             emit_snapshots_feedback(state, true, "已删除快照 #" + id_s + "。");
         }
         push_snapshots_state(state);
-    }).detach();
+    })) {
+        emit_snapshots_feedback(state, false, "已有快照操作正在执行中，请稍候。");
+    }
 }
 
 /* ==================== Agent Parallel Sandbox Settings & IPC ==================== */
@@ -408,7 +414,7 @@ void add_sandbox_dir(AppState *state, const std::string &payload) {
     }
 
     if (path.empty()) {
-        std::thread([state, writable]() {
+        launch_async_task("sandbox:pick", [state, writable]() {
             std::string bin = has_executable("spinel-files") ? "spinel-files" : "/usr/local/bin/spinel-files";
             std::string picked;
             int rc = 1;
@@ -441,7 +447,7 @@ void add_sandbox_dir(AppState *state, const std::string &payload) {
                 }
                 return G_SOURCE_REMOVE;
             }, ctx);
-        }).detach();
+        });
         return;
     }
 
@@ -471,7 +477,7 @@ void remove_sandbox_dir(AppState *state, const std::string &payload) {
 }
 
 void sandbox_session_action(AppState *state, const std::string &action) {
-    std::thread([state, action]() {
+    launch_async_task("sandbox:action", [state, action]() {
         std::string err;
         bool ok = true;
         std::string msg;
@@ -521,7 +527,7 @@ void sandbox_session_action(AppState *state, const std::string &action) {
             }
             return G_SOURCE_REMOVE;
         }, u);
-    }).detach();
+    });
 }
 
 void add_sandbox_app_ipc(AppState *state, const std::string &payload) {
@@ -587,7 +593,7 @@ void launch_sandbox_app_ipc(AppState *state, const std::string &payload) {
         if (trim_copy(line.substr(0, eq)) == "cmd") cmd = trim_copy(line.substr(eq + 1));
     }
     if (cmd.empty()) return;
-    std::thread([state, cmd]() {
+    launch_async_task("", [state, cmd]() {
         std::string err;
         bool ok = launch_cmd_in_sandbox(cmd, err);
         struct LaunchRes {
@@ -609,5 +615,5 @@ void launch_sandbox_app_ipc(AppState *state, const std::string &payload) {
             }
             return G_SOURCE_REMOVE;
         }, r);
-    }).detach();
+    });
 }

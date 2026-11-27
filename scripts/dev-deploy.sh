@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/manifest.env"
+
 if [[ -f "${ROOT_DIR}/.env.local" ]]; then
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/.env.local"
@@ -350,29 +353,25 @@ SSH_OPTS=(-p "${DEV_PORT}" -o "ControlMaster=auto" -o "ControlPath=${CTL_SOCK}" 
 SSH_CMD="ssh -p ${DEV_PORT} -o ControlMaster=auto -o ControlPath=${CTL_SOCK} -o ControlPersist=120 -o StrictHostKeyChecking=accept-new"
 ssh "${SSH_OPTS[@]}" "${DEV_HOST}" "rm -rf /tmp/spinel-dev && mkdir -p /tmp/spinel-dev/ui"
 if [[ "${MODE}" != "ui" ]]; then
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-shell" "${DEV_HOST}:/tmp/spinel-dev/spinel-shell"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-webui" "${DEV_HOST}:/tmp/spinel-dev/spinel-webui"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-terminal" "${DEV_HOST}:/tmp/spinel-dev/spinel-terminal"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-sandbox" "${DEV_HOST}:/tmp/spinel-dev/spinel-sandbox"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-agent-ctl" "${DEV_HOST}:/tmp/spinel-dev/spinel-agent-ctl"
-  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-os-mcp" "${DEV_HOST}:/tmp/spinel-dev/spinel-os-mcp"
-  rsync -avz -e "${SSH_CMD}" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Store.desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Games.desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Store.svg" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Games.svg" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" \
-    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" \
-    "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-update" \
-    "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota.conf" \
-    "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" \
-    "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" \
-    "${DEV_HOST}:/tmp/spinel-dev/"
+  RSYNC_ITEMS=()
+  for bin in "${SPINEL_NATIVE_BINS[@]}"; do
+    RSYNC_ITEMS+=("${ROOT_DIR}/build/linux-amd64/${bin}")
+  done
+  for df in "${SPINEL_DESKTOP_FILES[@]}"; do
+    RSYNC_ITEMS+=("${ROOT_DIR}/archiso/airootfs/usr/share/applications/${df}")
+  done
+  for svg in "${SPINEL_ICON_SVGS[@]}"; do
+    RSYNC_ITEMS+=("${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/${svg}")
+  done
+  for helper in "${SPINEL_HELPER_BINS[@]}"; do
+    RSYNC_ITEMS+=("${ROOT_DIR}/archiso/airootfs/usr/local/bin/${helper}")
+  done
+  RSYNC_ITEMS+=(
+    "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota.conf"
+    "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service"
+    "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list"
+  )
+  rsync -avz -e "${SSH_CMD}" "${RSYNC_ITEMS[@]}" "${DEV_HOST}:/tmp/spinel-dev/"
   if [[ -f "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota-pubkey.pem" ]]; then
     rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/archiso/airootfs/etc/spinelos/ota-pubkey.pem" "${DEV_HOST}:/tmp/spinel-dev/ota-pubkey.pem"
   fi

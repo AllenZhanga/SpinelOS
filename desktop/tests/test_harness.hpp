@@ -11,6 +11,7 @@
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "file_associations.hpp"
+#include "files_ops.hpp"
 #include "ipc_router.hpp"
 #include "native_shell.hpp"
 #include "relay_client.hpp"

@@ -571,6 +571,40 @@ void test_steam_library() {
     EXPECT(after.logs_bytes == 0);
 }
 
+void test_async_tasks_and_files_ops() {
+    // Tracked async task deduplication and graceful drain
+    std::atomic<int> runs{0};
+    std::atomic<bool> hold{true};
+    EXPECT(launch_async_task("unit:dedup", [&]() {
+        ++runs;
+        while (hold.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }));
+    EXPECT(!launch_async_task("unit:dedup", [&]() { ++runs; }));
+    hold.store(false);
+    wait_all_async_tasks(1000);
+    EXPECT(runs.load() == 1);
+    EXPECT(launch_async_task("unit:dedup", [&]() { ++runs; }));
+    wait_all_async_tasks(1000);
+    EXPECT(runs.load() == 2);
+
+    // Pure Spinel Files operations
+    EXPECT(spinel::files::format_size(512) == "512 B");
+    EXPECT(spinel::files::format_size(1536) == "1.5 KB");
+    EXPECT(spinel::files::format_perms(fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read) == "rw-r-----");
+    EXPECT(spinel::files::is_archive_file("/tmp/archive.tar.zst"));
+    EXPECT(spinel::files::is_archive_file("/tmp/DEMO.ZIP"));
+    EXPECT(!spinel::files::is_archive_file("/tmp/notes.txt"));
+    EXPECT(spinel::files::strip_archive_ext("project.tar.gz") == "project");
+    EXPECT(spinel::files::strip_archive_ext("bundle.zip") == "bundle");
+    EXPECT(spinel::files::is_script_or_appimage("/opt/Obsidian-1.6.AppImage"));
+    EXPECT(!spinel::files::is_script_or_appimage("/opt/readme.md"));
+    EXPECT(spinel::files::sanitize_app_slug("My_Cool.App 2") == "my-cool-app-2");
+    EXPECT(spinel::files::guess_friendly_app_name("/tmp/obsidian-1.6.AppImage") == "Obsidian-1.6");
+    EXPECT(spinel::files::sanitize_url_scheme("MyApp+Test://open") == "myapp+test");
+}
+
 
 }  // namespace
 
@@ -584,6 +618,7 @@ void run_core_tests() {
     test_desktop_apps();
     test_wine_app_catalog();
     test_steam_library();
+    test_async_tasks_and_files_ops();
 }
 
 }  // namespace spinel_test

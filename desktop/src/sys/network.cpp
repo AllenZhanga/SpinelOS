@@ -13,6 +13,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -105,10 +106,36 @@ std::string sanitize_no_proxy(const std::string &s) {
 }
 
 std::string detect_gpu_summary() {
-    std::string gpu = run_cmd_capture(
-        "lspci -mm 2>/dev/null | awk -F'\"' '/VGA|3D|Display/ {print $6; exit}'"
-    );
-    return gpu.empty() ? "Generic DRM/Mesa" : gpu;
+    static std::once_flag gpu_once;
+    static std::string cached_gpu;
+    std::call_once(gpu_once, []() {
+        std::string out;
+        int rc = 1;
+        if (run_argv_capture({"lspci", "-mm"}, out, rc) && rc == 0) {
+            for (const auto &line : split_lines(out)) {
+                if (line.find("\"VGA") == std::string::npos &&
+                    line.find("\"3D") == std::string::npos &&
+                    line.find("\"Display") == std::string::npos) {
+                    continue;
+                }
+                // lspci -mm quotes fields: slot "Class" "Vendor" "Device" ...
+                std::vector<std::string> quoted;
+                size_t pos = 0;
+                while ((pos = line.find('"', pos)) != std::string::npos) {
+                    size_t end = line.find('"', pos + 1);
+                    if (end == std::string::npos) break;
+                    quoted.push_back(line.substr(pos + 1, end - pos - 1));
+                    pos = end + 1;
+                }
+                if (quoted.size() >= 3 && !quoted[2].empty()) {
+                    cached_gpu = quoted[2];
+                    break;
+                }
+            }
+        }
+        if (cached_gpu.empty()) cached_gpu = "Generic DRM/Mesa";
+    });
+    return cached_gpu;
 }
 
 std::string detect_network_status() {
@@ -430,7 +457,26 @@ void push_proxy_config(AppState *state) {
     ProxyConfig cfg = load_proxy_config();
     ProxyConfig eff = resolve_effective_proxy();
     std::string ext_addr = (!cfg.enabled && eff.enabled) ? (!eff.http_proxy.empty() ? eff.http_proxy : eff.socks_proxy) : "";
-    std::string gw = run_cmd_capture("ip route 2>/dev/null | awk '/default/ {print $3; exit}'");
+    std::string gw;
+    if (has_executable("ip")) {
+        std::string route_out;
+        int route_rc = 1;
+        if (run_argv_capture({"ip", "route"}, route_out, route_rc) && route_rc == 0) {
+            for (const auto &line : split_lines(route_out)) {
+                if (line.rfind("default ", 0) == 0) {
+                    std::istringstream iss(line);
+                    std::string tok;
+                    while (iss >> tok) {
+                        if (tok == "via" && (iss >> tok)) {
+                            gw = tok;
+                            break;
+                        }
+                    }
+                    if (!gw.empty()) break;
+                }
+            }
+        }
+    }
     std::ostringstream js;
     js << "window.__spinelProxyConfig && window.__spinelProxyConfig({"
        << "\"enabled\":" << (cfg.enabled ? "true" : "false") << ","
@@ -601,13 +647,18 @@ TelemetrySnapshot collect_telemetry() {
 
 MediaSnapshot collect_media_state() {
     MediaSnapshot snap;
-    std::string vol_out = run_cmd_capture("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null");
-    auto pos = vol_out.find("Volume:");
-    if (pos != std::string::npos) {
-        double v = std::atof(vol_out.c_str() + pos + 7);
-        snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+    if (has_executable("wpctl")) {
+        std::string vol_out;
+        int vol_rc = 1;
+        if (run_argv_capture({"wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"}, vol_out, vol_rc) && vol_rc == 0) {
+            auto pos = vol_out.find("Volume:");
+            if (pos != std::string::npos) {
+                double v = std::atof(vol_out.c_str() + pos + 7);
+                snap.volume = std::clamp(static_cast<int>(v * 100.0 + 0.5), 0, 100);
+            }
+            snap.volume_muted = (vol_out.find("MUTED") != std::string::npos);
+        }
     }
-    snap.volume_muted = (vol_out.find("MUTED") != std::string::npos);
 
     if (has_executable("brightnessctl")) {
         std::string b_out;
@@ -622,19 +673,20 @@ MediaSnapshot collect_media_state() {
             }
         }
     }
+    std::error_code ec;
     if (snap.brightness < 0) {
-        std::string br_out = run_cmd_capture(
-            "for d in /sys/class/backlight/*; do "
-            "[ -r \"$d/brightness\" ] && [ -r \"$d/max_brightness\" ] || continue; "
-            "cur=$(cat \"$d/brightness\"); max=$(cat \"$d/max_brightness\"); "
-            "[ \"$max\" -gt 0 ] && awk \"BEGIN{printf \\\"%d\\\", ($cur/$max)*100}\" && break; "
-            "done 2>/dev/null");
-        if (!br_out.empty()) {
-            snap.brightness = std::clamp(std::atoi(br_out.c_str()), 5, 100);
+        for (const auto &entry : fs::directory_iterator("/sys/class/backlight", ec)) {
+            std::string cur_s = trim_copy(read_first_line((entry.path() / "brightness").string(), ""));
+            std::string max_s = trim_copy(read_first_line((entry.path() / "max_brightness").string(), ""));
+            long long cur = cur_s.empty() ? -1 : std::atoll(cur_s.c_str());
+            long long maxv = max_s.empty() ? 0 : std::atoll(max_s.c_str());
+            if (cur >= 0 && maxv > 0) {
+                snap.brightness = std::clamp(static_cast<int>((cur * 100) / maxv), 5, 100);
+                break;
+            }
         }
     }
 
-    std::error_code ec;
     for (const auto &entry : fs::directory_iterator("/sys/class/power_supply", ec)) {
         std::string nm = entry.path().filename().string();
         if (nm.rfind("BAT", 0) != 0) continue;
