@@ -43,6 +43,14 @@ void test_parallel_sandbox() {
     EXPECT(rc.find("spinel-shell --sandbox-launcher") != std::string::npos);
     EXPECT(has_arg(argv_shared, "SPINEL_SANDBOX_SHELL"));
 
+    // Verify sandbox dbus-daemon also runs inside bwrap with isolated display/runtime & systemd env stripped
+    auto argv_dbus = build_sandbox_dbus_bwrap_argv(loaded, rt_dir, fake_home, home_dir(), 1000);
+    EXPECT(has_arg(argv_dbus, "bwrap"));
+    EXPECT(has_arg(argv_dbus, "dbus-daemon"));
+    EXPECT(has_arg(argv_dbus, "unix:path=/run/user/1000/bus"));
+    EXPECT(has_arg(argv_dbus, "NOTIFY_SOCKET"));
+    EXPECT(has_arg(argv_dbus, "SPINEL_SANDBOX_SHELL"));
+
     EXPECT(remove_sandbox_mount_dir(norm));
     EXPECT(load_sandbox_config().rw_dirs.empty());
 

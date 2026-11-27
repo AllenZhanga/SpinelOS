@@ -69,7 +69,13 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
                                                   const std::string &host_home,
                                                   unsigned int uid,
                                                   const std::vector<std::string> &cmd_args,
-                                                  const std::string &cwd = "");
+                                                  const std::string &cwd = "",
+                                                  bool die_with_parent = true);
+std::vector<std::string> build_sandbox_dbus_bwrap_argv(const SandboxConfig &cfg,
+                                                       const std::string &runtime_dir,
+                                                       const std::string &fake_home,
+                                                       const std::string &host_home,
+                                                       unsigned int uid);
 
 SandboxStatus query_sandbox_status();
 std::string sandbox_state_json();

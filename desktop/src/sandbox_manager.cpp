@@ -189,7 +189,10 @@ int count_sandbox_processes(const std::string &sb_home) {
     return count;
 }
 
-bool start_sandbox_dbus_daemon(const std::string &rt_dir) {
+bool start_sandbox_dbus_daemon(const SandboxConfig &cfg,
+                               const std::string &rt_dir,
+                               const std::string &fake_home,
+                               bool force_sw_gtk) {
     std::string bus_sock = rt_dir + "/bus";
     std::error_code ec;
     if (fs::exists(bus_sock, ec)) {
@@ -197,39 +200,47 @@ bool start_sandbox_dbus_daemon(const std::string &rt_dir) {
         if (is_pid_alive(existing)) return true;
         fs::remove(bus_sock, ec);
     }
-    if (!has_executable("dbus-daemon")) return false;
+    if (!has_executable("dbus-daemon") || !has_executable("bwrap")) return false;
 
-    std::string addr = "unix:path=" + bus_sock;
-    std::string pid_str;
-    int rc = 1;
+    std::vector<std::string> bwrap_args = build_sandbox_dbus_bwrap_argv(
+        cfg, rt_dir, fake_home, home_dir(), static_cast<unsigned int>(::getuid()));
+
     int pipefd[2]{-1, -1};
     if (::pipe(pipefd) != 0) return false;
 
     pid_t pid = ::fork();
     if (pid == 0) {
+        ::setsid();
         ::close(pipefd[0]);
         ::dup2(pipefd[1], STDOUT_FILENO);
         ::close(pipefd[1]);
-        ::execlp("dbus-daemon", "dbus-daemon", "--session", "--nofork", "--address", addr.c_str(), "--print-pid", nullptr);
+        if (force_sw_gtk) {
+            ::setenv("WLR_RENDERER", "pixman", 1);
+            ::setenv("GSK_RENDERER", "cairo", 1);
+            ::setenv("LIBGL_ALWAYS_SOFTWARE", "1", 1);
+        }
+        std::vector<char *> cargs;
+        cargs.reserve(bwrap_args.size() + 1);
+        for (auto &a : bwrap_args) cargs.push_back(const_cast<char *>(a.c_str()));
+        cargs.push_back(nullptr);
+        ::execvp(cargs[0], cargs.data());
         _exit(127);
     }
     ::close(pipefd[1]);
     if (pid > 0) {
         write_text_file(sandbox_dbus_pid_file(), std::to_string(pid) + "\n");
-        // Wait briefly for bus socket creation (read --print-pid first line)
         char buf[64]{};
         ssize_t n = ::read(pipefd[0], buf, sizeof(buf) - 1);
         (void)n;
         ::close(pipefd[0]);
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < 25; ++i) {
             if (fs::exists(bus_sock, ec)) return true;
+            if (!is_pid_alive(pid)) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
         }
         return fs::exists(bus_sock, ec);
     }
     ::close(pipefd[0]);
-    (void)pid_str;
-    (void)rc;
     return false;
 }
 
@@ -655,11 +666,14 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
                                                   const std::string &host_home,
                                                   unsigned int uid,
                                                   const std::vector<std::string> &cmd_args,
-                                                  const std::string &cwd) {
+                                                  const std::string &cwd,
+                                                  bool die_with_parent) {
     std::vector<std::string> args;
     std::string run_user = "/run/user/" + std::to_string(uid);
     args.push_back("bwrap");
-    args.push_back("--die-with-parent");
+    if (die_with_parent) {
+        args.push_back("--die-with-parent");
+    }
     args.push_back("--new-session");
     args.push_back("--unshare-pid");
     args.push_back("--unshare-ipc");
@@ -785,6 +799,14 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
     args.push_back("DISPLAY");
     args.push_back("--unsetenv");
     args.push_back("SSH_AUTH_SOCK");
+    args.push_back("--unsetenv");
+    args.push_back("NOTIFY_SOCKET");
+    args.push_back("--unsetenv");
+    args.push_back("SYSTEMD_EXEC_PID");
+    args.push_back("--unsetenv");
+    args.push_back("INVOCATION_ID");
+    args.push_back("--unsetenv");
+    args.push_back("MANAGERPID");
 
     if (!cwd.empty()) {
         args.push_back("--chdir");
@@ -797,6 +819,23 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
     args.push_back("--");
     for (const auto &a : cmd_args) args.push_back(a);
     return args;
+}
+
+std::vector<std::string> build_sandbox_dbus_bwrap_argv(const SandboxConfig &cfg,
+                                                       const std::string &runtime_dir,
+                                                       const std::string &fake_home,
+                                                       const std::string &host_home,
+                                                       unsigned int uid) {
+    std::string run_user = "/run/user/" + std::to_string(uid);
+    return build_sandbox_bwrap_argv(
+        cfg,
+        runtime_dir,
+        fake_home,
+        host_home,
+        uid,
+        {"dbus-daemon", "--session", "--nofork", "--address", "unix:path=" + run_user + "/bus", "--print-pid"},
+        "",
+        false);
 }
 
 SandboxStatus query_sandbox_status() {
@@ -980,10 +1019,9 @@ bool start_sandbox_session(std::string &error_out) {
     int res_w = 1600, res_h = 900;
     is_valid_sandbox_resolution(cfg.resolution, res_w, res_h);
 
-    start_sandbox_dbus_daemon(rt_dir);
-
     const char *host_renderer = std::getenv("WLR_RENDERER");
     bool host_pixman = (host_renderer && std::string(host_renderer) == "pixman");
+    bool used_pixman = host_pixman;
     bool has_systemd = has_executable("systemd-run");
     pid_t pid = -1;
     bool ready = false;
@@ -991,12 +1029,15 @@ bool start_sandbox_session(std::string &error_out) {
     if (has_systemd) {
         ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, true, host_pixman, pid);
         if (!ready && !host_pixman) {
+            used_pixman = true;
             ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, true, true, pid);
         }
     }
     if (!ready) {
+        used_pixman = host_pixman;
         ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, false, host_pixman, pid);
         if (!ready && !host_pixman) {
+            used_pixman = true;
             ready = spawn_headless_compositor_attempt(rt_dir, cfg_dir, cfg, false, true, pid);
         }
     }
@@ -1006,8 +1047,10 @@ bool start_sandbox_session(std::string &error_out) {
         return false;
     }
 
-    // Apply requested headless resolution via wlr-randr if available inside that socket
+    // Apply requested headless resolution and start isolated session D-Bus inside bwrap
+    // so portals/file choosers render inside the sandbox Wayland display instead of leaking to host.
     apply_sandbox_resolution_live(res_w, res_h);
+    start_sandbox_dbus_daemon(cfg, rt_dir, fake_home, used_pixman);
 
     ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
     ensure_sandbox_shell_running(cfg, rt_dir, fake_home);
@@ -1040,7 +1083,16 @@ bool stop_sandbox_session(std::string &error_out) {
 
     int dpid = read_pid_file(sandbox_dbus_pid_file());
     if (is_pid_alive(dpid)) {
+        ::kill(-dpid, SIGTERM);
         ::kill(dpid, SIGTERM);
+        for (int i = 0; i < 10; ++i) {
+            if (!is_pid_alive(dpid)) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+        if (is_pid_alive(dpid)) {
+            ::kill(-dpid, SIGKILL);
+            ::kill(dpid, SIGKILL);
+        }
     }
 
     std::error_code ec;
