@@ -189,6 +189,28 @@ int count_sandbox_processes(const std::string &sb_home) {
     return count;
 }
 
+void prepare_sandbox_dbus_config(const std::string &rt_dir, unsigned int uid) {
+    std::string srv_dir = rt_dir + "/dbus-services";
+    std::error_code ec;
+    fs::remove_all(srv_dir, ec);
+    fs::create_directories(srv_dir, ec);
+    ::chmod(srv_dir.c_str(), 0700);
+
+    for (const char *sys_dir : {"/usr/share/dbus-1/services", "/usr/local/share/dbus-1/services"}) {
+        if (!fs::is_directory(sys_dir, ec)) continue;
+        for (const auto &entry : fs::directory_iterator(sys_dir, fs::directory_options::skip_permission_denied, ec)) {
+            if (entry.is_directory(ec)) continue;
+            std::string name = entry.path().filename().string();
+            if (!is_sandbox_dbus_service_allowed(name)) continue;
+            fs::path dst = fs::path(srv_dir) / name;
+            fs::remove(dst, ec);
+            fs::create_symlink(entry.path(), dst, ec);
+        }
+    }
+
+    write_text_file(rt_dir + "/dbus-session.conf", build_sandbox_dbus_session_conf(uid));
+}
+
 bool start_sandbox_dbus_daemon(const SandboxConfig &cfg,
                                const std::string &rt_dir,
                                const std::string &fake_home,
@@ -202,18 +224,20 @@ bool start_sandbox_dbus_daemon(const SandboxConfig &cfg,
     }
     if (!has_executable("dbus-daemon") || !has_executable("bwrap")) return false;
 
-    std::vector<std::string> bwrap_args = build_sandbox_dbus_bwrap_argv(
-        cfg, rt_dir, fake_home, home_dir(), static_cast<unsigned int>(::getuid()));
-
-    int pipefd[2]{-1, -1};
-    if (::pipe(pipefd) != 0) return false;
+    unsigned int uid = static_cast<unsigned int>(::getuid());
+    prepare_sandbox_dbus_config(rt_dir, uid);
+    std::vector<std::string> bwrap_args = build_sandbox_dbus_bwrap_argv(cfg, rt_dir, fake_home, home_dir(), uid);
+    std::string log_path = rt_dir + "/dbus.log";
 
     pid_t pid = ::fork();
     if (pid == 0) {
         ::setsid();
-        ::close(pipefd[0]);
-        ::dup2(pipefd[1], STDOUT_FILENO);
-        ::close(pipefd[1]);
+        int log_fd = ::open(log_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
+        if (log_fd >= 0) {
+            ::dup2(log_fd, STDOUT_FILENO);
+            ::dup2(log_fd, STDERR_FILENO);
+            if (log_fd > STDERR_FILENO) ::close(log_fd);
+        }
         if (force_sw_gtk) {
             ::setenv("WLR_RENDERER", "pixman", 1);
             ::setenv("GSK_RENDERER", "cairo", 1);
@@ -226,21 +250,15 @@ bool start_sandbox_dbus_daemon(const SandboxConfig &cfg,
         ::execvp(cargs[0], cargs.data());
         _exit(127);
     }
-    ::close(pipefd[1]);
     if (pid > 0) {
         write_text_file(sandbox_dbus_pid_file(), std::to_string(pid) + "\n");
-        char buf[64]{};
-        ssize_t n = ::read(pipefd[0], buf, sizeof(buf) - 1);
-        (void)n;
-        ::close(pipefd[0]);
-        for (int i = 0; i < 25; ++i) {
+        for (int i = 0; i < 40; ++i) {
             if (fs::exists(bus_sock, ec)) return true;
             if (!is_pid_alive(pid)) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
         }
         return fs::exists(bus_sock, ec);
     }
-    ::close(pipefd[0]);
     return false;
 }
 
@@ -793,6 +811,9 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
     args.push_back("ELECTRON_OZONE_PLATFORM_HINT");
     args.push_back("wayland");
     args.push_back("--setenv");
+    args.push_back("GTK_USE_PORTAL");
+    args.push_back("0");
+    args.push_back("--setenv");
     args.push_back("SPINEL_SANDBOX_SHELL");
     args.push_back("1");
     args.push_back("--unsetenv");
@@ -821,6 +842,42 @@ std::vector<std::string> build_sandbox_bwrap_argv(const SandboxConfig &cfg,
     return args;
 }
 
+bool is_sandbox_dbus_service_allowed(const std::string &filename) {
+    if (filename.size() <= 8 || filename.compare(filename.size() - 8, 8, ".service") != 0) {
+        return false;
+    }
+    // Exclude xdg-desktop-portal / document-portal (fails on missing FUSE or leaks host chooser),
+    // and systemd/logind services unreachable inside isolated --unshare-pid namespaces.
+    if (filename.find("portal") != std::string::npos) return false;
+    static const char *const kBlocked[] = {
+        "org.freedesktop.systemd1.service",
+        "org.freedesktop.import1.service",
+        "org.freedesktop.machine1.service",
+        "org.freedesktop.portable1.service",
+    };
+    for (const char *b : kBlocked) {
+        if (filename == b) return false;
+    }
+    return true;
+}
+
+std::string build_sandbox_dbus_session_conf(unsigned int uid) {
+    std::string run_user = "/run/user/" + std::to_string(uid);
+    return "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\"\n"
+           " \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n"
+           "<busconfig>\n"
+           "  <type>session</type>\n"
+           "  <listen>unix:path=" + run_user + "/bus</listen>\n"
+           "  <servicedir>" + run_user + "/dbus-services</servicedir>\n"
+           "  <policy context=\"default\">\n"
+           "    <allow send_destination=\"*\" eavesdrop=\"true\"/>\n"
+           "    <allow eavesdrop=\"true\"/>\n"
+           "    <allow own=\"*\"/>\n"
+           "    <allow user=\"*\"/>\n"
+           "  </policy>\n"
+           "</busconfig>\n";
+}
+
 std::vector<std::string> build_sandbox_dbus_bwrap_argv(const SandboxConfig &cfg,
                                                        const std::string &runtime_dir,
                                                        const std::string &fake_home,
@@ -833,7 +890,7 @@ std::vector<std::string> build_sandbox_dbus_bwrap_argv(const SandboxConfig &cfg,
         fake_home,
         host_home,
         uid,
-        {"dbus-daemon", "--session", "--nofork", "--address", "unix:path=" + run_user + "/bus", "--print-pid"},
+        {"dbus-daemon", "--config-file=" + run_user + "/dbus-session.conf", "--nofork", "--nopidfile"},
         "",
         false);
 }

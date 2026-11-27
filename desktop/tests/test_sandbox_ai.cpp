@@ -43,13 +43,23 @@ void test_parallel_sandbox() {
     EXPECT(rc.find("spinel-shell --sandbox-launcher") != std::string::npos);
     EXPECT(has_arg(argv_shared, "SPINEL_SANDBOX_SHELL"));
 
-    // Verify sandbox dbus-daemon also runs inside bwrap with isolated display/runtime & systemd env stripped
+    // Verify sandbox dbus-daemon also runs inside bwrap with isolated display/runtime,
+    // strips portal services so Electron/GTK falls back to in-process sandbox file choosers,
+    // and strips systemd env vars.
     auto argv_dbus = build_sandbox_dbus_bwrap_argv(loaded, rt_dir, fake_home, home_dir(), 1000);
     EXPECT(has_arg(argv_dbus, "bwrap"));
     EXPECT(has_arg(argv_dbus, "dbus-daemon"));
-    EXPECT(has_arg(argv_dbus, "unix:path=/run/user/1000/bus"));
+    EXPECT(has_arg(argv_dbus, "--config-file=/run/user/1000/dbus-session.conf"));
     EXPECT(has_arg(argv_dbus, "NOTIFY_SOCKET"));
+    EXPECT(has_arg(argv_dbus, "GTK_USE_PORTAL"));
     EXPECT(has_arg(argv_dbus, "SPINEL_SANDBOX_SHELL"));
+    EXPECT(!is_sandbox_dbus_service_allowed("org.freedesktop.portal.Desktop.service"));
+    EXPECT(!is_sandbox_dbus_service_allowed("org.freedesktop.portal.Documents.service"));
+    EXPECT(!is_sandbox_dbus_service_allowed("org.freedesktop.systemd1.service"));
+    EXPECT(is_sandbox_dbus_service_allowed("org.spinelos.FileManager1.service"));
+    EXPECT(is_sandbox_dbus_service_allowed("ca.desrt.dconf.service"));
+    std::string dconf_xml = build_sandbox_dbus_session_conf(1000);
+    EXPECT(dconf_xml.find("/run/user/1000/dbus-services") != std::string::npos);
 
     EXPECT(remove_sandbox_mount_dir(norm));
     EXPECT(load_sandbox_config().rw_dirs.empty());

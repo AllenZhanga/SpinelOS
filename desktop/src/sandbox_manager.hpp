@@ -76,6 +76,8 @@ std::vector<std::string> build_sandbox_dbus_bwrap_argv(const SandboxConfig &cfg,
                                                        const std::string &fake_home,
                                                        const std::string &host_home,
                                                        unsigned int uid);
+bool is_sandbox_dbus_service_allowed(const std::string &filename);
+std::string build_sandbox_dbus_session_conf(unsigned int uid);
 
 SandboxStatus query_sandbox_status();
 std::string sandbox_state_json();
