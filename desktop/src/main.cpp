@@ -625,16 +625,18 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
         gtk_file_dialog_set_initial_folder(dlg, init_folder);
         g_object_unref(init_folder);
 
-        gtk_file_dialog_open(dlg, s->store_win, nullptr,
+        GtkWindow *parent_win = s->settings_win ? s->settings_win : s->store_win;
+        gtk_file_dialog_open(dlg, parent_win, nullptr,
             +[](GObject *src, GAsyncResult *res, gpointer data) {
                 auto *st = static_cast<AppState *>(data);
                 GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, nullptr);
                 if (file) {
                     char *path = g_file_get_path(file);
-                    if (path && *path && st && !st->shutting_down.load() && st->store_view) {
+                    if (path && *path && st && !st->shutting_down.load()) {
                         std::string js = "window.__spinelStartOfflineOta && window.__spinelStartOfflineOta(\"" +
                                          json_escape(path) + "\");";
-                        eval_js(st->store_view, js);
+                        if (st->settings_view) eval_js(st->settings_view, js);
+                        if (st->store_view) eval_js(st->store_view, js);
                     }
                     g_free(path);
                     g_object_unref(file);

@@ -2514,6 +2514,8 @@ void check_spinelos_ota_async(AppState *state) {
             int rc = 1;
             if (run_argv_capture({bin, "check", "--json"}, out, rc)) {
                 std::string trimmed = trim_copy(out);
+                auto line_pos = trimmed.rfind("\n{");
+                if (line_pos != std::string::npos) trimmed = trimmed.substr(line_pos + 1);
                 if (!trimmed.empty() && trimmed.front() == '{' && trimmed.back() == '}') {
                     payload = trimmed;
                 }

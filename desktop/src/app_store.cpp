@@ -357,6 +357,12 @@ struct StoreIdleMsg {
     std::string action;
 };
 
+void eval_store_and_settings_views(AppState *state, const std::string &js) {
+    if (!state) return;
+    if (state->store_view) eval_js(state->store_view, js);
+    if (state->settings_view) eval_js(state->settings_view, js);
+}
+
 gboolean on_store_idle(gpointer data) {
     std::unique_ptr<StoreIdleMsg> msg(static_cast<StoreIdleMsg *>(data));
     if (msg->state->shutting_down.load()) return G_SOURCE_REMOVE;
@@ -366,32 +372,32 @@ gboolean on_store_idle(gpointer data) {
         push_desktop_apps(msg->state);
         push_store_catalog(msg->state);
 
-        if (msg->state->store_view) {
+        if (msg->state->store_view || msg->state->settings_view) {
             std::ostringstream js;
             js << "window.__spinelStoreDone && window.__spinelStoreDone("
                << (msg->exit_code == 0 ? "true" : "false") << ",\""
                << json_escape(msg->target_id) << "\",\""
                << json_escape(msg->action) << "\");";
-            eval_js(msg->state->store_view, js.str());
+            eval_store_and_settings_views(msg->state, js.str());
         }
         return G_SOURCE_REMOVE;
     }
 
     if (msg->kind == StoreIdleKind::Progress) {
-        if (msg->state->store_view) {
+        if (msg->state->store_view || msg->state->settings_view) {
             std::ostringstream js;
             js << "window.__spinelStoreProgress && window.__spinelStoreProgress("
                << msg->exit_code << ",\"" << json_escape(msg->line) << "\");";
-            eval_js(msg->state->store_view, js.str());
+            eval_store_and_settings_views(msg->state, js.str());
         }
         return G_SOURCE_REMOVE;
     }
 
-    if (msg->state->store_view) {
+    if (msg->state->store_view || msg->state->settings_view) {
         std::ostringstream js;
         js << "window.__spinelStoreLog && window.__spinelStoreLog(\""
            << json_escape(msg->line) << "\");";
-        eval_js(msg->state->store_view, js.str());
+        eval_store_and_settings_views(msg->state, js.str());
     }
     return G_SOURCE_REMOVE;
 }
@@ -590,7 +596,7 @@ const StoreAppEntry *find_catalog_entry(const std::string &id) {
 }  // namespace
 
 void push_store_catalog(AppState *state) {
-    if (!state || !state->store_view) return;
+    if (!state || (!state->store_view && !state->settings_view)) return;
     bool flatpak_ok = has_flatpak_cli();
     bool sudo_nopass = check_sudo_nopasswd();
     GpuDriverUpdateInfo gi = collect_gpu_driver_update_info();
@@ -648,7 +654,7 @@ void push_store_catalog(AppState *state) {
            << "}";
     }
     js << "]});";
-    eval_js(state->store_view, js.str());
+    eval_store_and_settings_views(state, js.str());
 }
 
 void start_store_action(AppState *state, const std::string &action, const std::string &payload) {

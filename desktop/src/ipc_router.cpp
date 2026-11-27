@@ -868,7 +868,7 @@ bool dispatch_ipc_command(AppState *state,
                 return;
             }
             if (tab == "wifi" || tab == "bt" || tab == "display" || tab == "devices" || tab == "audio" || tab == "shortcuts" ||
-                tab == "perf" || tab == "appearance" || tab == "perms" || tab == "relay") {
+                tab == "perf" || tab == "appearance" || tab == "perms" || tab == "snapshots" || tab == "updates" || tab == "relay") {
                 native_shell_set_cc_visible(s, false);
                 if (a.open_settings) a.open_settings(s, tab);
             }

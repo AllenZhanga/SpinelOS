@@ -268,49 +268,82 @@
     renderDesktopShortcuts();
   };
 
-  /* ---------------- 5. SpinelOS App Store ---------------- */
+  /* ---------------- 5. SpinelOS App Store & Settings Updates ---------------- */
   let storeCategory = "all";
 
+  function getActiveLogDom() {
+    const useUpd = UI.mode === "settings";
+    const pfx = useUpd ? "upd" : "store";
+    return {
+      wrap: document.getElementById(`${pfx}-log-wrap`),
+      box: document.getElementById(`${pfx}-log-box`),
+      title: document.getElementById(`${pfx}-log-title`),
+      progWrap: document.getElementById(`${pfx}-progress-wrap`),
+      progBar: document.getElementById(`${pfx}-progress-bar`),
+      progText: document.getElementById(`${pfx}-progress-text`),
+      progPct: document.getElementById(`${pfx}-progress-pct`),
+      cancelBtn: document.getElementById(useUpd ? "btn-upd-cancel" : "btn-store-cancel")
+    };
+  }
+
   function renderStoreApps() {
-    const grid = document.getElementById("store-app-grid");
-    if (!grid) return;
     const ss = state.storeState;
     const customBtn = document.getElementById("btn-store-custom");
     if (customBtn) customBtn.disabled = ss.busy;
-    const cancelBtn = document.getElementById("btn-store-cancel");
-    if (cancelBtn) {
-      cancelBtn.classList.toggle("hidden", !ss.busy);
-      if (!ss.busy) {
-        cancelBtn.disabled = false;
-        cancelBtn.textContent = "停止下载";
+    ["btn-store-cancel", "btn-upd-cancel"].forEach((cid) => {
+      const cancelBtn = document.getElementById(cid);
+      if (cancelBtn) {
+        cancelBtn.classList.toggle("hidden", !ss.busy);
+        if (!ss.busy) {
+          cancelBtn.disabled = false;
+          cancelBtn.textContent = cid === "btn-upd-cancel" ? "停止任务" : "停止下载";
+        }
       }
-    }
-    document.querySelectorAll("[data-store-sys]").forEach((b) => { b.disabled = ss.busy; });
-    const drvChip = document.getElementById("store-driver-chip");
-    if (drvChip && ss.driver_summary) {
-      drvChip.textContent = `显卡: ${ss.driver_summary}${ss.kernel_summary ? ` · 内核 ${ss.kernel_summary}` : ""}`;
-    }
-    const updChip = document.getElementById("store-update-chip");
+    });
+    document.querySelectorAll("[data-store-sys]").forEach((b) => {
+      if (b.dataset.otaLocked === "1") {
+        b.disabled = true;
+      } else {
+        b.disabled = ss.busy;
+      }
+    });
+    const offlineBtn = document.getElementById("btn-spinel-ota-offline");
+    if (offlineBtn) offlineBtn.disabled = ss.busy;
+
+    const drvText = ss.driver_summary
+      ? `显卡: ${ss.driver_summary}${ss.kernel_summary ? ` · 内核 ${ss.kernel_summary}` : ""}`
+      : "";
+    ["store-driver-chip", "upd-driver-chip"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && drvText) el.textContent = drvText;
+    });
+
+    const totalUpd = Number(ss.updates_total || 0);
+    const gpuUpds = Array.isArray(ss.gpu_updates) ? ss.gpu_updates : [];
     const sysUpdBtn = document.getElementById("btn-sys-update");
-    if (updChip) {
-      const totalUpd = Number(ss.updates_total || 0);
-      const gpuUpds = Array.isArray(ss.gpu_updates) ? ss.gpu_updates : [];
+    ["store-update-chip", "upd-update-chip"].forEach((id) => {
+      const updChip = document.getElementById(id);
+      if (!updChip) return;
       if (totalUpd > 0) {
         updChip.textContent = gpuUpds.length > 0
           ? `可更新 ${totalUpd} 项（含显卡/内核 ${gpuUpds.length} 项）`
           : `可更新 ${totalUpd} 项`;
         updChip.style.background = "rgba(245, 158, 11, 0.18)";
         updChip.style.color = "#f59e0b";
-        if (sysUpdBtn) sysUpdBtn.textContent = `一键更新 (${totalUpd})`;
       } else {
         updChip.textContent = "系统与驱动已是最新";
         updChip.style.background = "";
         updChip.style.color = "";
-        if (sysUpdBtn) sysUpdBtn.textContent = "一键更新系统";
       }
+    });
+    if (sysUpdBtn) {
+      sysUpdBtn.textContent = totalUpd > 0 ? `一键更新软件包 (${totalUpd})` : "一键更新软件包";
     }
-    const rebootBtn = document.getElementById("btn-store-reboot");
-    if (rebootBtn) rebootBtn.classList.toggle("hidden", !ss.reboot_required);
+    const rebootBtn = document.getElementById("btn-upd-reboot");
+    if (rebootBtn && ss.reboot_required) rebootBtn.classList.remove("hidden");
+
+    const grid = document.getElementById("store-app-grid");
+    if (!grid) return;
 
     const query = (document.getElementById("store-search-input")?.value || "").trim().toLowerCase();
     const list = (ss.apps || []).filter((app) => {
@@ -474,10 +507,11 @@
   }
 
   function setStoreProgress(visible, pct = 0, label = "") {
-    const wrap = document.getElementById("store-progress-wrap");
-    const bar = document.getElementById("store-progress-bar");
-    const pctEl = document.getElementById("store-progress-pct");
-    const textEl = document.getElementById("store-progress-text");
+    const dom = getActiveLogDom();
+    const wrap = dom.progWrap;
+    const bar = dom.progBar;
+    const pctEl = dom.progPct;
+    const textEl = dom.progText;
     if (!wrap) return;
     wrap.classList.toggle("hidden", !visible);
     if (!visible) return;
@@ -488,9 +522,10 @@
   }
 
   function executeStoreOp(action, op, password = "") {
-    const logWrap = document.getElementById("store-log-wrap");
-    const logBox = document.getElementById("store-log-box");
-    const logTitle = document.getElementById("store-log-title");
+    const dom = getActiveLogDom();
+    const logWrap = dom.wrap;
+    const logBox = dom.box;
+    const logTitle = dom.title;
     if (logWrap) logWrap.classList.remove("hidden");
     if (logBox) logBox.textContent = "";
     const verbMap = {
@@ -501,11 +536,14 @@
       "webapp-pin": "正在固定快捷方式",
       "webapp-unpin": "正在移除快捷方式",
       "sys-update": "正在执行",
+      "spinel-ota-full": "正在在线升级",
+      "spinel-ota": "正在在线升级",
+      "spinel-ota-offline": "正在离线升级",
       "mirror-test": "正在执行",
       "keyring-fix": "正在执行"
     };
     if (logTitle) logTitle.textContent = `${verbMap[action] || "正在执行"}: ${op.name || op.pkg}`;
-    setStoreProgress(action === "install" || action === "sys-update", 2, `${verbMap[action] || "正在执行"} ${op.name || op.pkg}...`);
+    setStoreProgress(action === "install" || action === "sys-update" || action.startsWith("spinel-ota"), 2, `${verbMap[action] || "正在执行"} ${op.name || op.pkg}...`);
     state.storeState.busy = true;
     state.storeState.active_id = op.id || op.pkg || "";
     state.storeState.active_action = action;
@@ -626,12 +664,11 @@
   };
 
   window.__spinelStoreLog = (line) => {
-    const logWrap = document.getElementById("store-log-wrap");
-    const logBox = document.getElementById("store-log-box");
-    if (logWrap) logWrap.classList.remove("hidden");
-    if (logBox) {
-      logBox.textContent += `${line}\n`;
-      logBox.scrollTop = logBox.scrollHeight;
+    const dom = getActiveLogDom();
+    if (dom.wrap) dom.wrap.classList.remove("hidden");
+    if (dom.box) {
+      dom.box.textContent += `${line}\n`;
+      dom.box.scrollTop = dom.box.scrollHeight;
     }
   };
 
@@ -639,7 +676,8 @@
     state.storeState.busy = false;
     state.storeState.active_id = "";
     state.storeState.active_action = "";
-    const logTitle = document.getElementById("store-log-title");
+    const dom = getActiveLogDom();
+    const logTitle = dom.title;
     if (ok && action === "install") {
       setStoreProgress(true, 100, `安装完成: ${targetId}`);
     } else if (action === "cancel") {
@@ -650,15 +688,16 @@
       setStoreProgress(true, 100, `操作完成: ${targetId}`);
     }
     if (ok && (action === "spinel-ota-full" || action === "spinel-ota" || action === "spinel-ota-offline")) {
-      document.getElementById("btn-store-reboot")?.classList.remove("hidden");
+      document.getElementById("btn-upd-reboot")?.classList.remove("hidden");
       sendCommand("ota:check");
     }
     if (logTitle) {
       if (action === "cancel") {
-        logTitle.textContent = `已终止下载: ${targetId}`;
+        logTitle.textContent = `已终止任务: ${targetId}`;
       } else {
+        const doneVerb = action === "install" ? "安装完成" : (action === "remove" ? "卸载完成" : "操作完成");
         logTitle.textContent = ok
-          ? `${action === "install" ? "安装完成" : "卸载完成"}: ${targetId}`
+          ? `${doneVerb}: ${targetId}`
           : `操作未完成: ${targetId}（请查看下方输出）`;
       }
     }

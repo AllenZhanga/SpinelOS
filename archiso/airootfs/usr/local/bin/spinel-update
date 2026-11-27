@@ -127,6 +127,11 @@ if [[ -n "${RELAY_SERVER}" && -n "${RELAY_DEVICE_ID}" && -n "${RELAY_TOKEN}" ]];
 fi
 
 if [[ -z "${OTA_BASE_URL}" && "${IS_LOGGED_IN}" -eq 1 ]]; then
+  if [[ "${RELAY_SERVER}" == \[*\] ]]; then
+    RELAY_SERVER="${RELAY_SERVER}:7443"
+  elif [[ "${RELAY_SERVER}" != *:* ]]; then
+    RELAY_SERVER="${RELAY_SERVER}:7443"
+  fi
   OTA_BASE_URL="https://${RELAY_SERVER}/ota"
 fi
 OTA_BASE_URL="${OTA_BASE_URL%/}"
@@ -135,7 +140,7 @@ curl_fetch() {
   local url="$1"
   local out="$2"
   local show_prog="${3:-0}"
-  local args=(-fSL --connect-timeout 12 --max-time 300)
+  local args=(-fL --connect-timeout 12 --max-time 300)
   if [[ "${OTA_CURL_INSECURE}" == "true" ]]; then
     args+=(-k)
   fi
@@ -144,8 +149,10 @@ curl_fetch() {
   fi
   if [[ "${show_prog}" == "1" ]]; then
     args+=(--progress-bar)
-  else
+  elif [[ "${JSON_OUT}" -eq 1 ]]; then
     args+=(-s)
+  else
+    args+=(-sS)
   fi
   curl "${args[@]}" -o "${out}" "${url}"
 }

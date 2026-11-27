@@ -19,6 +19,7 @@
       shortcuts: "键盘与快捷键",
       perf: "游戏性能",
       appearance: "外观与输入法",
+      updates: "系统更新",
       perms: "权限与安全",
       snapshots: "系统快照 (Snapper)"
     };
@@ -50,6 +51,10 @@
       sendCommand("theme:refresh");
       sendCommand("dock:config-get");
       sendCommand("ime:status");
+    }
+    else if (target === "updates") {
+      sendCommand("ota:check");
+      sendCommand("store:refresh");
     }
     else if (target === "perms") sendCommand("settings:perms-get");
     else if (target === "snapshots") sendCommand("settings:snapshots-get");

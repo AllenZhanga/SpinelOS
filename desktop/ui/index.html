@@ -382,6 +382,10 @@
         </button>
 
         <div class="settings-nav-group">安全与维护</div>
+        <button type="button" class="settings-nav-item" data-cmd="settings:tab:updates">
+          <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.2M5.2 7L8 9.8 10.8 7"/><path d="M3 12.2h10"/></svg></span>
+          <span>系统更新</span>
+        </button>
         <button type="button" class="settings-nav-item" data-cmd="settings:tab:perms">
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
@@ -1026,11 +1030,8 @@
           <div><strong>当前模式：</strong><span id="about-mode">--</span></div>
           <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
           <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
-          <div id="about-ota-feedback" class="feedback-banner hidden" style="margin-top: 8px;"></div>
           <div class="footer-actions" style="margin-top: 8px;">
-            <button type="button" class="btn small primary" id="btn-about-ota-check" data-cmd="ota:check">检查在线更新</button>
-            <button type="button" class="btn small hidden" id="btn-about-ota-login" data-cmd="settings:tab:relay">登录远程账号</button>
-            <button type="button" class="btn small" data-cmd="store:open">升级系统本体</button>
+            <button type="button" class="btn small primary" data-cmd="settings:tab:updates">系统更新</button>
             <button class="btn small" data-cmd="welcome:open">首次开机向导</button>
             <button class="btn small" data-cmd="monitor:open:logs">打开系统监视器</button>
             <button class="btn small" data-cmd="doctor:open">Spinel Doctor 体检</button>
@@ -1195,6 +1196,67 @@
         <div id="snap-list" class="disk-list">
           <div class="disk-empty">正在读取 Btrfs 快照列表...</div>
         </div>
+      </div>
+    </div>
+
+    <div id="tab-updates" class="win-body hidden">
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>Spinel OS 系统在线升级</h3>
+            <p class="muted-hint">登录后可从云端校验并升级 Spinel OS 核心桌面、主题与系统脚本；未登录设备可使用离线包（.tar.zst）升级。</p>
+          </div>
+          <div class="footer-actions">
+            <span class="status-chip" id="upd-spinel-version">版本 --</span>
+            <span class="status-chip" id="upd-ota-chip">检查更新状态...</span>
+            <button type="button" class="btn small danger hidden" id="btn-upd-reboot" data-cmd="power:reboot">更新完成，立即重启生效</button>
+          </div>
+        </div>
+        <div id="upd-ota-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+        <div class="footer-actions" style="flex-wrap: wrap;">
+          <button type="button" class="btn small" id="btn-upd-ota-check" data-cmd="ota:check">检查在线更新</button>
+          <button type="button" class="btn small primary" id="btn-spinel-ota" data-store-sys="spinel-ota-full">在线升级 Spinel OS (--full)</button>
+          <button type="button" class="btn small" id="btn-spinel-ota-offline" data-cmd="ota:pick-offline">离线包升级 (--full)</button>
+          <button type="button" class="btn small hidden" id="btn-upd-ota-login" data-cmd="settings:tab:relay">登录远程账号</button>
+        </div>
+      </div>
+
+      <div class="inst-section">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h3>系统软件包与镜像源维护</h3>
+            <p class="muted-hint">同步升级 Arch 内核、显卡驱动及已安装的软件，或测速优选中国区 HTTPS 镜像站。</p>
+          </div>
+          <div class="footer-actions">
+            <span class="status-chip" id="upd-driver-chip">驱动检测中...</span>
+            <span class="status-chip" id="upd-update-chip">索引检查中</span>
+          </div>
+        </div>
+        <div class="footer-actions" style="flex-wrap: wrap;">
+          <button type="button" class="btn small primary" id="btn-sys-update" data-store-sys="sys-update">一键更新软件包</button>
+          <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>
+          <button type="button" class="btn small" id="btn-keyring-fix" data-store-sys="keyring-fix">修复密钥环</button>
+        </div>
+      </div>
+
+      <div id="upd-log-wrap" class="glass store-log-card hidden">
+        <div class="sub-panel-head">
+          <strong id="upd-log-title">系统更新输出</strong>
+          <div class="footer-actions">
+            <button type="button" class="btn small danger hidden" id="btn-upd-cancel" data-cmd="store:cancel">停止任务</button>
+            <button type="button" class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+          </div>
+        </div>
+        <div id="upd-progress-wrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
+          <div class="progress-header">
+            <span id="upd-progress-text" class="muted-hint">准备中...</span>
+            <strong id="upd-progress-pct">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="upd-progress-bar" class="progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+        <pre id="upd-log-box" class="log-box"></pre>
       </div>
     </div>
     </div>
@@ -1496,15 +1558,9 @@
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span class="status-chip" id="store-driver-chip">驱动检测中...</span>
           <span class="status-chip" id="store-update-chip">索引检查中</span>
-          <span class="status-chip" id="store-ota-chip">Spinel OS 版本检查中...</span>
-          <button type="button" class="btn small danger hidden" id="btn-store-reboot" data-cmd="power:reboot">更新完成，立即重启生效</button>
         </div>
         <div class="footer-actions">
-          <button type="button" class="btn small primary" id="btn-spinel-ota" data-store-sys="spinel-ota-full">在线升级 Spinel OS (--full)</button>
-          <button type="button" class="btn small" id="btn-spinel-ota-offline" data-cmd="ota:pick-offline">离线包升级 (--full)</button>
-          <button type="button" class="btn small" id="btn-sys-update" data-store-sys="sys-update">一键更新软件包</button>
-          <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>
-          <button type="button" class="btn small" id="btn-keyring-fix" data-store-sys="keyring-fix">修复密钥环</button>
+          <button type="button" class="btn small" data-cmd="settings:open:updates">系统更新与镜像维护 →</button>
         </div>
       </div>
 
@@ -1530,24 +1586,6 @@
           </div>
         </div>
         <pre id="store-log-box" class="log-box"></pre>
-      </div>
-    </div>
-
-    <div id="store-pass-box" class="store-modal-backdrop hidden">
-      <div class="store-modal-card glass">
-        <div class="sub-panel-head">
-          <strong id="store-pass-title">需要管理员密码授权</strong>
-          <button type="button" class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
-        </div>
-        <p class="muted-hint">请输入当前用户管理员密码以执行系统级软件变更。</p>
-        <input type="password" id="store-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
-        <div class="modal-footer" style="margin-top: 4px;">
-          <span class="muted-hint">仅用于本次 sudo 授权，不会保存</span>
-          <div class="footer-actions">
-            <button type="button" class="btn small" data-cmd="store:pass-cancel">取消</button>
-            <button type="button" class="btn small primary" id="btn-store-pass-confirm" data-cmd="store:pass-confirm">确认并开始安装</button>
-          </div>
-        </div>
       </div>
     </div>
   </section>
@@ -1648,6 +1686,24 @@
       </footer>
     </div>
   </section>
+
+  <div id="store-pass-box" class="store-modal-backdrop hidden">
+    <div class="store-modal-card glass">
+      <div class="sub-panel-head">
+        <strong id="store-pass-title">需要管理员密码授权</strong>
+        <button type="button" class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
+      </div>
+      <p class="muted-hint">请输入当前用户管理员密码以执行系统级软件变更。</p>
+      <input type="password" id="store-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
+      <div class="modal-footer" style="margin-top: 4px;">
+        <span class="muted-hint">仅用于本次 sudo 授权，不会保存</span>
+        <div class="footer-actions">
+          <button type="button" class="btn small" data-cmd="store:pass-cancel">取消</button>
+          <button type="button" class="btn small primary" id="btn-store-pass-confirm" data-cmd="store:pass-confirm">确认并继续</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script defer src="js/bridge.js"></script>
   <script defer src="js/games_store.js"></script>
