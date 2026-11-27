@@ -9,21 +9,21 @@
   let currentSettingsTab = "";
 
   function switchSettingsTab(tab) {
-    const titles = {
-      wifi: "Wi-Fi 与网络",
-      bt: "蓝牙手柄",
-      relay: "云接力与远程沙箱",
-      display: "显示器",
-      devices: "设备管理器",
-      audio: "声音与电源",
-      shortcuts: "键盘与快捷键",
-      perf: "游戏性能",
-      appearance: "外观与输入法",
-      updates: "系统更新",
-      perms: "权限与安全",
-      snapshots: "系统快照 (Snapper)"
+    const meta = {
+      wifi: { title: "Wi-Fi 与网络", sub: "管理网络接口、无线热点与全局代理" },
+      bt: { title: "蓝牙手柄", sub: "配对并管理手柄、耳机等蓝牙外设" },
+      relay: { title: "云接力与远程沙箱", sub: "Spinel ID 跨设备互联与平行沙箱远程接管" },
+      display: { title: "显示器", sub: "设置输出分辨率、刷新率与桌面缩放比例" },
+      devices: { title: "设备管理器", sub: "挂载磁盘分区、查看 USB、输入与音频硬件" },
+      audio: { title: "声音与电源", sub: "调节主音量、麦克风增益、性能档位与锁屏" },
+      shortcuts: { title: "键盘与快捷键", sub: "自定义全局组合键并查看内置桌面快捷键" },
+      perf: { title: "游戏性能", sub: "配置 MangoHud、帧率上限、FSR 与 GameMode" },
+      appearance: { title: "外观与输入法", sub: "主题风格、桌面壁纸、Dock 栏与中文输入法" },
+      updates: { title: "系统更新", sub: "Spinel OS 在线/离线升级与软件包镜像维护" },
+      perms: { title: "权限与安全", sub: "AI Agent 能力边界、平行沙箱与系统授权保护" },
+      snapshots: { title: "系统快照", sub: "通过 Btrfs Snapper 创建与回滚系统还原点" }
     };
-    const tabs = Object.keys(titles);
+    const tabs = Object.keys(meta);
     const target = tabs.includes(tab) ? tab : "wifi";
     if (currentSettingsTab === "audio" && target !== "audio") {
       sendCommand("settings:audio-test-mic:stop");
@@ -32,12 +32,20 @@
     currentSettingsTab = target;
     tabs.forEach((t) => {
       const body = document.getElementById(`tab-${t}`);
-      if (body) body.classList.toggle("hidden", t !== target);
+      if (body) {
+        body.classList.toggle("hidden", t !== target);
+        if (t === target) body.scrollTop = 0;
+      }
     });
     const titleEl = document.getElementById("settings-page-title");
-    if (titleEl) titleEl.textContent = titles[target] || "系统设置";
+    if (titleEl) titleEl.textContent = meta[target]?.title || "系统设置";
+    const subEl = document.getElementById("settings-page-sub");
+    if (subEl) subEl.textContent = meta[target]?.sub || "";
     document.querySelectorAll("#app-settings [data-cmd^='settings:tab:']").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-cmd") === `settings:tab:${target}`);
+      const active = btn.getAttribute("data-cmd") === `settings:tab:${target}`;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", String(active));
+      if (active) btn.scrollIntoView({ block: "nearest" });
     });
     if (target === "wifi") sendCommand("settings:wifi-list");
     else if (target === "bt") sendCommand("settings:bt-status");
@@ -210,6 +218,8 @@
       else if (!data.snapper_installed) chip.textContent = "未安装 snapper";
       else if (!data.config_ready) chip.textContent = "未初始化 root 快照配置";
       else chip.textContent = `Btrfs 已就绪 · 共 ${snaps.length} 个快照`;
+      chip.classList.toggle("ok", ready);
+      chip.classList.toggle("warn", !ready);
     }
     if (createBtn) createBtn.disabled = !ready;
 
@@ -457,6 +467,7 @@
             const sw = document.createElement("button");
             sw.type = "button";
             sw.className = "sp-switch" + (on ? " is-on" : "");
+            sw.setAttribute("role", "switch");
             sw.setAttribute("aria-label", `${app.name || app.id} ${pd.label}`);
             sw.setAttribute("aria-checked", String(on));
             const thumb = document.createElement("span");
@@ -903,6 +914,8 @@
         const dictText = data.rime_ice ? "雾凇词库" : "内置拼音";
         chip.textContent = (data.running ? "运行中 · " : "未启动 · ") + `${modeText} (${dictText})`;
       }
+      chip.classList.toggle("ok", Boolean(data.installed && data.running));
+      chip.classList.toggle("warn", !data.installed || !data.running);
     }
     const enBtn = document.getElementById("btn-ime-en");
     const zhBtn = document.getElementById("btn-ime-zh");
@@ -1009,9 +1022,11 @@
     detectedGateway = data.gateway || "";
     const chip = document.getElementById("proxy-status-chip");
     if (chip) {
+      const hasExt = !data.enabled && Boolean(data.external_proxy);
       chip.textContent = data.enabled
         ? "已启用"
-        : (data.external_proxy ? `外部代理生效 (${data.external_proxy})` : "已关闭");
+        : (hasExt ? `外部代理生效 (${data.external_proxy})` : "已关闭");
+      chip.classList.toggle("ok", Boolean(data.enabled || hasExt));
     }
     const hint = document.getElementById("proxy-gw-hint");
     if (hint) {
@@ -1220,7 +1235,10 @@
     const badge = document.getElementById("bt-power-badge");
     const powerBtn = document.getElementById("btn-bt-power");
     const scanBtn = document.getElementById("btn-bt-scan");
-    if (badge) badge.textContent = state.btPowered ? "已开启" : "已关闭";
+    if (badge) {
+      badge.textContent = state.btPowered ? "已开启" : "已关闭";
+      badge.classList.toggle("ok", state.btPowered);
+    }
     if (powerBtn) powerBtn.textContent = state.btPowered ? "关闭蓝牙" : "开启蓝牙";
     if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = "扫描手柄 (6s)"; }
 
@@ -1635,12 +1653,20 @@
       if (!data.bwrap_installed) chip.textContent = "未安装 bubblewrap";
       else if (data.running) chip.textContent = data.allow_network ? "运行中 · 共享网络" : "运行中 · 离线隔离";
       else chip.textContent = "已停止（按需自启）";
+      chip.classList.toggle("ok", Boolean(data.bwrap_installed && data.running));
+      chip.classList.toggle("warn", !data.bwrap_installed);
     }
     if (homeInfo) {
       homeInfo.textContent = `沙箱临时主目录: ${data.home_path || "--"} · 已占 ${data.home_size_mb || 0} MB`;
     }
-    if (swNet) swNet.classList.toggle("is-on", Boolean(data.allow_network));
-    if (swClip) swClip.classList.toggle("is-on", Boolean(data.sync_clipboard));
+    if (swNet) {
+      swNet.classList.toggle("is-on", Boolean(data.allow_network));
+      swNet.setAttribute("aria-checked", String(Boolean(data.allow_network)));
+    }
+    if (swClip) {
+      swClip.classList.toggle("is-on", Boolean(data.sync_clipboard));
+      swClip.setAttribute("aria-checked", String(Boolean(data.sync_clipboard)));
+    }
     if (selPerf && data.perf_mode) {
       selPerf.value = data.perf_mode;
       if (typeof enhanceSelect === "function") enhanceSelect(selPerf);
@@ -1709,6 +1735,9 @@
           autoLbl.textContent = "默认自启";
           const autoSw = document.createElement("button");
           autoSw.type = "button";
+          autoSw.setAttribute("role", "switch");
+          autoSw.setAttribute("aria-checked", String(Boolean(app.auto_start)));
+          autoSw.setAttribute("aria-label", `${app.name || app.cmd} 默认自启`);
           autoSw.className = "sp-switch" + (app.auto_start ? " is-on" : "");
           autoSw.innerHTML = '<span class="sp-switch-thumb"></span>';
           autoSw.addEventListener("click", (ev) => {
@@ -1823,7 +1852,10 @@
     const listEl = document.getElementById("relay-device-list");
 
     const logged = Boolean(data.logged_in);
-    if (chip) chip.textContent = logged ? `已登录 · ${data.account}` : "未登录";
+    if (chip) {
+      chip.textContent = logged ? `已登录 · ${data.account}` : "未登录";
+      chip.classList.toggle("ok", logged);
+    }
     if (authPanel) authPanel.classList.toggle("hidden", logged);
     if (onlinePanel) onlinePanel.classList.toggle("hidden", !logged);
 
@@ -1837,7 +1869,10 @@
     if (devNameInput && document.activeElement !== devNameInput && data.device_name) {
       devNameInput.value = data.device_name;
     }
-    if (swAllow) swAllow.classList.toggle("is-on", Boolean(data.allow_remote));
+    if (swAllow) {
+      swAllow.classList.toggle("is-on", Boolean(data.allow_remote));
+      swAllow.setAttribute("aria-checked", String(Boolean(data.allow_remote)));
+    }
     if (hostDesc) {
       hostDesc.textContent = data.allow_remote
         ? (data.hostd_running ? "宿主服务在线待命中 · 其他同账号设备可一键远程画中画接管本机沙箱" : "已开启远程权限 · 正在后台连接服务器")

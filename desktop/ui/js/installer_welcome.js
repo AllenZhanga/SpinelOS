@@ -659,6 +659,7 @@
     set("about-kernel", data.kernel);
     set("about-spinel-version", data.spinel_version);
     if (data.spinel_version) {
+      set("settings-foot-ver", `v${data.spinel_version}`);
       const uv = document.getElementById("upd-spinel-version");
       if (uv) uv.textContent = `当前 ${data.spinel_version}`;
     }

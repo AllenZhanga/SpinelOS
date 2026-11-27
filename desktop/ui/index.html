@@ -342,150 +342,164 @@
       <div class="settings-sidebar-head">
         <h2>系统设置</h2>
       </div>
-      <nav class="settings-nav" aria-label="设置导航">
+      <nav class="settings-nav" role="tablist" aria-orientation="vertical" aria-label="设置导航">
         <div class="settings-nav-group">网络与连接</div>
-        <button type="button" class="settings-nav-item active" data-cmd="settings:tab:wifi">
+        <button type="button" class="settings-nav-item active" role="tab" aria-selected="true" aria-controls="tab-wifi" data-cmd="settings:tab:wifi">
           <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.2 6.2a8.8 8.8 0 0 1 11.6 0M4.8 9a5.2 5.2 0 0 1 6.4 0"/><circle cx="8" cy="12.2" r="1.2" fill="currentColor" stroke="none"/></svg></span>
           <span>Wi-Fi 与网络</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:bt">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-bt" data-cmd="settings:tab:bt">
           <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2v12l3.8-3.4L4.5 5.4M8 2l3.8 3.4-7.3 5.2"/></svg></span>
           <span>蓝牙手柄</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:relay">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-relay" data-cmd="settings:tab:relay">
           <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 11.5h7.2a2.8 2.8 0 0 0 .3-5.6 4 4 0 0 0-7.7-1.1A3.1 3.1 0 0 0 4.5 11.5z"/></svg></span>
           <span>云接力与远程沙箱</span>
         </button>
 
         <div class="settings-nav-group">硬件与外设</div>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:display">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-display" data-cmd="settings:tab:display">
           <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="8.5" rx="1.6"/><path d="M5.5 13.5h5M8 11v2.5" stroke-linecap="round"/></svg></span>
           <span>显示器</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:devices">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-devices" data-cmd="settings:tab:devices">
           <span class="settings-nav-ico ico-indigo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="8" height="9" rx="1.5"/><path d="M6 3.5V2M10 3.5V2M6 12.5V14M10 12.5V14M6.5 6.8h3v2.4h-3z"/></svg></span>
           <span>设备管理器</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:audio">
-          <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.8l3.5-2.8v9.2L5.3 9.8H2.5z"/><path d="M11.3 5.4a3.6 3.6 0 0 1 0 5.2M13.2 3.8a6 6 0 0 1 0 8.4"/></svg></span>
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-audio" data-cmd="settings:tab:audio">
+          <span class="settings-nav-ico ico-amber"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.8l3.5-2.8v9.2L5.3 9.8H2.5z"/><path d="M11.3 5.4a3.6 3.6 0 0 1 0 5.2M13.2 3.8a6 6 0 0 1 0 8.4"/></svg></span>
           <span>声音与电源</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:shortcuts">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-shortcuts" data-cmd="settings:tab:shortcuts">
           <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="3.5" width="12.4" height="9" rx="1.8"/><path d="M4.2 6.5h1.2M7.4 6.5h1.2M10.6 6.5h1.2M4.8 9.8h6.4"/></svg></span>
           <span>键盘与快捷键</span>
         </button>
 
         <div class="settings-nav-group">个性化与游戏</div>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:appearance">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-appearance" data-cmd="settings:tab:appearance">
           <span class="settings-nav-ico ico-pink"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><circle cx="6.2" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="9.8" cy="6.4" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="9.8" r="1" fill="currentColor" stroke="none"/></svg></span>
           <span>外观与输入法</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perf">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-perf" data-cmd="settings:tab:perf">
           <span class="settings-nav-ico ico-violet"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 11.5a5.5 5.5 0 1 1 10 0"/><path d="M8 8.5l2.6-2.4"/><circle cx="8" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
           <span>游戏性能</span>
         </button>
 
         <div class="settings-nav-group">安全与维护</div>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:updates">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-updates" data-cmd="settings:tab:updates">
           <span class="settings-nav-ico ico-blue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.2M5.2 7L8 9.8 10.8 7"/><path d="M3 12.2h10"/></svg></span>
           <span>系统更新</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:perms">
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-perms" data-cmd="settings:tab:perms">
           <span class="settings-nav-ico ico-emerald"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2l5 2.2v3.6c0 3.2-2.1 5.6-5 6.5-2.9-.9-5-3.3-5-6.5V4.2L8 2z"/><path d="M6 8.2l1.4 1.4 2.8-2.8" stroke-linecap="round"/></svg></span>
           <span>权限与安全</span>
         </button>
-        <button type="button" class="settings-nav-item" data-cmd="settings:tab:snapshots">
-          <span class="settings-nav-ico ico-cyan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9"/><path d="M2.5 4.8V8h3.2"/><path d="M8 5.2V8l2 1.2"/></svg></span>
+        <button type="button" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="tab-snapshots" data-cmd="settings:tab:snapshots">
+          <span class="settings-nav-ico ico-slate"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9"/><path d="M2.5 4.8V8h3.2"/><path d="M8 5.2V8l2 1.2"/></svg></span>
           <span>系统快照</span>
         </button>
       </nav>
-      <div class="settings-sidebar-foot">Spinel OS</div>
+      <div class="settings-sidebar-foot">
+        <span>Spinel OS</span>
+        <span id="settings-foot-ver"></span>
+      </div>
     </aside>
 
     <div class="settings-main">
       <header class="settings-header">
-        <h2 id="settings-page-title">Wi-Fi 与网络</h2>
+        <div class="settings-header-title">
+          <h2 id="settings-page-title">Wi-Fi 与网络</h2>
+          <span id="settings-page-sub" class="settings-header-sub">管理网络接口、无线连接与全局代理</span>
+        </div>
       </header>
 
-    <div id="tab-wifi" class="win-body">
-      <div class="section-head">
-        <h3>网络接口状态</h3>
-        <button class="btn small" id="btn-wifi-rescan" data-cmd="settings:wifi-scan">扫描周边 Wi-Fi</button>
-      </div>
-      <div id="wifi-iface-list" class="status-list"></div>
-
-      <div id="wifi-connect-box" class="connect-box hidden">
-        <div class="connect-head">
-          <strong id="wifi-target-ssid">连接到 Wi-Fi</strong>
-          <button class="icon-btn" data-cmd="settings:wifi-cancel">取消</button>
-        </div>
-        <div class="connect-row">
-          <input type="password" id="wifi-password-input" placeholder="输入 Wi-Fi 密码（开放网络可留空）" />
-          <button class="btn primary small" data-cmd="settings:wifi-do-connect">连接</button>
-        </div>
-      </div>
-
-      <div id="net-ip-config-box" class="connect-box hidden" style="flex-direction: column; align-items: stretch; gap: 10px;">
-        <div class="connect-head">
-          <strong id="net-cfg-title">配置 IP 与 DNS</strong>
-          <button type="button" class="icon-btn" id="btn-net-ip-cancel">取消</button>
-        </div>
-        <div class="form-grid">
-          <label class="field">
-            <span>IPv4 分配方式</span>
-            <select id="net-ip-method">
-              <option value="auto">自动获取 (DHCP)</option>
-              <option value="manual">手动设置静态 IP</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>IP 地址（静态模式必填）</span>
-            <input type="text" id="net-ip-addr" placeholder="例如 192.168.31.189" />
-          </label>
-          <label class="field">
-            <span>子网掩码 / 前缀长度</span>
-            <input type="text" id="net-ip-mask" placeholder="例如 255.255.255.0 或 24" value="24" />
-          </label>
-          <label class="field">
-            <span>默认网关（可选）</span>
-            <input type="text" id="net-ip-gw" placeholder="例如 192.168.31.1" />
-          </label>
-          <label class="field" style="grid-column: 1 / -1;">
-            <span>自定义 DNS 服务器（多个用逗号分隔；DHCP 模式下填写也会优先使用）</span>
-            <input type="text" id="net-ip-dns" placeholder="例如 223.5.5.5, 119.29.29.29（留空则自动跟随路由器）" />
-          </label>
-        </div>
-        <div class="footer-actions" style="justify-content: space-between; flex-wrap: wrap;">
-          <div class="footer-actions">
-            <button type="button" class="btn small ghost" data-dns-preset="223.5.5.5, 119.29.29.29">国内高速 DNS (阿里/腾讯)</button>
-            <button type="button" class="btn small ghost" data-dns-preset="1.1.1.1, 8.8.8.8">国际公共 DNS (1.1.1.1)</button>
-            <button type="button" class="btn small ghost" data-dns-preset="">恢复默认 DNS</button>
+    <div id="tab-wifi" class="win-body" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
+          <div>
+            <h3>网络接口状态</h3>
+            <p class="muted-hint">查看有线/无线连接状态，支持配置静态 IP 与自定义 DNS。</p>
           </div>
-          <button type="button" class="btn small primary" id="btn-net-ip-save">保存并应用网络配置</button>
+          <button type="button" class="btn small" id="btn-wifi-rescan" data-cmd="settings:wifi-scan">扫描周边 Wi-Fi</button>
         </div>
-      </div>
+        <div id="wifi-iface-list" class="disk-list"></div>
 
-      <div id="wifi-feedback" class="feedback-banner hidden"></div>
+        <div id="wifi-connect-box" class="connect-box hidden">
+          <div class="connect-head">
+            <strong id="wifi-target-ssid">连接到 Wi-Fi</strong>
+            <button type="button" class="btn small ghost" data-cmd="settings:wifi-cancel">取消</button>
+          </div>
+          <div class="connect-row">
+            <input type="password" id="wifi-password-input" autocomplete="off" placeholder="输入 Wi-Fi 密码（开放网络可留空）" />
+            <button type="button" class="btn primary small" data-cmd="settings:wifi-do-connect">连接</button>
+          </div>
+        </div>
 
-      <div class="inst-section">
-        <h3>可用 Wi-Fi 列表</h3>
+        <div id="net-ip-config-box" class="connect-box hidden">
+          <div class="connect-head">
+            <strong id="net-cfg-title">配置 IP 与 DNS</strong>
+            <button type="button" class="btn small ghost" id="btn-net-ip-cancel">取消</button>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>IPv4 分配方式</span>
+              <select id="net-ip-method">
+                <option value="auto">自动获取 (DHCP)</option>
+                <option value="manual">手动设置静态 IP</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>IP 地址</span>
+              <input type="text" id="net-ip-addr" placeholder="静态模式必填，如 192.168.31.189" />
+            </label>
+            <label class="field">
+              <span>子网掩码 / 前缀</span>
+              <input type="text" id="net-ip-mask" placeholder="如 255.255.255.0 或 24" value="24" />
+            </label>
+            <label class="field">
+              <span>默认网关</span>
+              <input type="text" id="net-ip-gw" placeholder="可选，如 192.168.31.1" />
+            </label>
+            <label class="field field-full">
+              <span>自定义 DNS 服务器</span>
+              <input type="text" id="net-ip-dns" placeholder="多个用逗号分隔（如 223.5.5.5, 119.29.29.29），留空跟随路由器" />
+            </label>
+          </div>
+          <div class="set-toolbar-split">
+            <div class="footer-actions wrap">
+              <button type="button" class="btn small ghost" data-dns-preset="223.5.5.5, 119.29.29.29">国内高速 DNS</button>
+              <button type="button" class="btn small ghost" data-dns-preset="1.1.1.1, 8.8.8.8">国际公共 DNS</button>
+              <button type="button" class="btn small ghost" data-dns-preset="">恢复默认 DNS</button>
+            </div>
+            <button type="button" class="btn small primary" id="btn-net-ip-save">保存并应用</button>
+          </div>
+        </div>
+
+        <div id="wifi-feedback" class="feedback-banner hidden" role="status"></div>
+      </section>
+
+      <section class="set-section">
+        <div class="set-head">
+          <h3>可用 Wi-Fi 列表</h3>
+        </div>
         <div id="wifi-network-list" class="disk-list">
           <div class="disk-empty">正在读取网络列表...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section" style="margin-top: 8px;">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div class="bt-head-left">
-            <h3>系统网络代理 (Steam / 应用商店 / 终端全局生效)</h3>
-            <span id="proxy-status-chip" class="status-chip">已关闭</span>
+      <section class="set-section">
+        <div class="set-head">
+          <div>
+            <div class="bt-head-left">
+              <h3>系统网络代理</h3>
+              <span id="proxy-status-chip" class="status-chip">已关闭</span>
+            </div>
+            <p class="muted-hint">为 Steam、应用商店与终端提供全局 HTTP / SOCKS5 代理。</p>
           </div>
-          <div class="footer-actions">
-            <button class="btn small" id="btn-proxy-gw">填入网关:7890</button>
-          </div>
+          <button type="button" class="btn small" id="btn-proxy-gw">填入网关:7890</button>
         </div>
-        <div class="part-section">
-          <p class="muted-hint" id="proxy-gw-hint" style="margin-bottom: 10px;">适用于 NAT 模式连接 Windows/Mac 宿主机代理软件（如 Clash / v2rayN，需开启“允许局域网连接”）。</p>
+        <div class="set-card">
+          <p class="muted-hint" id="proxy-gw-hint">适用于 NAT 模式连接 Windows/Mac 宿主机代理软件（如 Clash / v2rayN，需开启“允许局域网连接”）。</p>
           <div class="form-grid">
             <label class="field">
               <span>HTTP / HTTPS 代理地址</span>
@@ -495,104 +509,107 @@
               <span>SOCKS5 代理地址（可选）</span>
               <input type="text" id="proxy-socks-input" placeholder="例如 socks5://192.168.0.1:7891" />
             </label>
-            <label class="field" style="grid-column: 1 / -1;">
+            <label class="field field-full">
               <span>绕过代理地址 (NO_PROXY)</span>
               <input type="text" id="proxy-noproxy-input" value="localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8" />
             </label>
           </div>
-          <div class="footer-actions" style="margin-top: 12px;">
-            <button class="btn small primary" id="btn-proxy-save">保存并启用代理</button>
-            <button class="btn small danger" id="btn-proxy-clear">关闭代理</button>
+          <div class="footer-actions">
+            <button type="button" class="btn small primary" id="btn-proxy-save">保存并启用代理</button>
+            <button type="button" class="btn small danger" id="btn-proxy-clear">关闭代理</button>
           </div>
-          <div id="proxy-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+          <div id="proxy-feedback" class="feedback-banner hidden" role="status"></div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-relay" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-relay" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>Spinel ID 跨设备互联与云接力</h3>
-            <p class="muted-hint">同账号设备自动尝试「局域网 -> IPv6 打洞 -> UDP 穿透 -> 私有云中继」端到端加密连接，外出也能用轻量设备零负载接管家里台式机平行沙箱。</p>
+            <div class="bt-head-left">
+              <h3>Spinel ID 跨设备互联与云接力</h3>
+              <span class="status-chip" id="relay-status-chip">未登录</span>
+            </div>
+            <p class="muted-hint">自动尝试局域网、IPv6 直连、UDP 穿透与私有云中继，支持外接轻量设备远程接管家里台式机沙箱。</p>
           </div>
-          <span class="badge" id="relay-status-chip">未登录</span>
         </div>
-        <div class="part-section" id="relay-auth-panel">
+
+        <div class="set-card" id="relay-auth-panel">
           <div class="form-grid">
             <label class="field">
-              <span>自建服务器地址 (IP:端口)</span>
-              <input type="text" id="relay-server-input" placeholder="例如 123.45.67.89:7443" />
+              <span>中继服务器地址</span>
+              <input type="text" id="relay-server-input" placeholder="IP:端口，例如 123.45.67.89:7443" />
             </label>
             <label class="field">
               <span>STUN UDP 端口</span>
               <input type="number" id="relay-udp-input" value="7444" min="1" max="65535" />
             </label>
-            <label class="field" style="grid-column: 1 / -1;">
-              <span>TLS 证书指纹（留空将首次自动信任并锁定，防劫持）</span>
-              <div style="display:flex; gap:8px;">
-                <input type="text" id="relay-fp-input" style="flex:1;" placeholder="sha256-..." />
-                <button class="btn small ghost" id="btn-relay-reset-fp">清除指纹</button>
+            <label class="field field-full">
+              <span>TLS 证书指纹（留空将首次自动信任并锁定）</span>
+              <div class="set-inline-row">
+                <input type="text" id="relay-fp-input" class="set-flex-1" placeholder="sha256-..." />
+                <button type="button" class="btn small ghost" id="btn-relay-reset-fp">清除指纹</button>
               </div>
             </label>
             <label class="field">
               <span>Spinel 账号名</span>
-              <input type="text" id="relay-account-input" placeholder="输入 Spinel ID 账号名称" />
+              <input type="text" id="relay-account-input" autocomplete="username" placeholder="输入 Spinel ID 账号名称" />
             </label>
             <label class="field">
-              <span>账号密码（至少 6 位）</span>
-              <input type="password" id="relay-password-input" placeholder="输入密码登录或注册" />
+              <span>账号密码</span>
+              <input type="password" id="relay-password-input" autocomplete="current-password" minlength="6" placeholder="至少 6 位密码（登录或注册）" />
             </label>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
-            <button class="btn small primary" id="btn-relay-login">登录 Spinel ID</button>
-            <button class="btn small" id="btn-relay-register">注册并绑定本机</button>
+          <div class="footer-actions wrap">
+            <button type="button" class="btn small primary" id="btn-relay-login">登录 Spinel ID</button>
+            <button type="button" class="btn small" id="btn-relay-register">注册并绑定本机</button>
           </div>
-          <hr style="margin: 14px 0; border-color: var(--ui-border);" />
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <input type="text" id="relay-paircode-input" class="search-input" style="max-width: 180px;" placeholder="输入 6 位配对码" />
-            <button class="btn small" id="btn-relay-pair-claim">通过配对码加入账号</button>
+          <hr class="set-divider" />
+          <div class="set-inline-row wrap">
+            <input type="text" id="relay-paircode-input" class="set-input-compact" placeholder="输入 6 位配对码" />
+            <button type="button" class="btn small" id="btn-relay-pair-claim">通过配对码加入账号</button>
           </div>
         </div>
 
-        <div class="part-section hidden" id="relay-online-panel">
-          <div class="status-grid" style="margin-bottom: 10px;">
-            <div class="status-row">
-              <div>
+        <div class="set-stack hidden" id="relay-online-panel">
+          <div class="perf-row-list">
+            <div class="perf-row">
+              <div class="perf-row-info">
                 <strong id="relay-account-label">当前账号: --</strong>
-                <div class="muted-hint" id="relay-device-label">本机设备 ID: --</div>
+                <span class="muted-hint" id="relay-device-label">本机设备 ID: --</span>
               </div>
-              <button class="btn small danger" id="btn-relay-logout">退出账号</button>
+              <button type="button" class="btn small danger" id="btn-relay-logout">退出账号</button>
             </div>
-            <div class="status-row">
-              <div>
+            <div class="perf-row">
+              <div class="perf-row-info">
                 <strong>本机设备显示名称</strong>
-                <div class="muted-hint">用于在同账号互联设备列表和 Mac 端菜单栏中区分多台 SpinelOS</div>
+                <span class="muted-hint">用于在互联设备列表与 Mac 端菜单栏区分多台 SpinelOS</span>
               </div>
-              <div style="display:flex; gap:6px; align-items:center;">
-                <input type="text" id="relay-device-name-input" class="search-input" style="max-width: 190px;" placeholder="例如 客厅主机 / 工作室台式机" />
+              <div class="set-inline-row">
+                <input type="text" id="relay-device-name-input" class="set-input-med" placeholder="例如 客厅主机 / 工作室台式机" />
                 <button type="button" class="btn small" id="btn-relay-rename">修改名称</button>
               </div>
             </div>
-            <div class="status-row">
-              <div>
+            <div class="perf-row">
+              <div class="perf-row-info">
                 <strong>允许其他同账号设备远程接管本机平行沙箱</strong>
-                <div class="muted-hint" id="relay-hostd-desc">开启后本机台式机在后台待命，供外出的笔记本一键投流接管</div>
+                <span class="muted-hint" id="relay-hostd-desc">开启后本机在后台待命，供外出的设备一键投流接管</span>
               </div>
-              <button type="button" class="sp-switch" id="sw-relay-allow-remote" aria-label="允许远程接管"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch" role="switch" aria-checked="false" id="sw-relay-allow-remote" aria-label="允许远程接管"><span class="sp-switch-thumb"></span></button>
             </div>
           </div>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button class="btn small primary" id="btn-relay-pair-create">生成 6 位配对码</button>
-            <button class="btn small" id="btn-relay-refresh">刷新同账号设备</button>
-            <span class="badge hidden" id="relay-paircode-display" style="font-size: 13px; letter-spacing: 2px;">------</span>
+          <div class="footer-actions wrap">
+            <button type="button" class="btn small primary" id="btn-relay-pair-create">生成 6 位配对码</button>
+            <button type="button" class="btn small" id="btn-relay-refresh">刷新同账号设备</button>
+            <span class="status-chip paircode hidden" id="relay-paircode-display">------</span>
           </div>
         </div>
-        <div id="relay-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
-      </div>
+        <div id="relay-feedback" class="feedback-banner hidden" role="status"></div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>同账号互联设备</h3>
             <p class="muted-hint">点击在线设备的「远程画中画接管」，即可把它的平行沙箱窗口拉到当前屏幕操作。</p>
@@ -601,40 +618,50 @@
         <div id="relay-device-list" class="disk-list">
           <div class="disk-empty">登录后这里会显示同一账号下的所有 SpinelOS 设备</div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-bt" class="win-body hidden">
-      <div class="section-head">
-        <div class="bt-head-left">
-          <h3>蓝牙适配器</h3>
-          <span id="bt-power-badge" class="status-chip">状态检测中</span>
+    <div id="tab-bt" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
+          <div>
+            <div class="bt-head-left">
+              <h3>蓝牙适配器与手柄配对</h3>
+              <span id="bt-power-badge" class="status-chip">状态检测中</span>
+            </div>
+            <p class="muted-hint">支持 Xbox、DualSense、Switch Pro 手柄与蓝牙耳机快速配对。</p>
+          </div>
+          <div class="footer-actions">
+            <button type="button" class="btn small" id="btn-bt-power" data-cmd="settings:bt-toggle">开关蓝牙</button>
+            <button type="button" class="btn primary small" id="btn-bt-scan" data-cmd="settings:bt-scan">扫描手柄 (6s)</button>
+          </div>
         </div>
-        <div class="footer-actions">
-          <button class="btn small" id="btn-bt-power" data-cmd="settings:bt-toggle">开关蓝牙</button>
-          <button class="btn primary small" id="btn-bt-scan" data-cmd="settings:bt-scan">扫描手柄 (6s)</button>
+        <div id="bt-feedback" class="feedback-banner hidden" role="status"></div>
+        <div id="bt-device-list" class="disk-list">
+          <div class="disk-empty">正在读取蓝牙设备...</div>
         </div>
-      </div>
-      <div id="bt-feedback" class="feedback-banner hidden"></div>
-      <div id="bt-device-list" class="disk-list">
-        <div class="disk-empty">正在读取蓝牙设备...</div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-display" class="win-body hidden">
-      <div class="section-head">
-        <h3>显示器输出与刷新率 (Wayland wlr-randr)</h3>
-        <button class="btn small" data-cmd="settings:display-scan">刷新显示器</button>
-      </div>
-      <div id="display-feedback" class="feedback-banner hidden"></div>
-      <div id="display-output-list" class="disk-list">
-        <div class="disk-empty">正在读取显示器信息...</div>
-      </div>
+    <div id="tab-display" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
+          <div>
+            <h3>显示器输出与缩放</h3>
+            <p class="muted-hint">调节 Wayland 显示器的分辨率、刷新率与 DPI 缩放比例（基于 wlr-randr）。</p>
+          </div>
+          <button type="button" class="btn small" data-cmd="settings:display-scan">刷新显示器</button>
+        </div>
+        <div id="display-feedback" class="feedback-banner hidden" role="status"></div>
+        <div id="display-output-list" class="disk-list">
+          <div class="disk-empty">正在读取显示器信息...</div>
+        </div>
+      </section>
     </div>
 
-    <div id="tab-devices" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-devices" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>外置存储与磁盘分区</h3>
             <p class="muted-hint">一键挂载、打开文件管理器、卸载或安全断电弹出 U 盘、移动硬盘与扩展 SSD。</p>
@@ -644,14 +671,14 @@
             <button type="button" class="btn small primary" data-cmd="settings:devices-get">重新扫描外设</button>
           </div>
         </div>
-        <div id="devices-feedback" class="feedback-banner hidden"></div>
+        <div id="devices-feedback" class="feedback-banner hidden" role="status"></div>
         <div id="dev-disk-list" class="disk-list">
           <div class="disk-empty">正在扫描存储设备与外置 U 盘...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>USB 外设与扩展设备</h3>
             <p class="muted-hint">查看已连接的 USB 控制器、接收器、摄像头、读卡器及当前绑定的内核驱动。</p>
@@ -660,10 +687,10 @@
         <div id="dev-usb-list" class="disk-list">
           <div class="disk-empty">正在扫描 USB 总线...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>输入设备与游戏手柄</h3>
             <p class="muted-hint">识别键盘、鼠标、触控板与已接入的 Xbox / DualSense / Switch 手柄。</p>
@@ -672,66 +699,66 @@
         <div id="dev-input-list" class="disk-list">
           <div class="disk-empty">正在检测输入设备...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>音频输出与输入设备（音响 / 耳机 / 麦克风）</h3>
-            <p class="muted-hint">可独立禁用不需要的 HDMI 显示器音频或闲置麦克风，或随时重新启用（即时生效并持久化）。</p>
+            <h3>音频输出与输入设备</h3>
+            <p class="muted-hint">可独立禁用不需要的 HDMI 显示器音频或闲置麦克风，或随时重新启用。</p>
           </div>
         </div>
         <div id="dev-audio-list" class="disk-list">
           <div class="disk-empty">正在读取音频输入输出设备...</div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-audio" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-audio" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>输出设备与主音量 (PipeWire)</h3>
-            <p class="muted-hint">在扬声器、HDMI 显示器音频或蓝牙耳机之间切换默认输出。</p>
+            <h3>输出设备与主音量</h3>
+            <p class="muted-hint">基于 PipeWire 在扬声器、HDMI 显示器音频或蓝牙耳机之间切换默认输出。</p>
           </div>
           <div class="footer-actions">
             <span id="audio-out-pct" class="status-chip">75%</span>
-            <button class="btn small" data-cmd="settings:audio-get">刷新设备</button>
+            <button type="button" class="btn small" data-cmd="settings:audio-get">刷新设备</button>
           </div>
         </div>
-        <div class="part-section" style="margin-bottom: 10px;">
-          <input type="range" id="audio-out-slider" min="0" max="100" value="75" style="width: 100%;" />
+        <div class="set-card">
+          <input type="range" class="sp-range" id="audio-out-slider" min="0" max="100" value="75" aria-label="主音量" />
           <div class="audio-test-bar">
             <span class="muted-hint" id="audio-speaker-test-status">点击测试左/右声道或立体声扬声器输出</span>
             <div class="pill-group">
-              <button class="pill-btn" data-speaker-test="left" data-cmd="settings:audio-test-speaker:left">测试左声道</button>
-              <button class="pill-btn" data-speaker-test="right" data-cmd="settings:audio-test-speaker:right">测试右声道</button>
-              <button class="pill-btn" data-speaker-test="stereo" data-cmd="settings:audio-test-speaker:stereo">立体声测试音</button>
+              <button type="button" class="pill-btn" data-speaker-test="left" data-cmd="settings:audio-test-speaker:left">测试左声道</button>
+              <button type="button" class="pill-btn" data-speaker-test="right" data-cmd="settings:audio-test-speaker:right">测试右声道</button>
+              <button type="button" class="pill-btn" data-speaker-test="stereo" data-cmd="settings:audio-test-speaker:stereo">立体声测试音</button>
             </div>
           </div>
         </div>
         <div id="audio-sink-list" class="disk-list">
           <div class="disk-empty">正在检测音频输出设备...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>麦克风输入设备</h3>
             <p class="muted-hint">选择默认麦克风或快速开关静音（语音频道 / OBS 录屏生效）。</p>
           </div>
           <div class="footer-actions">
             <span id="audio-mic-pct" class="status-chip">100%</span>
-            <button class="btn small" id="btn-mic-mute" data-cmd="settings:mic-mute">静音切换</button>
+            <button type="button" class="btn small" id="btn-mic-mute" data-cmd="settings:mic-mute">静音切换</button>
           </div>
         </div>
-        <div class="part-section" style="margin-bottom: 10px;">
-          <input type="range" id="audio-mic-slider" min="0" max="100" value="100" style="width: 100%;" />
+        <div class="set-card">
+          <input type="range" class="sp-range" id="audio-mic-slider" min="0" max="100" value="100" aria-label="麦克风增益" />
           <div class="audio-mic-test-panel">
             <div class="audio-test-bar">
               <div class="audio-mic-test-left">
-                <button class="btn small" id="btn-mic-test" data-cmd="settings:audio-test-mic:toggle">测试麦克风（回听自己声音）</button>
+                <button type="button" class="btn small" id="btn-mic-test" data-cmd="settings:audio-test-mic:toggle">测试麦克风（回听自己声音）</button>
                 <span class="muted-hint" id="audio-mic-test-status">点击开启实时监听与音量电平检测（建议使用耳机防止啸叫）</span>
               </div>
               <span class="status-chip" id="audio-mic-level-chip">电平 --</span>
@@ -744,12 +771,12 @@
         <div id="audio-source-list" class="disk-list">
           <div class="disk-empty">正在检测麦克风设备...</div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>电源模式、zram 与桌面工具</h3>
+            <h3>电源模式与桌面工具</h3>
             <p class="muted-hint" id="power-hw-summary">正在检测电源与内存压缩状态...</p>
           </div>
         </div>
@@ -760,9 +787,9 @@
               <span class="muted-hint" id="power-profile-hint">调节 CPU 调度倾向（笔记本续航或插电游戏全速运行）</span>
             </div>
             <div class="pill-group">
-              <button class="pill-btn" data-power-profile="power-saver" data-cmd="system:power-profile:power-saver">省电</button>
-              <button class="pill-btn active" data-power-profile="balanced" data-cmd="system:power-profile:balanced">平衡</button>
-              <button class="pill-btn" data-power-profile="performance" data-cmd="system:power-profile:performance">性能</button>
+              <button type="button" class="pill-btn" data-power-profile="power-saver" data-cmd="system:power-profile:power-saver">省电</button>
+              <button type="button" class="pill-btn active" data-power-profile="balanced" data-cmd="system:power-profile:balanced">平衡</button>
+              <button type="button" class="pill-btn" data-power-profile="performance" data-cmd="system:power-profile:performance">性能</button>
             </div>
           </div>
           <div class="perf-row">
@@ -771,8 +798,8 @@
               <span class="muted-hint">无操作 15 分钟后自动进入晶石安全锁屏（系统休眠前始终自动锁定）</span>
             </div>
             <div class="pill-group">
-              <button class="pill-btn" id="power-idle-lock-off" data-cmd="system:idle-lock:off">关闭</button>
-              <button class="pill-btn" id="power-idle-lock-on" data-cmd="system:idle-lock:on">开启</button>
+              <button type="button" class="pill-btn" id="power-idle-lock-off" data-cmd="system:idle-lock:off">关闭</button>
+              <button type="button" class="pill-btn" id="power-idle-lock-on" data-cmd="system:idle-lock:on">开启</button>
             </div>
           </div>
           <div class="perf-row">
@@ -780,29 +807,29 @@
               <strong>屏幕截图与锁屏快捷操作</strong>
               <span class="muted-hint">触发截图或锁屏（可在「键盘与快捷键」中修改组合键）</span>
             </div>
-            <div class="footer-actions">
-              <button class="btn small" data-cmd="system:screenshot:area">区域截图</button>
-              <button class="btn small" data-cmd="system:screenshot:full">全屏截图</button>
-              <button class="btn small" data-cmd="system:lock">锁定屏幕</button>
-              <button class="btn small" data-cmd="settings:tab:shortcuts">改快捷键...</button>
+            <div class="footer-actions wrap">
+              <button type="button" class="btn small" data-cmd="system:screenshot:area">区域截图</button>
+              <button type="button" class="btn small" data-cmd="system:screenshot:full">全屏截图</button>
+              <button type="button" class="btn small" data-cmd="system:lock">锁定屏幕</button>
+              <button type="button" class="btn small ghost" data-cmd="settings:tab:shortcuts">改快捷键...</button>
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-shortcuts" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-shortcuts" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>全局桌面快捷键 (labwc)</h3>
-            <p class="muted-hint">点击「录制快捷键」后直接按下你想用的组合键（如 Ctrl+Shift+A），保存后立即生效。</p>
+            <h3>全局桌面快捷键</h3>
+            <p class="muted-hint">点击「录制快捷键」后直接按下组合键（如 Ctrl+Shift+A），保存后对 labwc 合成器立即生效。</p>
           </div>
           <div class="footer-actions">
             <button type="button" class="btn small" data-cmd="settings:shortcuts-reset">恢复默认</button>
           </div>
         </div>
-        <div id="shortcuts-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+        <div id="shortcuts-feedback" class="feedback-banner hidden" role="status"></div>
         <div class="perf-row-list">
           <div class="perf-row">
             <div class="perf-row-info">
@@ -838,7 +865,7 @@
           </div>
           <div class="perf-row">
             <div class="perf-row-info">
-              <strong>打开终端 (Spinel 终端)</strong>
+              <strong>打开 Spinel 终端</strong>
               <span class="muted-hint">在任意界面快速打开原生多标签终端窗口</span>
             </div>
             <div class="footer-actions">
@@ -847,10 +874,12 @@
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <h3>内置窗口与终端常用快捷键</h3>
+      <section class="set-section">
+        <div class="set-head">
+          <h3>内置窗口与终端常用快捷键</h3>
+        </div>
         <div class="perf-row-list">
           <div class="perf-row">
             <div class="perf-row-info"><strong>全局搜索启动器 (Spotlight)</strong><span class="muted-hint">一键搜索应用、Steam 游戏与系统设置项</span></div>
@@ -881,24 +910,26 @@
             <div class="footer-actions"><span class="kbd-cap">Ctrl + Space</span><span class="kbd-cap">Shift</span></div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-perf" class="win-body hidden">
-      <section class="perf-strip glass">
-        <div class="perf-head">
+    <div id="tab-perf" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>游戏性能与主机大屏预设</h3>
             <p class="muted-hint">配置 MangoHud 监控、帧率上限、FSR 缩放与 GameMode，并一键写入全部 Steam 游戏启动项。</p>
           </div>
           <div class="footer-actions">
-            <button class="btn small primary" id="btn-apply-steam" data-cmd="perf:apply-steam">写入全部 Steam 游戏</button>
+            <button type="button" class="btn small primary" id="btn-apply-steam" data-cmd="perf:apply-steam">写入全部 Steam 游戏</button>
           </div>
         </div>
 
-        <div class="perf-launch-preview">
-          <span class="perf-label">生成参数</span>
-          <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
+        <div class="set-card set-card-compact">
+          <div class="perf-launch-preview">
+            <span class="perf-label">生成启动参数</span>
+            <code id="perf-cmd-preview">MANGOHUD=1 gamemoderun %command%</code>
+          </div>
         </div>
 
         <div class="perf-row-list">
@@ -908,9 +939,9 @@
               <span class="muted-hint">在游戏画面左上角显示帧率、CPU、GPU 占用</span>
             </div>
             <div class="pill-group">
-              <button class="pill-btn" data-perf-key="mangohud" data-perf-val="off">关闭</button>
-              <button class="pill-btn active" data-perf-key="mangohud" data-perf-val="compact">精简</button>
-              <button class="pill-btn" data-perf-key="mangohud" data-perf-val="full">详细</button>
+              <button type="button" class="pill-btn" data-perf-key="mangohud" data-perf-val="off">关闭</button>
+              <button type="button" class="pill-btn active" data-perf-key="mangohud" data-perf-val="compact">精简</button>
+              <button type="button" class="pill-btn" data-perf-key="mangohud" data-perf-val="full">详细</button>
             </div>
           </div>
 
@@ -920,11 +951,11 @@
               <span class="muted-hint">限制最高游戏帧率以降低功耗和发热</span>
             </div>
             <div class="pill-group">
-              <button class="pill-btn active" data-perf-key="fps_limit" data-perf-val="0">不限</button>
-              <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="60">60</button>
-              <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="90">90</button>
-              <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="120">120</button>
-              <button class="pill-btn" data-perf-key="fps_limit" data-perf-val="144">144</button>
+              <button type="button" class="pill-btn active" data-perf-key="fps_limit" data-perf-val="0">不限</button>
+              <button type="button" class="pill-btn" data-perf-key="fps_limit" data-perf-val="60">60</button>
+              <button type="button" class="pill-btn" data-perf-key="fps_limit" data-perf-val="90">90</button>
+              <button type="button" class="pill-btn" data-perf-key="fps_limit" data-perf-val="120">120</button>
+              <button type="button" class="pill-btn" data-perf-key="fps_limit" data-perf-val="144">144</button>
             </div>
           </div>
 
@@ -934,10 +965,10 @@
               <span class="muted-hint">降低内部分辨率并配合 FSR 拉伸提升游戏帧数</span>
             </div>
             <div class="pill-group">
-              <button class="pill-btn active" data-perf-key="render_res" data-perf-val="native">原生</button>
-              <button class="pill-btn" data-perf-key="render_res" data-perf-val="1080p">1080p</button>
-              <button class="pill-btn" data-perf-key="render_res" data-perf-val="900p">900p</button>
-              <button class="pill-btn" data-perf-key="render_res" data-perf-val="720p">720p</button>
+              <button type="button" class="pill-btn active" data-perf-key="render_res" data-perf-val="native">原生</button>
+              <button type="button" class="pill-btn" data-perf-key="render_res" data-perf-val="1080p">1080p</button>
+              <button type="button" class="pill-btn" data-perf-key="render_res" data-perf-val="900p">900p</button>
+              <button type="button" class="pill-btn" data-perf-key="render_res" data-perf-val="720p">720p</button>
             </div>
           </div>
 
@@ -946,7 +977,7 @@
               <strong>AMD FSR 画面锐化放大</strong>
               <span class="muted-hint">配合低渲染分辨率改善画面清晰度</span>
             </div>
-            <button type="button" class="sp-switch" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr" aria-label="FSR 锐化"><span class="sp-switch-thumb"></span></button>
+            <button type="button" class="sp-switch" role="switch" aria-checked="false" id="btn-toggle-fsr" data-cmd="perf:toggle-fsr" aria-label="FSR 锐化"><span class="sp-switch-thumb"></span></button>
           </div>
 
           <div class="perf-row">
@@ -954,101 +985,114 @@
               <strong>GameMode 游戏调度加速</strong>
               <span class="muted-hint">自动提升游戏进程 CPU 优先级并优化电源调度</span>
             </div>
-            <button type="button" class="sp-switch is-on" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode" aria-label="GameMode"><span class="sp-switch-thumb"></span></button>
+            <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" id="btn-toggle-gamemode" data-cmd="perf:toggle-gamemode" aria-label="GameMode"><span class="sp-switch-thumb"></span></button>
           </div>
         </div>
-        <div id="perf-feedback" class="feedback-banner hidden"></div>
+        <div id="perf-feedback" class="feedback-banner hidden" role="status"></div>
       </section>
     </div>
 
-    <div id="tab-appearance" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-appearance" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>统一 UI 风格与主题管理</h3>
             <p class="muted-hint">同步切换桌面壁纸、顶栏、Dock、控制中心与全部窗口界面风格。</p>
           </div>
           <div class="footer-actions">
-            <button class="btn small" data-cmd="theme:refresh">刷新主题</button>
-            <button class="btn small primary" data-cmd="theme:export">扩展主题模板 (.theme)</button>
+            <button type="button" class="btn small" data-cmd="theme:refresh">刷新主题</button>
+            <button type="button" class="btn small primary" data-cmd="theme:export">扩展主题模板 (.theme)</button>
           </div>
         </div>
         <div class="wallpaper-grid" id="theme-grid"></div>
-        <div class="perf-row" style="margin-top: 12px;">
-          <div class="perf-row-info">
-            <strong>自定义桌面壁纸图片</strong>
-            <span class="muted-hint" id="wp-image-label">当前使用主题内置极光渐变</span>
-          </div>
-          <div class="footer-actions">
-            <button type="button" class="btn small primary" data-cmd="wallpaper:pick-image">选择图片...</button>
-            <button type="button" class="btn small" id="btn-wp-clear" data-cmd="wallpaper:clear-image">恢复主题渐变</button>
-          </div>
-        </div>
-        <div class="perf-row" style="margin-top: 10px;">
-          <div class="perf-row-info">
-            <strong>Dock 栏显示与交互模式</strong>
-            <span class="muted-hint" id="dock-mode-desc">悬浮放大（自动扩展间距防拥挤，底部常驻保留工作区）</span>
-          </div>
-          <div class="pill-group" id="dock-mode-group">
-            <button type="button" class="pill-btn active" data-dock-mode="magnify">悬浮放大</button>
-            <button type="button" class="pill-btn" data-dock-mode="fixed">不放大</button>
-            <button type="button" class="pill-btn" data-dock-mode="autohide">不悬浮默认隐藏</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div class="bt-head-left">
-            <h3>中英文输入法 (Fcitx5)</h3>
-            <span id="ime-status-chip" class="status-chip">检测中</span>
-          </div>
-          <div class="footer-actions">
-            <button class="btn small" data-cmd="ime:restart">重启服务</button>
-          </div>
-        </div>
-        <div class="part-section">
-          <p class="muted-hint" style="margin-bottom: 10px;">仅保留 <strong>英文</strong> 与 <strong>中文拼音</strong> 双模式，按 <strong>Shift</strong> 或 <strong>Ctrl + Space</strong> 流畅切换；顶部状态栏可快速切换中英与简繁体。</p>
-          <div class="footer-actions" style="flex-wrap: wrap; gap: 8px;">
-            <button class="pill-btn" id="btn-ime-en" data-cmd="ime:mode:en">英文输入 (EN)</button>
-            <button class="pill-btn active" id="btn-ime-zh" data-cmd="ime:mode:zh">中文输入 (中)</button>
-            <button class="pill-btn active" id="btn-ime-simp" data-cmd="ime:trad:simp">简体中文</button>
-            <button class="pill-btn" id="btn-ime-trad" data-cmd="ime:trad:trad">繁体中文</button>
-            <button class="btn small" id="btn-ime-ice" data-cmd="ime:install-rime-ice">安装雾凇词库</button>
-          </div>
-          <div id="ime-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
-        </div>
-      </div>
-
-      <div class="inst-section">
-        <h3>关于 Spinel OS</h3>
-        <div class="about-box glass">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
-            <img src="spinel-logo.png" alt="Spinel OS Logo" style="width:42px;height:42px;object-fit:contain;" />
-            <div>
-              <div style="font-size:15px;font-weight:700;">Spinel OS</div>
-              <div class="muted-hint">Wayland + labwc + GTK4 Native Shell + WebKitGTK6</div>
+        <div class="perf-row-list">
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>自定义桌面壁纸图片</strong>
+              <span class="muted-hint" id="wp-image-label">当前使用主题内置极光渐变</span>
+            </div>
+            <div class="footer-actions">
+              <button type="button" class="btn small primary" data-cmd="wallpaper:pick-image">选择图片...</button>
+              <button type="button" class="btn small ghost" id="btn-wp-clear" data-cmd="wallpaper:clear-image">恢复主题渐变</button>
             </div>
           </div>
-          <div><strong>系统架构：</strong>Spinel OS (Wayland + labwc + GTK4 Native Shell + WebKitGTK6)</div>
-          <div><strong>Spinel 版本：</strong><span id="about-spinel-version">--</span></div>
-          <div><strong>当前模式：</strong><span id="about-mode">--</span></div>
-          <div><strong>图形设备：</strong><span id="about-gpu">--</span></div>
-          <div><strong>Linux 内核：</strong><span id="about-kernel">--</span></div>
-          <div class="footer-actions" style="margin-top: 8px;">
-            <button type="button" class="btn small primary" data-cmd="settings:tab:updates">系统更新</button>
-            <button class="btn small" data-cmd="welcome:open">首次开机向导</button>
-            <button class="btn small" data-cmd="monitor:open:logs">打开系统监视器</button>
-            <button class="btn small" data-cmd="doctor:open">Spinel Doctor 体检</button>
-            <button class="btn small" data-cmd="installer:open">打开磁盘安装 / 重装工具</button>
-            <button class="btn small" data-cmd="power:reboot">重启系统</button>
-            <button class="btn small danger" data-cmd="power:shutdown">关机</button>
+          <div class="perf-row">
+            <div class="perf-row-info">
+              <strong>Dock 栏显示与交互模式</strong>
+              <span class="muted-hint" id="dock-mode-desc">悬浮放大（自动扩展间距防拥挤，底部常驻保留工作区）</span>
+            </div>
+            <div class="pill-group" id="dock-mode-group">
+              <button type="button" class="pill-btn active" data-dock-mode="magnify">悬浮放大</button>
+              <button type="button" class="pill-btn" data-dock-mode="fixed">不放大</button>
+              <button type="button" class="pill-btn" data-dock-mode="autohide">不悬浮默认隐藏</button>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
+
+      <section class="set-section">
+        <div class="set-head">
+          <div>
+            <div class="bt-head-left">
+              <h3>中英文输入法</h3>
+              <span id="ime-status-chip" class="status-chip">检测中</span>
+            </div>
+            <p class="muted-hint">仅保留英文与中文拼音双模式，按 Shift 或 Ctrl + Space 流畅切换；顶部状态栏可快速切换中英与简繁体（Fcitx5）。</p>
+          </div>
+          <div class="footer-actions">
+            <button type="button" class="btn small" data-cmd="ime:restart">重启服务</button>
+          </div>
+        </div>
+        <div class="set-card">
+          <div class="set-toolbar-split">
+            <div class="footer-actions wrap">
+              <div class="pill-group">
+                <button type="button" class="pill-btn" id="btn-ime-en" data-cmd="ime:mode:en">英文输入 (EN)</button>
+                <button type="button" class="pill-btn active" id="btn-ime-zh" data-cmd="ime:mode:zh">中文输入 (中)</button>
+              </div>
+              <div class="pill-group">
+                <button type="button" class="pill-btn active" id="btn-ime-simp" data-cmd="ime:trad:simp">简体中文</button>
+                <button type="button" class="pill-btn" id="btn-ime-trad" data-cmd="ime:trad:trad">繁体中文</button>
+              </div>
+            </div>
+            <button type="button" class="btn small" id="btn-ime-ice" data-cmd="ime:install-rime-ice">安装雾凇词库</button>
+          </div>
+          <div id="ime-feedback" class="feedback-banner hidden" role="status"></div>
+        </div>
+      </section>
+
+      <section class="set-section">
+        <div class="set-head">
+          <h3>关于 Spinel OS</h3>
+        </div>
+        <div class="set-card set-about-card">
+          <div class="set-about-hero">
+            <img src="spinel-logo.png" alt="Spinel OS Logo" class="set-about-logo" />
+            <div>
+              <div class="set-about-name">Spinel OS</div>
+              <div class="muted-hint">Wayland · labwc · GTK4 Native Shell · WebKitGTK6</div>
+            </div>
+          </div>
+          <div class="set-kv-list">
+            <div class="set-kv-row"><span class="muted-hint">Spinel 版本</span><strong id="about-spinel-version">--</strong></div>
+            <div class="set-kv-row"><span class="muted-hint">运行模式</span><strong id="about-mode">--</strong></div>
+            <div class="set-kv-row"><span class="muted-hint">图形设备</span><strong id="about-gpu">--</strong></div>
+            <div class="set-kv-row"><span class="muted-hint">Linux 内核</span><strong id="about-kernel">--</strong></div>
+          </div>
+          <div class="footer-actions wrap">
+            <button type="button" class="btn small primary" data-cmd="settings:tab:updates">系统更新</button>
+            <button type="button" class="btn small" data-cmd="welcome:open">首次开机向导</button>
+            <button type="button" class="btn small" data-cmd="monitor:open:logs">打开系统监视器</button>
+            <button type="button" class="btn small" data-cmd="doctor:open">Spinel Doctor 体检</button>
+            <button type="button" class="btn small" data-cmd="installer:open">磁盘安装 / 重装工具</button>
+            <button type="button" class="btn small" data-cmd="power:reboot">重启系统</button>
+            <button type="button" class="btn small danger" data-cmd="power:shutdown">关机</button>
+          </div>
+        </div>
+      </section>
     </div>
 
-    <div id="tab-perms" class="win-body hidden">
+    <div id="tab-perms" class="win-body hidden" role="tabpanel">
       <div class="perms-subbar">
         <div class="tab-bar" id="perms-subtabs">
           <button type="button" class="tab-btn active" data-perms-tab="ai">AI Agent 权限</button>
@@ -1061,7 +1105,7 @@
       <!-- Sub-tab 1: AI Agent Capabilities & MCP -->
       <div id="perms-pane-ai" class="perms-pane">
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>AI Agent 能力与分级权限</h3>
               <p class="muted-hint">控制接入 SpinelOS 的 Antigravity / Codex / Claude 等调用系统原子能力的默认边界。</p>
@@ -1078,49 +1122,49 @@
                 <strong>Tier 0 · 基础观测与会话感知</strong>
                 <span class="muted-hint">允许上报执行状态、读取当前专注应用与网络代理概况</span>
               </div>
-              <button type="button" class="sp-switch is-on" data-ai-perm="tier0_observe" aria-label="Tier 0 基础观测"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" data-ai-perm="tier0_observe" aria-label="Tier 0 基础观测"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 1 · 读取剪贴板近期历史</strong>
                 <span class="muted-hint">允许通过工作现场向 Agent 提供近期复制的报错与代码片段</span>
               </div>
-              <button type="button" class="sp-switch" data-ai-perm="tier1_clipboard" aria-label="Tier 1 剪贴板"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch" role="switch" aria-checked="false" data-ai-perm="tier1_clipboard" aria-label="Tier 1 剪贴板"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 1 · 桌面与窗口截图回传</strong>
                 <span class="muted-hint">允许 MCP 调用无头截图以多模态 PNG 回传给 Coding Agent</span>
               </div>
-              <button type="button" class="sp-switch" data-ai-perm="tier1_screenshot" aria-label="Tier 1 截图"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch" role="switch" aria-checked="false" data-ai-perm="tier1_screenshot" aria-label="Tier 1 截图"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 1 · Doctor 体检与脱敏日志</strong>
                 <span class="muted-hint">允许读取已脱敏的系统诊断与运行日志，自动定位服务报错</span>
               </div>
-              <button type="button" class="sp-switch" data-ai-perm="tier1_logs" aria-label="Tier 1 体检日志"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch" role="switch" aria-checked="false" data-ai-perm="tier1_logs" aria-label="Tier 1 体检日志"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 2 · 平行沙箱自动隔离运行</strong>
                 <span class="muted-hint">允许在 spinel-sandbox 中运行高风险测试并供画中画实时接管</span>
               </div>
-              <button type="button" class="sp-switch is-on" data-ai-perm="tier2_sandbox" aria-label="Tier 2 平行沙箱"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" data-ai-perm="tier2_sandbox" aria-label="Tier 2 平行沙箱"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 2 · Btrfs 保护性还原点快照</strong>
                 <span class="muted-hint">允许高危修改前通过 Snapper 创建只增不减系统还原点</span>
               </div>
-              <button type="button" class="sp-switch is-on" data-ai-perm="tier2_snapshot" aria-label="Tier 2 保护快照"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" data-ai-perm="tier2_snapshot" aria-label="Tier 2 保护快照"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>Tier 3 · 宿主机控制动作策略</strong>
                 <span class="muted-hint">启停服务（ollama / vllm / docker）或切换宿主机窗口时的放行方式</span>
               </div>
-              <select id="sel-ai-tier3-policy" class="spinel-select" style="min-width: 164px;">
+              <select id="sel-ai-tier3-policy" class="spinel-select set-select-md">
                 <option value="ask">灵动岛逐次询问（推荐）</option>
                 <option value="allow">始终允许</option>
                 <option value="deny">一律拒绝</option>
@@ -1131,21 +1175,21 @@
                 <strong>全屏游戏时自动暂让 vLLM 显存</strong>
                 <span class="muted-hint">启用 GameMode 时释放用户态本地重推理显存占用</span>
               </div>
-              <button type="button" class="sp-switch is-on" data-ai-perm="vram_yield_on_gamemode" aria-label="显存协同"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" data-ai-perm="vram_yield_on_gamemode" aria-label="显存协同"><span class="sp-switch-thumb"></span></button>
             </div>
           </div>
-          <div id="ai-perms-feedback" class="feedback-banner hidden"></div>
+          <div id="ai-perms-feedback" class="feedback-banner hidden" role="status"></div>
         </div>
 
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
-              <h3>接入外部 Coding Agent (`spinel-os-mcp`)</h3>
+              <h3>接入外部 Coding Agent (spinel-os-mcp)</h3>
               <p class="muted-hint" id="ai-mcp-path-hint">配置文件: ~/.gemini/config/mcp_config.json</p>
             </div>
-            <div class="footer-actions">
+            <div class="footer-actions wrap">
               <span class="status-chip" id="ai-mcp-install-chip">检测中</span>
-              <select id="sel-ai-mcp-client" class="spinel-select" style="min-width: 146px;">
+              <select id="sel-ai-mcp-client" class="spinel-select set-select-sm">
                 <option value="antigravity">Antigravity</option>
                 <option value="codex">Codex (TOML)</option>
                 <option value="claude">Claude Code</option>
@@ -1156,23 +1200,23 @@
               <button type="button" class="btn small" id="btn-ai-copy-mcp">复制配置</button>
             </div>
           </div>
-          <pre id="ai-mcp-snippet" class="log-box selectable" style="max-height: 168px;"></pre>
+          <pre id="ai-mcp-snippet" class="log-box selectable set-code-snippet"></pre>
         </div>
       </div>
 
       <!-- Sub-tab 2: Parallel Sandbox Desktop -->
       <div id="perms-pane-sandbox" class="perms-pane hidden">
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>Agent 平行沙箱桌面（内核级全隔离）</h3>
               <p class="muted-hint">独立隐藏主目录与虚拟显示器，仅持久保存下方白名单目录；可随时开启画中画人工接管。</p>
             </div>
-            <div class="footer-actions">
+            <div class="footer-actions wrap">
               <span class="status-chip" id="sandbox-status-chip">检测中</span>
-              <button class="btn small primary" id="btn-sandbox-start">启动 / 画中画</button>
-              <button class="btn small" id="btn-sandbox-stop">停止</button>
-              <button class="btn small danger" id="btn-sandbox-reset">重置环境</button>
+              <button type="button" class="btn small primary" id="btn-sandbox-start">启动 / 画中画</button>
+              <button type="button" class="btn small" id="btn-sandbox-stop">停止</button>
+              <button type="button" class="btn small danger" id="btn-sandbox-reset">重置环境</button>
             </div>
           </div>
           <div class="perf-row-list">
@@ -1181,38 +1225,38 @@
                 <strong>共享本机网络</strong>
                 <span class="muted-hint">开启后可联网并直连本地 Ollama / 系统代理；关闭则完全断网隔离</span>
               </div>
-              <button type="button" class="sp-switch is-on" id="sw-sandbox-net" aria-label="共享本机网络"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" id="sw-sandbox-net" aria-label="共享本机网络"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>剪贴板双向同步</strong>
                 <span class="muted-hint">开启后宿主桌面与平行桌面可互相复制粘贴文本</span>
               </div>
-              <button type="button" class="sp-switch is-on" id="sw-sandbox-clip" aria-label="剪贴板双向同步"><span class="sp-switch-thumb"></span></button>
+              <button type="button" class="sp-switch is-on" role="switch" aria-checked="true" id="sw-sandbox-clip" aria-label="剪贴板双向同步"><span class="sp-switch-thumb"></span></button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>算力配额模式</strong>
                 <span class="muted-hint">限制平行桌面最大 CPU / 内存优先级，防止后台任务卡死宿主机</span>
               </div>
-              <select id="sel-sandbox-perf" class="spinel-select" style="min-width: 146px;">
+              <select id="sel-sandbox-perf" class="spinel-select set-select-sm">
                 <option value="host-priority">宿主优先（推荐）</option>
                 <option value="balanced">均衡分配</option>
               </select>
             </div>
           </div>
-          <div id="sandbox-feedback" class="feedback-banner hidden"></div>
+          <div id="sandbox-feedback" class="feedback-banner hidden" role="status"></div>
         </div>
 
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>持久保留目录白名单</h3>
               <p class="muted-hint" id="sandbox-home-info">沙箱临时主目录: --</p>
             </div>
             <div class="footer-actions">
-              <button class="btn small" id="btn-sandbox-add-rw">+ 可写目录</button>
-              <button class="btn small ghost" id="btn-sandbox-add-ro">+ 只读目录</button>
+              <button type="button" class="btn small" id="btn-sandbox-add-rw">+ 可写目录</button>
+              <button type="button" class="btn small ghost" id="btn-sandbox-add-ro">+ 只读目录</button>
             </div>
           </div>
           <div id="sandbox-dir-list" class="perf-row-list">
@@ -1221,14 +1265,14 @@
         </div>
 
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>可启动应用与默认自启</h3>
               <p class="muted-hint">配置画中画「+ 应用」快捷菜单，以及开启平行沙箱时自动打开哪些应用。</p>
             </div>
             <div class="footer-actions">
-              <select id="sel-sandbox-app-add" class="spinel-select" style="min-width: 180px;"></select>
-              <button class="btn small" id="btn-sandbox-app-add">+ 添加应用</button>
+              <select id="sel-sandbox-app-add" class="spinel-select set-select-lg"></select>
+              <button type="button" class="btn small" id="btn-sandbox-app-add">+ 添加应用</button>
             </div>
           </div>
           <div id="sandbox-app-list" class="perf-row-list">
@@ -1240,7 +1284,7 @@
       <!-- Sub-tab 3: System & Software Authorizations -->
       <div id="perms-pane-system" class="perms-pane hidden">
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>系统弹窗授权保护</h3>
               <p class="muted-hint">软件请求管理员密码、拍照、录屏或打开文件时自动弹出确认框，保持开启即可。</p>
@@ -1252,21 +1296,21 @@
                 <strong>管理员密码确认弹窗 (Polkit)</strong>
                 <span class="muted-hint" id="perms-polkit-desc">安装软件或改硬盘等敏感操作时弹窗输密码</span>
               </div>
-              <button class="btn small" data-cmd="settings:perms-polkit">启用 / 重启</button>
+              <button type="button" class="btn small" data-cmd="settings:perms-polkit">启用 / 重启</button>
             </div>
             <div class="perf-row">
               <div class="perf-row-info">
                 <strong>应用拍照 / 录屏 / 文件访问询问 (Portal)</strong>
                 <span class="muted-hint" id="perms-portal-desc">软件想访问摄像头、录屏或打开文件时先征求你的同意</span>
               </div>
-              <button class="btn small" data-cmd="settings:perms-portal">刷新服务</button>
+              <button type="button" class="btn small" data-cmd="settings:perms-portal">刷新服务</button>
             </div>
           </div>
-          <div id="perms-feedback" class="feedback-banner hidden"></div>
+          <div id="perms-feedback" class="feedback-banner hidden" role="status"></div>
         </div>
 
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>已记住的弹窗授权记录</h3>
               <p class="muted-hint">如果不小心点了“始终拒绝/允许”录屏或摄像头，可在这里撤销让软件下次重询。</p>
@@ -1278,7 +1322,7 @@
         </div>
 
         <div class="perms-group">
-          <div class="section-head">
+          <div class="set-head">
             <div>
               <h3>第三方沙箱应用权限</h3>
               <p class="muted-hint">若 Flatpak 沙箱应用读不到存档目录或外设，可在这里按项放开权限。</p>
@@ -1291,12 +1335,12 @@
       </div>
     </div>
 
-    <div id="tab-snapshots" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-snapshots" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
-            <h3>Btrfs 系统快照与安全回滚 (Snapper)</h3>
-            <p class="muted-hint">在系统更新、驱动升级或 AI 修改系统配置前创建零占用写时复制 (CoW) 还原点，出错可一键回滚恢复。</p>
+            <h3>Btrfs 系统快照与安全回滚</h3>
+            <p class="muted-hint">通过 Snapper 在系统更新、驱动升级或 AI 修改系统配置前创建零占用写时复制 (CoW) 还原点。</p>
           </div>
           <div class="footer-actions">
             <span class="status-chip" id="snap-status-chip">检测中...</span>
@@ -1304,65 +1348,65 @@
           </div>
         </div>
 
-        <div class="part-section" style="margin-bottom: 12px;">
+        <div class="perf-row-list">
           <div class="perf-row">
-            <div class="perf-row-info" style="flex: 1;">
+            <div class="perf-row-info set-flex-1">
               <strong>立即创建系统还原点</strong>
               <span class="muted-hint">支持自定义备注名称（例如：升级驱动前 / 安装 AI 环境前）</span>
             </div>
-            <div class="footer-actions" style="flex-wrap: nowrap;">
-              <input type="text" id="snap-desc-input" class="modal-input" style="min-width: 220px;" placeholder="输入快照备注（可选）..." />
+            <div class="footer-actions nowrap">
+              <input type="text" id="snap-desc-input" class="modal-input set-input-med" placeholder="输入快照备注（可选）..." />
               <button type="button" class="btn small primary" id="btn-snap-create">创建系统快照</button>
             </div>
           </div>
         </div>
 
-        <div id="snap-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+        <div id="snap-feedback" class="feedback-banner hidden" role="status"></div>
         <div id="snap-list" class="disk-list">
           <div class="disk-empty">正在读取 Btrfs 快照列表...</div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div id="tab-updates" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+    <div id="tab-updates" class="win-body hidden" role="tabpanel">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>Spinel OS 系统在线升级</h3>
             <p class="muted-hint">登录后可从云端校验并升级 Spinel OS 核心桌面、主题与系统脚本；未登录设备可使用离线包（.tar.zst）升级。</p>
           </div>
-          <div class="footer-actions">
+          <div class="footer-actions wrap">
             <span class="status-chip" id="upd-spinel-version">版本 --</span>
             <span class="status-chip" id="upd-ota-chip">检查更新状态...</span>
             <button type="button" class="btn small danger hidden" id="btn-upd-reboot" data-cmd="power:reboot">更新完成，立即重启生效</button>
           </div>
         </div>
-        <div id="upd-ota-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
-        <div class="footer-actions" style="flex-wrap: wrap;">
+        <div id="upd-ota-feedback" class="feedback-banner hidden" role="status"></div>
+        <div class="footer-actions wrap">
           <button type="button" class="btn small" id="btn-upd-ota-check" data-cmd="ota:check">检查在线更新</button>
           <button type="button" class="btn small primary" id="btn-spinel-ota" data-store-sys="spinel-ota-full">在线升级 Spinel OS (--full)</button>
           <button type="button" class="btn small" id="btn-spinel-ota-offline" data-cmd="ota:pick-offline">离线包升级 (--full)</button>
           <button type="button" class="btn small hidden" id="btn-upd-ota-login" data-cmd="settings:tab:relay">登录远程账号</button>
         </div>
-      </div>
+      </section>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
+      <section class="set-section">
+        <div class="set-head">
           <div>
             <h3>系统软件包与镜像源维护</h3>
             <p class="muted-hint">同步升级 Arch 内核、显卡驱动及已安装的软件，或测速优选中国区 HTTPS 镜像站。</p>
           </div>
-          <div class="footer-actions">
+          <div class="footer-actions wrap">
             <span class="status-chip" id="upd-driver-chip">驱动检测中...</span>
             <span class="status-chip" id="upd-update-chip">索引检查中</span>
           </div>
         </div>
-        <div class="footer-actions" style="flex-wrap: wrap;">
+        <div class="footer-actions wrap">
           <button type="button" class="btn small primary" id="btn-sys-update" data-store-sys="sys-update">一键更新软件包</button>
           <button type="button" class="btn small" id="btn-mirror-test" data-store-sys="mirror-test">测速优选国内镜像</button>
           <button type="button" class="btn small" id="btn-keyring-fix" data-store-sys="keyring-fix">修复密钥环</button>
         </div>
-      </div>
+      </section>
 
       <div id="upd-log-wrap" class="glass store-log-card hidden">
         <div class="sub-panel-head">
@@ -1372,13 +1416,13 @@
             <button type="button" class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
           </div>
         </div>
-        <div id="upd-progress-wrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
+        <div id="upd-progress-wrap" class="set-progress-wrap hidden">
           <div class="progress-header">
             <span id="upd-progress-text" class="muted-hint">准备中...</span>
             <strong id="upd-progress-pct">0%</strong>
           </div>
           <div class="progress-track">
-            <div id="upd-progress-bar" class="progress-fill" style="width: 0%"></div>
+            <div id="upd-progress-bar" class="progress-fill"></div>
           </div>
         </div>
         <pre id="upd-log-box" class="log-box"></pre>
@@ -1394,10 +1438,10 @@
         </div>
         <p id="snap-pass-desc" class="muted-hint">需要管理员权限 (sudo) 读写系统根目录 @snapshots 子卷。</p>
         <div>
-          <label class="muted-hint" for="snap-pass-input" style="display:block;margin-bottom:4px;">管理员密码</label>
-          <input type="password" id="snap-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
+          <label class="muted-hint field-label-block" for="snap-pass-input">管理员密码</label>
+          <input type="password" id="snap-pass-input" class="modal-input" autocomplete="current-password" placeholder="请输入当前用户 sudo 密码..." />
         </div>
-        <div class="modal-footer" style="margin-top: 4px;">
+        <div class="modal-footer">
           <span class="muted-hint">密码仅用于本次授权，不会保存</span>
           <button type="button" class="btn primary small" id="btn-snap-pass-confirm">确认执行</button>
         </div>
@@ -1412,21 +1456,21 @@
         </div>
         <p id="dev-fstab-desc" class="muted-hint">将磁盘写入 /etc/fstab，实现开机自动挂载到 /mnt 目录（自动附加 nofail 保护，防止拔盘卡死）。</p>
         <div id="dev-fstab-name-wrap">
-          <label class="muted-hint" for="dev-fstab-name-input" style="display:block;margin-bottom:4px;">挂载目录名（位于 /mnt/ 下，仅限英文、数字、下划线或连字符）</label>
+          <label class="muted-hint field-label-block" for="dev-fstab-name-input">挂载目录名（位于 /mnt/ 下，仅限英文、数字、下划线或连字符）</label>
           <input type="text" id="dev-fstab-name-input" class="modal-input" placeholder="例如: games_ssd" />
         </div>
         <div id="dev-fstab-mode-wrap">
-          <label class="muted-hint" for="dev-fstab-mode-select" style="display:block;margin-bottom:4px;">挂载读写权限</label>
+          <label class="muted-hint field-label-block" for="dev-fstab-mode-select">挂载读写权限</label>
           <select id="dev-fstab-mode-select" class="modal-input">
             <option value="ro">只读保护模式 (ro) — 推荐 Windows 双系统盘 / 备份盘</option>
             <option value="rw">读写模式 (rw) — 确认 Windows 已完全关机</option>
           </select>
         </div>
         <div id="dev-fstab-pass-wrap" class="hidden">
-          <label class="muted-hint" for="dev-fstab-pass-input" style="display:block;margin-bottom:4px;">管理员密码（用于写入 /etc/fstab）</label>
-          <input type="password" id="dev-fstab-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
+          <label class="muted-hint field-label-block" for="dev-fstab-pass-input">管理员密码（用于写入 /etc/fstab）</label>
+          <input type="password" id="dev-fstab-pass-input" class="modal-input" autocomplete="current-password" placeholder="请输入当前用户 sudo 密码..." />
         </div>
-        <div class="modal-footer" style="margin-top: 4px;">
+        <div class="modal-footer">
           <span class="muted-hint" id="dev-fstab-hint">密码仅用于本次 sudo 授权，不会保存</span>
           <button type="button" class="btn primary small" id="btn-dev-fstab-confirm">确认应用</button>
         </div>
