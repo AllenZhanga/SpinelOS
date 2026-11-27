@@ -64,6 +64,9 @@ bool create_guarded_snapshot(const std::string &desc, std::string &out_json, std
 /// Launch a command or desktop URL inside the isolated Spinel parallel sandbox.
 bool launch_in_guarded_sandbox(const std::string &cmd, std::string &error_out);
 
+/// Query current Spinel parallel sandbox status as JSON.
+std::string query_sandbox_status_json();
+
 /// Focus a tracked workspace (1-based) and/or window via installed desktop hooks.
 bool focus_workspace_or_window(int workspace_1based, uint64_t win_id, std::string &error_out);
 
@@ -97,6 +100,7 @@ std::vector<ApprovalRequestInfo> list_pending_approvals();
 std::string serialize_approvals_json(const std::vector<ApprovalRequestInfo> &items);
 
 void set_approval_changed_callback(std::function<void()> cb);
+void cancel_all_pending_approvals();
 void reset_os_atomics_for_tests();
 
 }  // namespace spinel::ai

@@ -382,10 +382,14 @@ std::vector<AgentSessionInfo> reconcile_agent_sessions(long long now_sec,
                 std::string raw((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
                 AgentSessionInfo file_info;
                 if (!parse_session_json(raw, file_info)) continue;
-                if (file_info.updated_at <= 0) file_info.updated_at = now_sec;
 
                 auto existing = g_sessions.find(file_info.id);
-                if (existing == g_sessions.end() || file_info.updated_at >= existing->second.updated_at) {
+                if (file_info.updated_at <= 0) {
+                    file_info.updated_at = (existing != g_sessions.end()) ? existing->second.updated_at : now_sec;
+                }
+                if (existing == g_sessions.end() ||
+                    existing->second.source == "proc" ||
+                    file_info.updated_at > existing->second.updated_at) {
                     if (existing != g_sessions.end() && existing->second.status != file_info.status) {
                         transitions.push_back({file_info.id, true, existing->second.status, file_info.status, file_info});
                     } else if (existing == g_sessions.end()) {
@@ -410,11 +414,13 @@ std::vector<AgentSessionInfo> reconcile_agent_sessions(long long now_sec,
                 finished_ttl_sec > 0 && s.updated_at > 0 && (now_sec - s.updated_at) > finished_ttl_sec) {
                 remove_ids.push_back(kv.first);
             } else if (s.status == AgentSessionStatus::Running && s.pid > 1 && !pid_is_alive(s.pid)) {
-                // Process disappeared before reporting final status: mark done if file untouched.
+                // Process disappeared before reporting final status: mark done and persist.
                 AgentSessionStatus prev = s.status;
                 s.status = AgentSessionStatus::Done;
                 if (s.summary.empty()) s.summary = "会话进程已退出";
-                s.updated_at = now_sec;
+                s.updated_at = std::max(now_sec, s.updated_at + 1);
+                fs::create_directories(dir, ec);
+                write_text_file((dir / (s.id + ".json")).string(), serialize_agent_session_json(s));
                 transitions.push_back({s.id, true, prev, s.status, s});
             }
         }

@@ -34,6 +34,7 @@ constexpr CapabilityMeta kCapabilityTable[] = {
     {"perms.get", AgentCapabilityTier::Tier0Observe, "tier0_observe", "读取 AI Agent 权限配置"},
     {"audit.tail", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查看近期 Agent 能力审计日志"},
     {"action.proxy_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询系统网络代理状态"},
+    {"action.sandbox_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询平行沙箱运行状态"},
     {"action.service_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询本地 AI/容器/打印服务状态"},
     {"approval.list", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询待审批请求列表"},
 

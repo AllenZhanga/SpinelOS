@@ -1,6 +1,7 @@
 #include "ai/os_atomics.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
+#include "sandbox_manager.hpp"
 #include "system_control.hpp"
 
 #include <unistd.h>
@@ -217,6 +218,22 @@ bool capture_headless_screenshot(const std::string &mode, std::string &out_path,
         return false;
     }
     out_path = target.string();
+
+    // Keep at most 20 recent captures in tmpfs to avoid unbounded growth.
+    std::vector<fs::path> old_caps;
+    for (const auto &de : fs::directory_iterator(cap_dir, ec)) {
+        if (!de.is_regular_file(ec)) continue;
+        std::string fn = de.path().filename().string();
+        if (fn.rfind("cap-", 0) == 0 && de.path().extension() == ".png" && de.path() != target) {
+            old_caps.push_back(de.path());
+        }
+    }
+    if (old_caps.size() > 19) {
+        std::sort(old_caps.begin(), old_caps.end());
+        for (size_t i = 0; i + 19 < old_caps.size(); ++i) {
+            fs::remove(old_caps[i], ec);
+        }
+    }
     return true;
 }
 
@@ -265,6 +282,10 @@ bool launch_in_guarded_sandbox(const std::string &cmd, std::string &error_out) {
         return false;
     }
     return launch_cmd_in_sandbox(clean, error_out);
+}
+
+std::string query_sandbox_status_json() {
+    return sandbox_state_json();
 }
 
 bool focus_workspace_or_window(int workspace_1based, uint64_t win_id, std::string &error_out) {
@@ -358,7 +379,7 @@ ApprovalRequestInfo create_pending_approval(const std::string &client_id,
     auto slot = std::make_shared<PendingApprovalSlot>();
     long long now = static_cast<long long>(std::time(nullptr));
     unsigned long long seq = g_approval_seq.fetch_add(1) + 1;
-    slot->info.id = "apr_" + std::to_string(now) + "_" + std::to_string(seq);
+    slot->info.id = "apr_" + std::to_string(now) + "_" + std::to_string(::getpid()) + "_" + std::to_string(seq);
     slot->info.client_id = client_id.empty() ? "agent" : client_id;
     slot->info.capability = capability;
     slot->info.summary = summary;
@@ -458,6 +479,22 @@ std::string serialize_approvals_json(const std::vector<ApprovalRequestInfo> &ite
 void set_approval_changed_callback(std::function<void()> cb) {
     std::lock_guard<std::mutex> lock(g_approval_mu);
     g_approval_cb = std::move(cb);
+}
+
+void cancel_all_pending_approvals() {
+    bool any = false;
+    {
+        std::lock_guard<std::mutex> lock(g_approval_mu);
+        for (auto &kv : g_approvals) {
+            if (!kv.second->resolved) {
+                kv.second->info.state = "deny";
+                kv.second->resolved = true;
+                kv.second->cv.notify_all();
+                any = true;
+            }
+        }
+    }
+    if (any) notify_approval_cb();
 }
 
 void reset_os_atomics_for_tests() {

@@ -2,6 +2,8 @@
 #include "ai/json_util.hpp"
 #include "common.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
@@ -141,7 +143,7 @@ bool create_task(const std::string &title,
     unsigned long long seq = g_task_seq.fetch_add(1) + 1;
 
     AgentTaskItem item;
-    item.id = "t_" + std::to_string(now) + "_" + std::to_string(seq);
+    item.id = "t_" + std::to_string(now) + "_" + std::to_string(::getpid()) + "_" + std::to_string(seq);
     item.title = clean_title;
     item.notes = trim_copy(notes);
     item.repo_path = trim_copy(repo_path);

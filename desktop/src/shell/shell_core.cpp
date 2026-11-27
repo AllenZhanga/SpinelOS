@@ -9,10 +9,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 
 namespace shell_internal {
 
@@ -1115,19 +1119,58 @@ void init_native_shell(GtkApplication *app, AppState *state) {
         }, ns);
 
         spinel::ai::DesktopContextHooks ai_hooks;
-        ai_hooks.list_windows = []() {
-            std::vector<spinel::ai::WindowBindingRef> out;
-            for (const auto &w : list_tracked_windows()) {
-                out.push_back({w.id, w.app_id, w.title, w.activated});
+        auto invoke_main_sync = [](auto fn, auto fallback) {
+            GMainContext *mc = g_main_context_default();
+            if (mc && g_main_context_is_owner(mc)) {
+                return fn();
             }
-            return out;
+            using R = decltype(fn());
+            struct SyncCall {
+                std::mutex mu;
+                std::condition_variable cv;
+                bool done = false;
+                R result;
+                decltype(fn) work;
+                SyncCall(R init_res, decltype(fn) w)
+                    : result(std::move(init_res)), work(std::move(w)) {}
+            };
+            auto pkt = std::make_shared<SyncCall>(std::move(fallback), std::move(fn));
+            auto *holder = new std::shared_ptr<SyncCall>(pkt);
+            g_main_context_invoke(nullptr, +[](gpointer data) -> gboolean {
+                auto *h = static_cast<std::shared_ptr<SyncCall> *>(data);
+                R val = (*h)->work();
+                {
+                    std::lock_guard<std::mutex> lock((*h)->mu);
+                    (*h)->result = std::move(val);
+                    (*h)->done = true;
+                }
+                (*h)->cv.notify_all();
+                delete h;
+                return G_SOURCE_REMOVE;
+            }, holder);
+            std::unique_lock<std::mutex> lock(pkt->mu);
+            if (!pkt->cv.wait_for(lock, std::chrono::milliseconds(800), [&]() { return pkt->done; })) {
+                return fallback;
+            }
+            return std::move(pkt->result);
         };
-        ai_hooks.list_workspaces = []() {
-            std::vector<spinel::ai::WorkspaceBindingRef> out;
-            for (const auto &ws : list_tracked_workspaces()) {
-                out.push_back({ws.index, ws.name, ws.active, ws.urgent});
-            }
-            return out;
+        ai_hooks.list_windows = [invoke_main_sync]() {
+            return invoke_main_sync([]() {
+                std::vector<spinel::ai::WindowBindingRef> out;
+                for (const auto &w : list_tracked_windows()) {
+                    out.push_back({w.id, w.app_id, w.title, w.activated});
+                }
+                return out;
+            }, std::vector<spinel::ai::WindowBindingRef>{});
+        };
+        ai_hooks.list_workspaces = [invoke_main_sync]() {
+            return invoke_main_sync([]() {
+                std::vector<spinel::ai::WorkspaceBindingRef> out;
+                for (const auto &ws : list_tracked_workspaces()) {
+                    out.push_back({ws.index, ws.name, ws.active, ws.urgent});
+                }
+                return out;
+            }, std::vector<spinel::ai::WorkspaceBindingRef>{});
         };
         ai_hooks.activate_window = [](uint64_t wid) -> bool {
             if (wid == 0) return false;

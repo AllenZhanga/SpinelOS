@@ -80,6 +80,9 @@ if [ "$MODE" != "ui" ]; then
   if [ -f /tmp/spinel-dev/spinel-agent-ctl ]; then
     sudo install -Dm755 /tmp/spinel-dev/spinel-agent-ctl /usr/local/bin/spinel-agent-ctl
   fi
+  if [ -f /tmp/spinel-dev/spinel-os-mcp ]; then
+    sudo install -Dm755 /tmp/spinel-dev/spinel-os-mcp /usr/local/bin/spinel-os-mcp
+  fi
   if [ -f /tmp/spinel-dev/spinel-update ]; then
     sudo install -Dm755 /tmp/spinel-dev/spinel-update /usr/local/bin/spinel-update
   fi
@@ -331,6 +334,7 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-files" "${DEV_HOST}:/tmp/spinel-dev/spinel-files"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-sandbox" "${DEV_HOST}:/tmp/spinel-dev/spinel-sandbox"
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-agent-ctl" "${DEV_HOST}:/tmp/spinel-dev/spinel-agent-ctl"
+  rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-os-mcp" "${DEV_HOST}:/tmp/spinel-dev/spinel-os-mcp"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Store.desktop" \

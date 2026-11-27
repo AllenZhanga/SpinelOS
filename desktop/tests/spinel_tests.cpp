@@ -1,6 +1,8 @@
 #include "ai/agent_bus.hpp"
 #include "ai/agent_perms.hpp"
 #include "ai/agent_tracker.hpp"
+#include "ai/json_util.hpp"
+#include "ai/mcp_server.hpp"
 #include "ai/os_atomics.hpp"
 #include "ai/task_inbox.hpp"
 #include "app_store.hpp"
@@ -1436,6 +1438,141 @@ void test_ai_os_stage1_atomics() {
     reset_os_atomics_for_tests();
 }
 
+void test_ai_os_stage2_mcp() {
+    using namespace spinel::ai;
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+
+    fs::path base = fs::path(home_dir()) / ".spinel_ai_stage2_test";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(base, ec);
+
+    setenv("SPINEL_AGENT_RUNTIME_DIR", (base / "rt/agents").c_str(), 1);
+    setenv("SPINEL_TASK_INBOX_FILE", (base / "tasks.json").c_str(), 1);
+    setenv("SPINEL_AGENT_PERMS_FILE", (base / "agent_perms.conf").c_str(), 1);
+    setenv("SPINEL_AGENT_BUS_SOCK", (base / "rt/agent.sock").c_str(), 1);
+
+    AgentPermConfig perms;
+    EXPECT(update_agent_perms_kv("tier1_clipboard=false\ntier3_policy=deny\n", perms));
+
+    // Mock desktop compositor context + start live AF_UNIX bus
+    DesktopContextHooks mock_ctx;
+    mock_ctx.list_windows = []() -> std::vector<WindowBindingRef> {
+        return {{99, "codex", "Codex CLI - SpinelOS", true}};
+    };
+    mock_ctx.list_workspaces = []() -> std::vector<WorkspaceBindingRef> {
+        return {{0, "工作区 1", true, false}};
+    };
+    set_desktop_context_hooks(std::move(mock_ctx));
+
+    std::string bound_sock;
+    EXPECT(start_agent_bus_server(&bound_sock));
+
+    // 1. Initialize + notification + ping + tools/list
+    std::string init_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}})");
+    EXPECT(init_r.find("\"spinel-os-mcp\"") != std::string::npos);
+    EXPECT(init_r.find("\"protocolVersion\":\"2024-11-05\"") != std::string::npos);
+
+    std::string notif_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})");
+    EXPECT(notif_r.empty());
+
+    std::string ping_r = dispatch_mcp_jsonrpc(R"({"jsonrpc":"2.0","id":"p","method":"ping"})");
+    EXPECT(ping_r.find("\"result\":{}") != std::string::npos);
+
+    std::string list_r = dispatch_mcp_jsonrpc(R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})");
+    for (const char *tool : {
+             "agent_report", "agent_list", "todo_list", "todo_create", "todo_claim", "todo_complete",
+             "desktop_get_context", "clipboard_recent", "screenshot_capture", "doctor_diagnose",
+             "logs_tail", "snapshot_checkpoint", "sandbox_launch", "sandbox_status",
+             "workspace_focus", "service_control", "proxy_status", "request_user_approval"}) {
+        EXPECT(list_r.find(std::string("\"") + tool + "\"") != std::string::npos);
+    }
+
+    // 2. End-to-end live MCP -> AF_UNIX bus -> Task Inbox + Agent Tracker flow
+    std::string create_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"todo_create","arguments":{"title":"通过 MCP 联调 Stage 2","repo":"/tmp/SpinelOS","preferred_agent":"Codex"}}})");
+    EXPECT(create_r.find("\"isError\":false") != std::string::npos);
+    EXPECT(create_r.find("通过 MCP 联调 Stage 2") != std::string::npos);
+
+    auto backlog = list_tasks("backlog");
+    EXPECT(backlog.size() == 1);
+    std::string tid = backlog[0].id;
+
+    std::string claim_r = dispatch_mcp_jsonrpc(
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"todo_claim\",\"arguments\":{\"id\":\"" +
+        tid + "\",\"session_id\":\"codex-mcp-1\",\"agent\":\"Codex\"}}}");
+    EXPECT(claim_r.find("\"isError\":false") != std::string::npos);
+
+    std::string rep_r = dispatch_mcp_jsonrpc(
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"agent_report\",\"arguments\":{\"id\":\"codex-mcp-1\",\"agent\":\"Codex\",\"status\":\"done\",\"summary\":\"MCP 链路验收成功\",\"task_id\":\"" +
+        tid + "\"}}}");
+    EXPECT(rep_r.find("\"isError\":false") != std::string::npos);
+
+    std::string todo_rev = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"todo_list","arguments":{"status":"review"}}})");
+    EXPECT(todo_rev.find("\"isError\":false") != std::string::npos);
+    EXPECT(todo_rev.find("MCP 链路验收成功") != std::string::npos);
+
+    // 3. Context / Sandbox / Proxy / Permission gate enforcement via MCP
+    std::string ctx_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"desktop_get_context","arguments":{}}})");
+    EXPECT(ctx_r.find("\"isError\":false") != std::string::npos);
+    EXPECT(ctx_r.find("Codex CLI - SpinelOS") != std::string::npos);
+
+    std::string sb_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"sandbox_status","arguments":{}}})");
+    EXPECT(sb_r.find("\"isError\":false") != std::string::npos);
+
+    std::string clip_denied = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"clipboard_recent","arguments":{"limit":3}}})");
+    EXPECT(clip_denied.find("\"isError\":true") != std::string::npos);
+
+    std::string svc_denied = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"service_control","arguments":{"service":"ollama","action":"stop"}}})");
+    EXPECT(svc_denied.find("\"isError\":true") != std::string::npos);
+
+    // 4. Multimodal screenshot PNG base64 image return via mocked capture response
+    fs::path fake_png = base / "cap-test.png";
+    const unsigned char tiny_png[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 1};
+    {
+        std::ofstream pfs(fake_png, std::ios::binary);
+        pfs.write(reinterpret_cast<const char *>(tiny_png), sizeof(tiny_png));
+    }
+    std::string shot_r = dispatch_mcp_jsonrpc(
+        R"({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"screenshot_capture","arguments":{"mode":"full"}}})",
+        [&](const std::string &, std::string &resp_out, int) {
+            resp_out = "{\"id\":\"mcp\",\"ok\":true,\"decision\":\"allow\",\"result\":{\"path\":\"" +
+                       json_escape(fake_png.string()) + "\"}}";
+            return true;
+        });
+    EXPECT(shot_r.find("\"type\":\"image\"") != std::string::npos);
+    EXPECT(shot_r.find("\"mimeType\":\"image/png\"") != std::string::npos);
+    EXPECT(shot_r.find("iVBORw0K") != std::string::npos);
+
+    // 5. Stdio loop framing: both NDJSON and Content-Length framing
+    std::string frame_msg = R"({"jsonrpc":"2.0","id":99,"method":"ping"})";
+    std::ostringstream in_stream;
+    in_stream << frame_msg << "\n";
+    in_stream << "Content-Length: " << frame_msg.size() << "\r\n\r\n" << frame_msg;
+    std::istringstream iss(in_stream.str());
+    std::ostringstream oss;
+    EXPECT(run_mcp_stdio_loop(iss, oss) == 0);
+    std::string stdio_out = oss.str();
+    EXPECT(stdio_out.find("\"id\":99,\"result\":{}}\nContent-Length: ") != std::string::npos);
+    EXPECT(stdio_out.rfind("\"id\":99,\"result\":{}}") > stdio_out.find("Content-Length: "));
+
+    stop_agent_bus_server();
+    unsetenv("SPINEL_AGENT_RUNTIME_DIR");
+    unsetenv("SPINEL_TASK_INBOX_FILE");
+    unsetenv("SPINEL_AGENT_PERMS_FILE");
+    unsetenv("SPINEL_AGENT_BUS_SOCK");
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+}
+
 }  // namespace
 
 int main() {
@@ -1456,6 +1593,7 @@ int main() {
     test_parallel_sandbox();
     test_relay_crypto_and_stream();
     test_ai_os_stage1_atomics();
+    test_ai_os_stage2_mcp();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

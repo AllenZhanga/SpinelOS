@@ -317,6 +317,25 @@ target_compile_options(spinel-agent-ctl PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
+add_executable(spinel-os-mcp
+    src/ai/spinel_os_mcp.cpp
+    src/ai/mcp_server.cpp
+    src/ai/json_util.cpp
+    src/ai/agent_perms.cpp
+    src/ai/agent_tracker.cpp
+    src/ai/task_inbox.cpp
+    src/ai/agent_bus_client.cpp
+    src/common.cpp
+)
+
+target_include_directories(spinel-os-mcp PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_compile_options(spinel-os-mcp PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
+)
+
 enable_testing()
 configure_file(../archiso/airootfs/usr/local/bin/spinel-wine spinel-wine COPYONLY)
 
@@ -346,6 +365,7 @@ add_executable(spinel-tests
     src/ai/os_atomics.cpp
     src/ai/agent_bus_client.cpp
     src/ai/agent_bus.cpp
+    src/ai/mcp_server.cpp
 )
 
 target_compile_definitions(spinel-tests PRIVATE
@@ -371,7 +391,7 @@ target_compile_options(spinel-tests PRIVATE
 
 add_test(NAME spinel_unit_tests COMMAND spinel-tests)
 
-install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl DESTINATION bin)
+install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl spinel-os-mcp DESTINATION bin)
 install(PROGRAMS ../archiso/airootfs/usr/local/bin/spinel-wine DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)
 install(FILES

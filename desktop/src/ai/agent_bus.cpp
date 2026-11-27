@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -33,6 +34,7 @@ namespace {
 
 std::mutex g_srv_mu;
 std::atomic<bool> g_srv_running{false};
+std::atomic<int> g_active_workers{0};
 std::thread g_srv_thread;
 int g_listen_fd = -1;
 int g_wake_pipe[2]{-1, -1};
@@ -61,7 +63,13 @@ std::string param_str(const std::map<std::string, std::string> &p, const char *k
     return (it != p.end() && !it->second.empty()) ? it->second : def;
 }
 
+struct WorkerGuard {
+    WorkerGuard() { g_active_workers.fetch_add(1); }
+    ~WorkerGuard() { g_active_workers.fetch_sub(1); }
+};
+
 void handle_client_socket(int cfd) {
+    WorkerGuard guard;
     std::string req_buf;
     char chunk[4096];
     while (g_srv_running.load()) {
@@ -80,6 +88,7 @@ void handle_client_socket(int cfd) {
         auto nl = req_buf.find('\n');
         if (nl != std::string::npos) {
             std::string line = req_buf.substr(0, nl);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             std::string resp = dispatch_agent_bus_json(line, true, true) + "\n";
             size_t off = 0;
             while (off < resp.size()) {
@@ -348,6 +357,11 @@ std::string dispatch_agent_bus_json(const std::string &req_json,
         return make_envelope(id_raw, ok, "allow", ok ? "{\"launched\":true}" : "", err);
     }
 
+    if (method == "action.sandbox_status") {
+        append_agent_audit(client_id, method, PermDecision::Allow, "");
+        return make_envelope(id_raw, true, "allow", query_sandbox_status_json(), "");
+    }
+
     if (method == "action.proxy_status") {
         append_agent_audit(client_id, method, PermDecision::Allow, "");
         return make_envelope(id_raw, true, "allow", query_proxy_status_json(), "");
@@ -467,6 +481,7 @@ bool start_agent_bus_server(std::string *bound_path_out) {
 void stop_agent_bus_server() {
     std::lock_guard<std::mutex> lock(g_srv_mu);
     if (!g_srv_running.exchange(false)) return;
+    cancel_all_pending_approvals();
     if (g_wake_pipe[1] >= 0) {
         const char b = 'x';
         ssize_t unused = ::write(g_wake_pipe[1], &b, 1);
@@ -474,6 +489,9 @@ void stop_agent_bus_server() {
     }
     if (g_srv_thread.joinable()) {
         g_srv_thread.join();
+    }
+    for (int i = 0; i < 30 && g_active_workers.load() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (g_listen_fd >= 0) {
         ::close(g_listen_fd);
