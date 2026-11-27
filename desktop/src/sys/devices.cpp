@@ -489,8 +489,16 @@ std::vector<AudioDevEntry> collect_audio_devices() {
     std::vector<AudioDevEntry> res;
     std::set<std::string> active_nodes;
 
-    std::string def_sink = trim_copy(run_cmd_capture("pactl get-default-sink 2>/dev/null"));
-    std::string def_source = trim_copy(run_cmd_capture("pactl get-default-source 2>/dev/null"));
+    std::string def_sink;
+    std::string def_source;
+    if (has_executable("pactl")) {
+        int sink_rc = 1;
+        run_argv_capture({"pactl", "get-default-sink"}, def_sink, sink_rc);
+        def_sink = trim_copy(def_sink);
+        int src_rc = 1;
+        run_argv_capture({"pactl", "get-default-source"}, def_source, src_rc);
+        def_source = trim_copy(def_source);
+    }
 
     auto collect_pactl_type = [&](const char *ptype, const char *kind, const std::string &def_name) {
         std::string out;

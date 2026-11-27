@@ -28,6 +28,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -102,7 +104,10 @@ struct FilesWin {
     GtkWidget *btn_view_mode = nullptr;
     GtkWidget *btn_hidden = nullptr;
     GtkWidget *btn_path_edit = nullptr;
+    GtkWidget *btn_restore_trash = nullptr;
     GtkWidget *btn_empty_trash = nullptr;
+    GtkWindow *quick_look_win = nullptr;
+    fs::path quick_look_path;
 
     GtkWidget *crumb_scroll = nullptr;
     GtkWidget *crumb_box = nullptr;
@@ -140,6 +145,10 @@ struct FilesWin {
 
     ClipOp clip_op = ClipOp::None;
     std::vector<fs::path> clip_paths;
+
+    std::unordered_map<std::string, GdkTexture *> thumb_cache;
+    std::vector<std::string> thumb_lru;
+    std::unordered_set<std::string> thumb_inflight;
 };
 
 using namespace spinel::files;
@@ -445,45 +454,65 @@ void do_rename_selected(FilesWin *fw) {
     });
 }
 
-void do_paste(FilesWin *fw) {
-    if (fw->clip_op == ClipOp::None || fw->clip_paths.empty()) return;
-    for (const auto &src : fw->clip_paths) {
-        std::error_code ec;
-        if (!fs::exists(src, ec)) continue;
-        std::string stem = src.stem().string();
-        std::string ext = src.extension().string();
-        if (fs::is_directory(src, ec)) {
-            stem = src.filename().string();
-            ext.clear();
-        }
-        fs::path dst = fw->current_dir / src.filename();
-        int idx = 1;
-        while (fs::exists(dst, ec) && idx < 200) {
-            std::string suffix = (idx == 1) ? " (副本)" : (" (副本 " + std::to_string(idx) + ")");
-            dst = fw->current_dir / (stem + suffix + ext);
-            ++idx;
-        }
-        if (fw->clip_op == ClipOp::Copy) {
-            fs::copy(src, dst, fs::copy_options::recursive, ec);
-        } else {
-            fs::rename(src, dst, ec);
-            if (ec) {
-                ec.clear();
-                fs::copy(src, dst, fs::copy_options::recursive, ec);
-                if (!ec) fs::remove_all(src, ec);
+void perform_transfer_to_dir(FilesWin *fw,
+                             std::vector<fs::path> sources,
+                             fs::path target_dir,
+                             bool copy_mode,
+                             bool from_clipboard_cut) {
+    if (!fw || sources.empty() || target_dir.empty()) return;
+    if (fw->status_label) {
+        gtk_label_set_text(GTK_LABEL(fw->status_label),
+                           copy_mode ? "正在复制文件..." : "正在移动文件...");
+    }
+    auto alive = fw->alive;
+    launch_async_task("files:xfer", [fw, alive, sources = std::move(sources), target_dir = std::move(target_dir),
+                                     copy_mode, from_clipboard_cut]() mutable {
+        std::vector<fs::path> results;
+        std::string err;
+        bool ok = move_or_copy_paths_to_dir(sources, target_dir, copy_mode, results, err);
+        struct XferDone {
+            FilesWin *fw;
+            std::shared_ptr<std::atomic<bool>> alive;
+            fs::path target_dir;
+            bool ok;
+            bool copy_mode;
+            bool from_clipboard_cut;
+            std::vector<fs::path> results;
+            std::string err;
+        };
+        auto *done = new XferDone{fw, alive, std::move(target_dir), ok, copy_mode, from_clipboard_cut,
+                                  std::move(results), std::move(err)};
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<XferDone> msg(static_cast<XferDone *>(d));
+            if (!msg->alive->load()) return G_SOURCE_REMOVE;
+            if (!msg->ok) {
+                show_error_alert(msg->fw, msg->copy_mode ? "复制失败" : "移动失败", msg->err);
+                return G_SOURCE_REMOVE;
             }
-        }
-        if (ec) {
-            show_error_alert(fw, fw->clip_op == ClipOp::Copy ? "复制失败" : "移动失败", ec.message());
-            return;
-        }
-        fw->selected_path = dst;
-    }
-    if (fw->clip_op == ClipOp::Cut) {
-        fw->clip_op = ClipOp::None;
-        fw->clip_paths.clear();
-    }
-    refresh_current_dir(fw);
+            if (msg->from_clipboard_cut) {
+                msg->fw->clip_op = ClipOp::None;
+                msg->fw->clip_paths.clear();
+            }
+            if (!msg->results.empty() && msg->fw->current_dir == msg->target_dir) {
+                msg->fw->pending_select = msg->results.back();
+            }
+            refresh_current_dir(msg->fw);
+            if (msg->fw->status_label) {
+                std::string label = msg->results.empty()
+                    ? "未变更（源目录与目标目录相同）"
+                    : (std::string(msg->copy_mode ? "已复制 " : "已移动 ") +
+                       std::to_string(msg->results.size()) + " 项到 " + msg->target_dir.filename().string());
+                gtk_label_set_text(GTK_LABEL(msg->fw->status_label), label.c_str());
+            }
+            return G_SOURCE_REMOVE;
+        }, done);
+    });
+}
+
+void do_paste(FilesWin *fw) {
+    if (!fw || fw->clip_op == ClipOp::None || fw->clip_paths.empty()) return;
+    bool copy_mode = (fw->clip_op == ClipOp::Copy);
+    perform_transfer_to_dir(fw, fw->clip_paths, fw->current_dir, copy_mode, !copy_mode);
 }
 
 fs::path trash_root_dir() { return fs::path(home_dir()) / ".local/share/Trash"; }
@@ -1334,6 +1363,253 @@ void show_properties(FilesWin *fw, const fs::path &p) {
     show_error_alert(fw, "属性 · " + p.filename().string(), oss.str());
 }
 
+void close_quick_look(FilesWin *fw) {
+    if (!fw || !fw->quick_look_win) return;
+    GtkWindow *ql = fw->quick_look_win;
+    fw->quick_look_win = nullptr;
+    fw->quick_look_path.clear();
+    gtk_window_destroy(ql);
+}
+
+void open_quick_look(FilesWin *fw, const fs::path &p) {
+    if (!fw || p.empty()) return;
+    if (fw->quick_look_win) {
+        bool same = (fw->quick_look_path == p);
+        close_quick_look(fw);
+        if (same) return;
+    }
+
+    std::error_code ec;
+    bool is_dir = fs::is_directory(p, ec);
+    auto sz = is_dir ? 0ULL : fs::file_size(p, ec);
+    if (ec) sz = 0;
+
+    GtkWidget *ql_w = gtk_window_new();
+    GtkWindow *ql = GTK_WINDOW(ql_w);
+    fw->quick_look_win = ql;
+    fw->quick_look_path = p;
+    gtk_window_set_transient_for(ql, fw->win);
+    gtk_window_set_destroy_with_parent(ql, TRUE);
+    gtk_window_set_default_size(ql, 720, 520);
+    gtk_window_set_title(ql, ("快速预览 · " + p.filename().string()).c_str());
+    gtk_widget_add_css_class(ql_w, "sf-win");
+
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_add_css_class(hdr, "sf-ql-header");
+
+    GtkWidget *title_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(title_box, TRUE);
+    GtkWidget *lbl_name = gtk_label_new(p.filename().string().c_str());
+    gtk_widget_add_css_class(lbl_name, "sf-ql-title");
+    gtk_widget_set_halign(lbl_name, GTK_ALIGN_START);
+    gtk_label_set_ellipsize(GTK_LABEL(lbl_name), PANGO_ELLIPSIZE_MIDDLE);
+
+    std::ostringstream sub_oss;
+    if (is_dir) {
+        size_t child_cnt = 0;
+        for (const auto &e : fs::directory_iterator(p, fs::directory_options::skip_permission_denied, ec)) {
+            (void)e;
+            ++child_cnt;
+            if (child_cnt >= 5000) break;
+        }
+        sub_oss << "文件夹 · " << (child_cnt >= 5000 ? "5000+" : std::to_string(child_cnt)) << " 个直接项目";
+    } else {
+        sub_oss << format_size(sz) << " · " << p.parent_path().string();
+    }
+    GtkWidget *lbl_sub = gtk_label_new(sub_oss.str().c_str());
+    gtk_widget_add_css_class(lbl_sub, "sf-muted");
+    gtk_widget_set_halign(lbl_sub, GTK_ALIGN_START);
+    gtk_label_set_ellipsize(GTK_LABEL(lbl_sub), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_box_append(GTK_BOX(title_box), lbl_name);
+    gtk_box_append(GTK_BOX(title_box), lbl_sub);
+    gtk_box_append(GTK_BOX(hdr), title_box);
+
+    auto *open_path = new fs::path(p);
+    g_object_set_data_full(G_OBJECT(ql_w), "sf-ql-path", open_path, +[](gpointer x) { delete static_cast<fs::path *>(x); });
+
+    GtkWidget *btn_open = gtk_button_new_with_label(is_dir ? "在此进入" : "用默认程序打开");
+    gtk_widget_add_css_class(btn_open, "sf-tool-btn");
+    g_signal_connect(btn_open, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        fs::path target = w->quick_look_path;
+        close_quick_look(w);
+        open_item_action(w, target);
+    }), fw);
+    gtk_box_append(GTK_BOX(hdr), btn_open);
+
+    if (is_dir) {
+        GtkWidget *btn_term = gtk_button_new_with_label("终端");
+        gtk_widget_add_css_class(btn_term, "sf-tool-btn");
+        g_signal_connect(btn_term, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *w = static_cast<FilesWin *>(d);
+            open_terminal_at(w->quick_look_path);
+        }), fw);
+        gtk_box_append(GTK_BOX(hdr), btn_term);
+    }
+
+    GtkWidget *btn_copy = gtk_button_new_with_label("复制路径");
+    gtk_widget_add_css_class(btn_copy, "sf-tool-btn");
+    g_signal_connect(btn_copy, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        if (GdkDisplay *disp = gdk_display_get_default()) {
+            gdk_clipboard_set_text(gdk_display_get_clipboard(disp), w->quick_look_path.string().c_str());
+        }
+        if (w->status_label) {
+            gtk_label_set_text(GTK_LABEL(w->status_label), ("已复制路径: " + w->quick_look_path.string()).c_str());
+        }
+    }), fw);
+    gtk_box_append(GTK_BOX(hdr), btn_copy);
+
+    GtkWidget *btn_close = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(btn_close, "sf-tool-btn");
+    g_signal_connect(btn_close, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        close_quick_look(static_cast<FilesWin *>(d));
+    }), fw);
+    gtk_box_append(GTK_BOX(hdr), btn_close);
+
+    gtk_box_append(GTK_BOX(vbox), hdr);
+
+    GtkWidget *body = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_add_css_class(body, "sf-ql-body");
+    gtk_widget_set_vexpand(body, TRUE);
+
+    if (!is_dir && is_image_file(p)) {
+        GtkWidget *frame = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+        gtk_widget_add_css_class(frame, "sf-ql-frame");
+        gtk_widget_set_vexpand(frame, TRUE);
+        g_autoptr(GFile) gf = g_file_new_for_path(p.c_str());
+        GtkWidget *pic = gtk_picture_new_for_file(gf);
+        gtk_picture_set_can_shrink(GTK_PICTURE(pic), TRUE);
+        gtk_picture_set_content_fit(GTK_PICTURE(pic), GTK_CONTENT_FIT_CONTAIN);
+        gtk_widget_set_vexpand(pic, TRUE);
+        gtk_widget_set_hexpand(pic, TRUE);
+        gtk_box_append(GTK_BOX(frame), pic);
+
+        int img_w = 0, img_h = 0;
+        if (gdk_pixbuf_get_file_info(p.c_str(), &img_w, &img_h)) {
+            std::string dim = std::to_string(img_w) + " × " + std::to_string(img_h) + " px";
+            gtk_label_set_text(GTK_LABEL(lbl_sub), (sub_oss.str() + " · " + dim).c_str());
+        }
+        gtk_box_append(GTK_BOX(body), frame);
+    } else if (!is_dir && is_archive_file(p)) {
+        GtkWidget *scroll = gtk_scrolled_window_new();
+        gtk_widget_add_css_class(scroll, "sf-ql-frame");
+        gtk_widget_set_vexpand(scroll, TRUE);
+        GtkWidget *tv = gtk_text_view_new();
+        gtk_widget_add_css_class(tv, "sf-ql-code");
+        gtk_text_view_set_editable(GTK_TEXT_VIEW(tv), FALSE);
+        gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(tv), FALSE);
+        gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(tv), GTK_WRAP_WORD_CHAR);
+        gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(tv)), "正在读取压缩包目录...", -1);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), tv);
+        gtk_box_append(GTK_BOX(body), scroll);
+
+        g_object_ref(tv);
+        auto alive = fw->alive;
+        launch_async_task("files:ql-arc", [fw, alive, p, tv]() {
+            std::string out;
+            int rc = 1;
+            run_argv_capture({"bsdtar", "-tf", p.string()}, out, rc);
+            auto lines = split_lines(out);
+            std::ostringstream preview;
+            if (rc != 0 && lines.empty()) {
+                preview << "无法列出压缩包内容。";
+            } else {
+                const size_t limit = 250;
+                for (size_t i = 0; i < lines.size() && i < limit; ++i) {
+                    preview << lines[i] << "\n";
+                }
+                if (lines.size() > limit) {
+                    preview << "\n... 共 " << lines.size() << " 项（仅展示前 " << limit << " 项）\n";
+                }
+            }
+            struct ArcMsg {
+                FilesWin *fw;
+                std::shared_ptr<std::atomic<bool>> alive;
+                GtkWidget *tv;
+                std::string text;
+            };
+            auto *msg = new ArcMsg{fw, alive, tv, preview.str()};
+            g_idle_add(+[](gpointer d) -> gboolean {
+                std::unique_ptr<ArcMsg> m(static_cast<ArcMsg *>(d));
+                if (m->alive->load() && m->fw->quick_look_win && gtk_widget_get_parent(m->tv)) {
+                    gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(m->tv)), m->text.c_str(), -1);
+                }
+                g_object_unref(m->tv);
+                return G_SOURCE_REMOVE;
+            }, msg);
+        });
+    } else {
+        bool show_text = !is_dir && (is_text_previewable_file(p) || sz <= 256 * 1024);
+        bool truncated = false, is_binary = false;
+        std::string txt = show_text ? read_text_preview(p, 65536, truncated, is_binary) : "";
+        if (show_text && !is_binary) {
+            if (truncated) txt += "\n\n...（文件较大，仅展示前 64 KB）";
+            if (txt.empty()) txt = "(空文件)";
+            GtkWidget *scroll = gtk_scrolled_window_new();
+            gtk_widget_add_css_class(scroll, "sf-ql-frame");
+            gtk_widget_set_vexpand(scroll, TRUE);
+            GtkWidget *tv = gtk_text_view_new();
+            gtk_widget_add_css_class(tv, "sf-ql-code");
+            gtk_text_view_set_editable(GTK_TEXT_VIEW(tv), FALSE);
+            gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(tv), FALSE);
+            gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(tv), GTK_WRAP_WORD_CHAR);
+            gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(tv)), txt.c_str(), -1);
+            gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), tv);
+            gtk_box_append(GTK_BOX(body), scroll);
+        } else {
+            GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+            gtk_widget_add_css_class(card, "sf-ql-frame");
+            gtk_widget_set_vexpand(card, TRUE);
+            gtk_widget_set_valign(card, GTK_ALIGN_CENTER);
+            DirItem dummy;
+            dummy.name = p.filename().string();
+            dummy.path = p;
+            dummy.is_dir = is_dir;
+            dummy.size = sz;
+            FileBadge badge = classify_item(dummy);
+            GtkWidget *ico = gtk_image_new_from_icon_name(badge.icon_name);
+            gtk_image_set_pixel_size(GTK_IMAGE(ico), 72);
+            gtk_widget_add_css_class(ico, badge.css_class);
+
+            auto st = fs::symlink_status(p, ec);
+            g_autofree char *ctype = is_dir ? g_strdup("inode/directory")
+                                           : g_content_type_guess(p.filename().c_str(), nullptr, 0, nullptr);
+            std::ostringstream meta;
+            meta << "类型: " << (ctype ? ctype : "application/octet-stream") << "\n"
+                 << "权限: " << format_perms(st.permissions()) << "\n"
+                 << "路径: " << p.string();
+            GtkWidget *lbl_meta = gtk_label_new(meta.str().c_str());
+            gtk_label_set_justify(GTK_LABEL(lbl_meta), GTK_JUSTIFY_CENTER);
+            gtk_label_set_selectable(GTK_LABEL(lbl_meta), TRUE);
+            gtk_box_append(GTK_BOX(card), ico);
+            gtk_box_append(GTK_BOX(card), lbl_meta);
+            gtk_box_append(GTK_BOX(body), card);
+        }
+    }
+
+    gtk_box_append(GTK_BOX(vbox), body);
+    gtk_window_set_child(ql, vbox);
+
+    GtkEventController *ql_key = gtk_event_controller_key_new();
+    g_signal_connect(ql_key, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey *, guint keyval, guint, GdkModifierType, gpointer d) -> gboolean {
+        if (keyval == GDK_KEY_Escape || keyval == GDK_KEY_space) {
+            close_quick_look(static_cast<FilesWin *>(d));
+            return TRUE;
+        }
+        return FALSE;
+    }), fw);
+    gtk_widget_add_controller(ql_w, ql_key);
+
+    g_signal_connect(ql_w, "destroy", G_CALLBACK(+[](GtkWidget *, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        w->quick_look_win = nullptr;
+        w->quick_look_path.clear();
+    }), fw);
+    gtk_window_present(ql);
+}
+
 void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, const fs::path &item_path) {
     GtkWidget *pop = gtk_popover_new();
     gtk_widget_set_parent(pop, anchor);
@@ -1425,6 +1701,7 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
             }
         }
         add_btn("打开", false, [fw, item_path]() { open_item_action(fw, item_path); });
+        add_btn("快速预览 (Space)", false, [fw, item_path]() { open_quick_look(fw, item_path); });
         if (!is_dir) add_btn("打开方式…", false, [fw, item_path]() { open_item_action(fw, item_path, true); });
         if (is_dir) {
             add_btn("在此目录打开终端", false, [item_path]() { open_terminal_at(item_path); });
@@ -1500,6 +1777,54 @@ void show_context_menu(FilesWin *fw, GtkWidget *anchor, double x, double y, cons
     gtk_popover_popup(GTK_POPOVER(pop));
 }
 
+template <typename DestFn>
+void attach_dir_drop_target(GtkWidget *target_widget, FilesWin *fw, DestFn dest_fn) {
+    auto *fn_ptr = new std::function<fs::path()>(std::move(dest_fn));
+    g_object_set_data_full(G_OBJECT(target_widget), "sf-drop-dest-fn", fn_ptr, +[](gpointer p) {
+        delete static_cast<std::function<fs::path()> *>(p);
+    });
+
+    GtkDropTarget *drop = gtk_drop_target_new(G_TYPE_STRING,
+                                              static_cast<GdkDragAction>(GDK_ACTION_MOVE | GDK_ACTION_COPY));
+    auto decide_action = +[](GtkDropTarget *t, double, double, gpointer) -> GdkDragAction {
+        GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(t));
+        auto *fn = static_cast<std::function<fs::path()> *>(g_object_get_data(G_OBJECT(w), "sf-drop-dest-fn"));
+        std::error_code ec;
+        fs::path dest = fn ? (*fn)() : fs::path{};
+        if (dest.empty() || !fs::is_directory(dest, ec) || is_in_trash_dir(dest)) {
+            gtk_widget_remove_css_class(w, "sf-drop-hover");
+            return static_cast<GdkDragAction>(0);
+        }
+        gtk_widget_add_css_class(w, "sf-drop-hover");
+        GdkDrop *gd = gtk_drop_target_get_current_drop(t);
+        GdkDragAction req = gd ? gdk_drop_get_actions(gd) : GDK_ACTION_MOVE;
+        return (req == GDK_ACTION_COPY) ? GDK_ACTION_COPY : GDK_ACTION_MOVE;
+    };
+    g_signal_connect(drop, "enter", G_CALLBACK(decide_action), nullptr);
+    g_signal_connect(drop, "motion", G_CALLBACK(decide_action), nullptr);
+    g_signal_connect(drop, "leave", G_CALLBACK(+[](GtkDropTarget *t, gpointer) {
+        gtk_widget_remove_css_class(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(t)), "sf-drop-hover");
+    }), nullptr);
+    g_signal_connect(drop, "drop", G_CALLBACK(+[](GtkDropTarget *t, const GValue *val, double, double, gpointer d) -> gboolean {
+        GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(t));
+        gtk_widget_remove_css_class(w, "sf-drop-hover");
+        if (!val || !G_VALUE_HOLDS_STRING(val)) return FALSE;
+        auto *win = static_cast<FilesWin *>(d);
+        auto *fn = static_cast<std::function<fs::path()> *>(g_object_get_data(G_OBJECT(w), "sf-drop-dest-fn"));
+        fs::path dest = fn ? (*fn)() : fs::path{};
+        std::error_code ec;
+        if (dest.empty() || !fs::is_directory(dest, ec) || is_in_trash_dir(dest)) return FALSE;
+        const char *raw = g_value_get_string(val);
+        auto sources = decode_drag_paths(raw ? raw : "");
+        if (sources.empty()) return FALSE;
+        GdkDrop *gd = gtk_drop_target_get_current_drop(t);
+        bool copy_mode = gd && (gdk_drop_get_actions(gd) == GDK_ACTION_COPY);
+        perform_transfer_to_dir(win, std::move(sources), std::move(dest), copy_mode, false);
+        return TRUE;
+    }), fw);
+    gtk_widget_add_controller(target_widget, GTK_EVENT_CONTROLLER(drop));
+}
+
 void rebuild_sidebar(FilesWin *fw) {
     clear_box_children(fw->places_box);
     clear_box_children(fw->drives_box);
@@ -1540,6 +1865,10 @@ void rebuild_sidebar(FilesWin *fw) {
             auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(b), "sf-path"));
             if (target) navigate_to(static_cast<FilesWin *>(d), *target, true);
         }), fw);
+        attach_dir_drop_target(btn, fw, [btn]() {
+            auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(btn), "sf-path"));
+            return target ? *target : fs::path{};
+        });
         gtk_box_append(GTK_BOX(fw->places_box), btn);
     }
 
@@ -1576,6 +1905,10 @@ void rebuild_sidebar(FilesWin *fw) {
                 auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(b), "sf-path"));
                 if (target) navigate_to(static_cast<FilesWin *>(d), *target, true);
             }), fw);
+            attach_dir_drop_target(btn, fw, [btn]() {
+                auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(btn), "sf-path"));
+                return target ? *target : fs::path{};
+            });
             gtk_box_append(GTK_BOX(row), btn);
 
             if (m.removable) {
@@ -1630,6 +1963,10 @@ void rebuild_breadcrumbs(FilesWin *fw) {
             auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(btn), "sf-path"));
             if (target) navigate_to(static_cast<FilesWin *>(d), *target, true);
         }), fw);
+        attach_dir_drop_target(b, fw, [b]() {
+            auto *target = static_cast<fs::path *>(g_object_get_data(G_OBJECT(b), "sf-path"));
+            return target ? *target : fs::path{};
+        });
         gtk_box_append(GTK_BOX(fw->crumb_box), b);
     }
     gtk_editable_set_text(GTK_EDITABLE(fw->path_entry), fw->current_dir.string().c_str());
@@ -1646,9 +1983,14 @@ void update_status_bar(FilesWin *fw) {
         } else if (!fw->selected_path.empty()) {
             status << " · 已选: " << fw->selected_path.filename().string();
         }
-        status << " · Ctrl+A 全选 · Ctrl/Shift 多选 · Ctrl+C/X/V · Delete 回收站";
+        status << " · Ctrl+A 全选 · Space 预览 · Ctrl+C/X/V · Delete 回收站";
     }
     gtk_label_set_text(GTK_LABEL(fw->status_label), status.str().c_str());
+    if (fw->btn_restore_trash) {
+        bool in_trash = is_in_trash_dir(fw->current_dir);
+        gtk_widget_set_visible(fw->btn_restore_trash, in_trash);
+        gtk_widget_set_sensitive(fw->btn_restore_trash, in_trash && !fw->selected_paths.empty());
+    }
     if (fw->pick_dir_mode && fw->pick_label) {
         std::error_code ec;
         fs::path cand = fw->current_dir;
@@ -1716,6 +2058,11 @@ void refresh_current_dir(FilesWin *fw) {
         bool in_trash = is_in_trash_dir(fw->current_dir);
         gtk_widget_set_visible(fw->btn_empty_trash, in_trash);
         gtk_widget_set_sensitive(fw->btn_empty_trash, in_trash && trash_has_items());
+    }
+    if (fw->btn_restore_trash) {
+        bool in_trash = is_in_trash_dir(fw->current_dir);
+        gtk_widget_set_visible(fw->btn_restore_trash, in_trash);
+        gtk_widget_set_sensitive(fw->btn_restore_trash, in_trash && !fw->selected_paths.empty());
     }
 
     rebuild_sidebar(fw);
@@ -1795,6 +2142,129 @@ void clear_badge_classes(GtkWidget *ico) {
     }
 }
 
+void attach_item_drag_and_drop(GtkWidget *item_widget, FilesWin *fw) {
+    GtkDragSource *drag = gtk_drag_source_new();
+    gtk_drag_source_set_actions(drag, static_cast<GdkDragAction>(GDK_ACTION_MOVE | GDK_ACTION_COPY));
+    g_signal_connect(drag, "prepare", G_CALLBACK(+[](GtkDragSource *src, double, double, gpointer d) -> GdkContentProvider * {
+        auto *win = static_cast<FilesWin *>(d);
+        if (!win || is_in_trash_dir(win->current_dir)) return nullptr;
+        GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(src));
+        auto *li = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(w), "sf-li"));
+        auto *fobj = li ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(li)) : nullptr;
+        if (!fobj || !fobj->item) return nullptr;
+        std::vector<fs::path> drag_paths = get_selected_paths(win);
+        if (std::find(drag_paths.begin(), drag_paths.end(), fobj->item->path) == drag_paths.end()) {
+            drag_paths = {fobj->item->path};
+        }
+        std::string payload = encode_drag_paths(drag_paths);
+        if (payload.empty()) return nullptr;
+        return gdk_content_provider_new_typed(G_TYPE_STRING, payload.c_str());
+    }), fw);
+    gtk_widget_add_controller(item_widget, GTK_EVENT_CONTROLLER(drag));
+
+    attach_dir_drop_target(item_widget, fw, [item_widget]() {
+        auto *li = static_cast<GtkListItem *>(g_object_get_data(G_OBJECT(item_widget), "sf-li"));
+        auto *fobj = li ? reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(li)) : nullptr;
+        if (fobj && fobj->item && fobj->item->is_dir) {
+            return fobj->item->path;
+        }
+        return fs::path{};
+    });
+}
+
+void bind_grid_thumbnail(FilesWin *fw, GtkWidget *ico, const DirItem &it, const FileBadge &badge) {
+    std::string key = it.path.string();
+    auto *bound_copy = new std::string(key);
+    g_object_set_data_full(G_OBJECT(ico), "sf-bound-path", bound_copy, +[](gpointer p) {
+        delete static_cast<std::string *>(p);
+    });
+
+    if (it.is_dir || !is_image_file(it.path) || it.size == 0 || it.size > 25ULL * 1024ULL * 1024ULL) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(ico), badge.icon_name);
+        gtk_widget_add_css_class(ico, badge.css_class);
+        return;
+    }
+
+    auto cached = fw->thumb_cache.find(key);
+    if (cached != fw->thumb_cache.end() && cached->second) {
+        gtk_image_set_from_paintable(GTK_IMAGE(ico), GDK_PAINTABLE(cached->second));
+        return;
+    }
+
+    gtk_image_set_from_icon_name(GTK_IMAGE(ico), badge.icon_name);
+    gtk_widget_add_css_class(ico, badge.css_class);
+
+    if (fw->thumb_inflight.count(key)) return;
+    fw->thumb_inflight.insert(key);
+
+    g_object_ref(ico);
+    auto alive = fw->alive;
+    launch_async_task("files:thumb:" + std::to_string(std::hash<std::string>{}(key)), [fw, alive, ico, key]() {
+        GError *err = nullptr;
+        GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(key.c_str(), 112, 112, TRUE, &err);
+        if (err) g_error_free(err);
+
+        struct ThumbMsg {
+            FilesWin *fw;
+            std::shared_ptr<std::atomic<bool>> alive;
+            GtkWidget *ico;
+            std::string key;
+            GdkPixbuf *pb;
+        };
+        auto *msg = new ThumbMsg{fw, alive, ico, key, pb};
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<ThumbMsg> m(static_cast<ThumbMsg *>(d));
+            if (m->alive->load()) {
+                m->fw->thumb_inflight.erase(m->key);
+                if (m->pb) {
+                    GdkTexture *tex = nullptr;
+                    int w = gdk_pixbuf_get_width(m->pb);
+                    int h = gdk_pixbuf_get_height(m->pb);
+                    int ch = gdk_pixbuf_get_n_channels(m->pb);
+                    if (w > 0 && h > 0 && gdk_pixbuf_get_bits_per_sample(m->pb) == 8 && (ch == 3 || ch == 4)) {
+                        if (GBytes *bytes = gdk_pixbuf_read_pixel_bytes(m->pb)) {
+                            tex = gdk_memory_texture_new(
+                                w, h,
+                                ch == 4 ? GDK_MEMORY_R8G8B8A8 : GDK_MEMORY_R8G8B8,
+                                bytes,
+                                static_cast<gsize>(gdk_pixbuf_get_rowstride(m->pb))
+                            );
+                            g_bytes_unref(bytes);
+                        }
+                    }
+                    if (tex) {
+                        while (m->fw->thumb_lru.size() >= 240) {
+                            std::string evict = std::move(m->fw->thumb_lru.front());
+                            m->fw->thumb_lru.erase(m->fw->thumb_lru.begin());
+                            auto it_ev = m->fw->thumb_cache.find(evict);
+                            if (it_ev != m->fw->thumb_cache.end()) {
+                                if (it_ev->second) g_object_unref(it_ev->second);
+                                m->fw->thumb_cache.erase(it_ev);
+                            }
+                        }
+                        auto prev = m->fw->thumb_cache.find(m->key);
+                        if (prev != m->fw->thumb_cache.end()) {
+                            if (prev->second) g_object_unref(prev->second);
+                            prev->second = tex;
+                        } else {
+                            m->fw->thumb_cache.emplace(m->key, tex);
+                            m->fw->thumb_lru.push_back(m->key);
+                        }
+                        auto *cur = static_cast<std::string *>(g_object_get_data(G_OBJECT(m->ico), "sf-bound-path"));
+                        if (cur && *cur == m->key) {
+                            clear_badge_classes(m->ico);
+                            gtk_image_set_from_paintable(GTK_IMAGE(m->ico), GDK_PAINTABLE(tex));
+                        }
+                    }
+                }
+            }
+            if (m->pb) g_object_unref(m->pb);
+            g_object_unref(m->ico);
+            return G_SOURCE_REMOVE;
+        }, msg);
+    });
+}
+
 GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
     GtkListItemFactory *fac = gtk_signal_list_item_factory_new();
 
@@ -1847,6 +2317,7 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
                 }
             }), win);
             gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(click3));
+            attach_item_drag_and_drop(row, win);
             gtk_list_item_set_child(li, row);
         }), fw);
 
@@ -1875,7 +2346,7 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
             GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
             gtk_widget_add_css_class(card, "sf-grid-card");
             GtkWidget *ico = gtk_image_new();
-            gtk_image_set_pixel_size(GTK_IMAGE(ico), 36);
+            gtk_image_set_pixel_size(GTK_IMAGE(ico), 56);
             GtkWidget *name = gtk_label_new("");
             gtk_label_set_max_width_chars(GTK_LABEL(name), 14);
             gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
@@ -1908,10 +2379,12 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
                 }
             }), win);
             gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(click3));
+            attach_item_drag_and_drop(card, win);
             gtk_list_item_set_child(li, card);
         }), fw);
 
-        g_signal_connect(fac, "bind", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer) {
+        g_signal_connect(fac, "bind", G_CALLBACK(+[](GtkListItemFactory *, GtkListItem *li, gpointer d) {
+            auto *win = static_cast<FilesWin *>(d);
             GtkWidget *card = gtk_list_item_get_child(li);
             auto *fobj = reinterpret_cast<_SpinelFileObj *>(gtk_list_item_get_item(li));
             if (!card || !fobj || !fobj->item) return;
@@ -1923,8 +2396,7 @@ GtkListItemFactory *create_item_factory(FilesWin *fw, bool is_grid) {
             GtkWidget *sub = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(card), "sf-sub"));
 
             clear_badge_classes(ico);
-            gtk_image_set_from_icon_name(GTK_IMAGE(ico), badge.icon_name);
-            gtk_widget_add_css_class(ico, badge.css_class);
+            bind_grid_thumbnail(win, ico, it, badge);
             gtk_label_set_text(GTK_LABEL(name), it.name.c_str());
             gtk_label_set_text(GTK_LABEL(sub), it.is_dir ? "文件夹" : format_size(it.size).c_str());
         }), fw);
@@ -1989,6 +2461,14 @@ gboolean on_key_pressed(GtkEventControllerKey *, guint keyval, guint, GdkModifie
     if (ctrl && (keyval == GDK_KEY_v || keyval == GDK_KEY_V) && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
         do_paste(fw);
         return TRUE;
+    }
+    if (!ctrl && keyval == GDK_KEY_space && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
+        auto sel = get_selected_paths(fw);
+        fs::path target = !sel.empty() ? sel.front() : fw->selected_path;
+        if (!target.empty()) {
+            open_quick_look(fw, target);
+            return TRUE;
+        }
     }
     if (keyval == GDK_KEY_Delete && !gtk_widget_has_focus(fw->search_entry) && !gtk_widget_has_focus(fw->path_entry)) {
         do_delete_selected(fw, shift);
@@ -2113,6 +2593,14 @@ void build_files_window(GtkApplication *app,
         gtk_stack_set_visible_child_name(GTK_STACK(w->view_stack), w->grid_mode ? "grid" : "list");
     }), fw);
 
+    fw->btn_restore_trash = gtk_button_new_with_label("还原选中项");
+    gtk_widget_add_css_class(fw->btn_restore_trash, "sf-tool-btn");
+    gtk_widget_set_visible(fw->btn_restore_trash, FALSE);
+    g_signal_connect(fw->btn_restore_trash, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+        auto *w = static_cast<FilesWin *>(d);
+        do_restore_from_trash(w, get_selected_paths(w));
+    }), fw);
+
     fw->btn_empty_trash = gtk_button_new_with_label("清空回收站");
     gtk_widget_add_css_class(fw->btn_empty_trash, "sf-tool-danger");
     gtk_widget_set_visible(fw->btn_empty_trash, FALSE);
@@ -2127,8 +2615,8 @@ void build_files_window(GtkApplication *app,
     }), fw);
 
     for (GtkWidget *w : {fw->btn_back, fw->btn_fwd, fw->btn_up, fw->crumb_scroll, fw->path_entry,
-                         fw->btn_path_edit, fw->search_entry, fw->btn_empty_trash, new_dir_btn,
-                         fw->btn_hidden, fw->btn_view_mode, term_btn}) {
+                         fw->btn_path_edit, fw->search_entry, fw->btn_restore_trash, fw->btn_empty_trash,
+                         new_dir_btn, fw->btn_hidden, fw->btn_view_mode, term_btn}) {
         gtk_box_append(GTK_BOX(bar), w);
     }
 
@@ -2285,6 +2773,13 @@ void build_files_window(GtkApplication *app,
         w->alive->store(false);
         ++(*w->scan_gen);
         if (w->search_timer) g_source_remove(w->search_timer);
+        w->quick_look_win = nullptr;
+        for (auto &kv : w->thumb_cache) {
+            if (kv.second) g_object_unref(kv.second);
+        }
+        w->thumb_cache.clear();
+        w->thumb_lru.clear();
+        w->thumb_inflight.clear();
         delete w;
     }), fw);
 

@@ -600,9 +600,57 @@ void test_async_tasks_and_files_ops() {
     EXPECT(spinel::files::strip_archive_ext("bundle.zip") == "bundle");
     EXPECT(spinel::files::is_script_or_appimage("/opt/Obsidian-1.6.AppImage"));
     EXPECT(!spinel::files::is_script_or_appimage("/opt/readme.md"));
+    EXPECT(spinel::files::is_image_file("/tmp/photo.WEBP"));
+    EXPECT(!spinel::files::is_image_file("/tmp/photo.txt"));
+    EXPECT(spinel::files::is_text_previewable_file("/tmp/CMakeLists.txt"));
+    EXPECT(spinel::files::is_text_previewable_file("/tmp/notes.md"));
+    EXPECT(!spinel::files::is_text_previewable_file("/tmp/archive.tar.zst"));
     EXPECT(spinel::files::sanitize_app_slug("My_Cool.App 2") == "my-cool-app-2");
     EXPECT(spinel::files::guess_friendly_app_name("/tmp/obsidian-1.6.AppImage") == "Obsidian-1.6");
     EXPECT(spinel::files::sanitize_url_scheme("MyApp+Test://open") == "myapp+test");
+
+    // Text preview sanitization + truncation + binary detection
+    const fs::path ops_root = fs::path(home_dir()) / "files-ops-test";
+    const fs::path text_file = ops_root / "sample.txt";
+    EXPECT(write_text_file(text_file.string(), "hello 世界\nline2"));
+    bool trunc = true, bin = true;
+    EXPECT(spinel::files::read_text_preview(text_file, 64, trunc, bin) == "hello 世界\nline2");
+    EXPECT(!trunc && !bin);
+    EXPECT(spinel::files::read_text_preview(text_file, 5, trunc, bin) == "hello");
+    EXPECT(trunc && !bin);
+    const fs::path bin_file = ops_root / "blob.dat";
+    {
+        std::ofstream ofs(bin_file, std::ios::binary);
+        const char bytes[] = {'a', 'b', '\0', 'c'};
+        ofs.write(bytes, sizeof(bytes));
+    }
+    EXPECT(spinel::files::read_text_preview(bin_file, 64, trunc, bin).empty() && bin);
+
+    // Drag-path serialization & move/copy helpers
+    std::string payload = spinel::files::encode_drag_paths({ops_root / "a b.txt", ops_root / "dir"});
+    auto decoded = spinel::files::decode_drag_paths(payload);
+    EXPECT(decoded.size() == 2);
+    EXPECT(decoded[0] == (ops_root / "a b.txt"));
+    EXPECT(decoded[1] == (ops_root / "dir"));
+    auto uri_decoded = spinel::files::decode_drag_paths("file:///tmp/my%20doc.txt\n# comment\n");
+    EXPECT(uri_decoded.size() == 1 && uri_decoded[0] == fs::path("/tmp/my doc.txt"));
+
+    const fs::path src_dir = ops_root / "src_dir";
+    const fs::path dst_dir = ops_root / "dst_dir";
+    fs::create_directories(src_dir / "nested");
+    fs::create_directories(dst_dir);
+    EXPECT(spinel::files::is_same_or_subpath(src_dir / "nested", src_dir));
+    EXPECT(!spinel::files::is_same_or_subpath(dst_dir, src_dir));
+
+    std::vector<fs::path> moved_out;
+    std::string move_err;
+    EXPECT(!spinel::files::move_or_copy_paths_to_dir({src_dir}, src_dir / "nested", false, moved_out, move_err));
+    EXPECT(!move_err.empty());
+    EXPECT(spinel::files::move_or_copy_paths_to_dir({text_file}, ops_root, true, moved_out, move_err));
+    EXPECT(moved_out.size() == 1 && moved_out[0].filename() == "sample (副本).txt");
+    EXPECT(spinel::files::move_or_copy_paths_to_dir({moved_out[0]}, dst_dir, false, moved_out, move_err));
+    EXPECT(moved_out.size() == 1 && fs::exists(dst_dir / "sample (副本).txt"));
+    EXPECT(!fs::exists(ops_root / "sample (副本).txt"));
 }
 
 

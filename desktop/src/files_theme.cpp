@@ -160,7 +160,13 @@ void update_theme(FilesThemeBinding &binding) {
         << ".windows-app-list > row + row { border-top: 1px solid " << border << "; }\n"
         << ".windows-app-row { padding: 8px 14px; }\n"
         << ".windows-app-name { font-size: 13px; font-weight: 600; }\n"
-        << ".windows-app-row button:disabled { opacity: 0.45; }\n";
+        << ".windows-app-row button:disabled { opacity: 0.45; }\n"
+        << ".sf-drop-hover, .sf-drop-hover .sf-grid-card { background: " << sel_bg << "; border: 1px dashed " << accent << "; }\n"
+        << ".sf-ql-header { background: " << bar_bg << "; border-bottom: 1px solid " << border << "; padding: 12px 16px; }\n"
+        << ".sf-ql-title { font-size: 15px; font-weight: 700; }\n"
+        << ".sf-ql-body { padding: 16px; }\n"
+        << ".sf-ql-frame { background: " << card_bg << "; border: 1px solid " << border << "; border-radius: 12px; padding: 12px; }\n"
+        << ".sf-ql-code { font-family: \"JetBrains Mono\", ui-monospace, monospace; font-size: 12.5px; background: transparent; color: " << fg << "; }\n";
 
     gtk_css_provider_load_from_string(binding.css, css.str().c_str());
 }

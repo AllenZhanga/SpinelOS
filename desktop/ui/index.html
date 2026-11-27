@@ -1481,8 +1481,11 @@
   <!-- 5a. Standalone System Monitor & Logs Window (?mode=monitor) -->
   <section id="app-monitor" class="app-window hidden">
     <header class="win-toolbar">
-      <div class="bt-head-left">
-        <h2 id="monitor-page-title">系统监视器 · 进程监控</h2>
+      <div class="bt-head-left" style="gap: 16px;">
+        <div>
+          <h2 id="monitor-page-title">系统监视器 · 进程监控</h2>
+          <p class="brand-sub">实时资源占用、一键缓存释放与系统运行日志</p>
+        </div>
         <div class="pill-group" id="monitor-tab-group">
           <button type="button" class="pill-btn active" data-monitor-tab="procs">进程监控</button>
           <button type="button" class="pill-btn" data-monitor-tab="logs">系统日志</button>
@@ -1549,8 +1552,11 @@
   <!-- 5b. Standalone Spinel Doctor Health Check Window (?mode=doctor) -->
   <section id="app-doctor" class="app-window hidden">
     <header class="win-toolbar">
-      <div class="bt-head-left">
-        <h2>Spinel Doctor · 系统全链路健康体检</h2>
+      <div class="bt-head-left" style="gap: 12px;">
+        <div>
+          <h2>Spinel Doctor · 系统全链路健康体检</h2>
+          <p class="brand-sub">诊断 Wayland、输入法、音频、蓝牙、代理与磁盘状态</p>
+        </div>
         <span id="doc-summary-chip" class="status-chip">检查中...</span>
       </div>
       <div class="footer-actions">
@@ -1559,7 +1565,7 @@
       </div>
     </header>
     <div class="win-body">
-      <div id="doc-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
+      <div id="doc-feedback" class="feedback-banner hidden" style="margin-bottom: 12px;"></div>
       <div id="doc-check-grid" class="doctor-grid">
         <div class="disk-empty">正在运行全链路系统体检...</div>
       </div>
@@ -1815,15 +1821,18 @@
   <!-- 8. First-Boot OOBE Welcome Tour (?mode=welcome) -->
   <section id="app-welcome" class="app-window welcome-shell hidden">
     <header class="win-toolbar">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <img src="spinel-logo.png" alt="Spinel OS" style="width:24px;height:24px;object-fit:contain;" />
-        <h2>欢迎使用 Spinel OS</h2>
+      <div class="brand-title-row">
+        <img src="spinel-logo.png" alt="Spinel OS" class="brand-app-logo" style="object-fit:contain;" />
+        <div>
+          <h2>欢迎使用 Spinel OS</h2>
+          <p class="brand-sub">4 步快速完成主题外观、输入法、代理与游戏环境配置</p>
+        </div>
       </div>
       <div class="welcome-dots" id="welcome-step-dots">
-        <span class="welcome-dot active" data-wdot="1"></span>
-        <span class="welcome-dot" data-wdot="2"></span>
-        <span class="welcome-dot" data-wdot="3"></span>
-        <span class="welcome-dot" data-wdot="4"></span>
+        <span class="welcome-dot active" data-wdot="1" title="第 1 步 · 外观风格"></span>
+        <span class="welcome-dot" data-wdot="2" title="第 2 步 · 输入法与网络"></span>
+        <span class="welcome-dot" data-wdot="3" title="第 3 步 · 显卡与游戏"></span>
+        <span class="welcome-dot" data-wdot="4" title="第 4 步 · 快捷键速览"></span>
       </div>
     </header>
 
@@ -1831,7 +1840,7 @@
       <div id="welcome-step-1" class="welcome-pane">
         <div class="inst-section">
           <h3>第 1 步 / 共 4 步 · 选择桌面外观风格</h3>
-          <p class="muted-hint" style="margin-top:4px;">全局主题会同步更新桌面壁纸、顶栏、Dock、控制中心与 Sp​inel 终端，也可随时在「设置 → 外观」替换为自己的高清壁纸。</p>
+          <p class="muted-hint" style="margin-top:4px;">全局主题会同步更新桌面壁纸、顶栏、Dock、控制中心与 Spinel 终端，也可随时在「设置 → 外观」替换为自己的高清壁纸。</p>
           <div class="welcome-theme-row" style="margin-top:14px;">
             <button type="button" class="btn" data-cmd="theme:set:tahoe-light">浅色液态玻璃 (默认)</button>
             <button type="button" class="btn" data-cmd="theme:set:crystal-aurora">尖晶石深蓝极光</button>
@@ -1846,20 +1855,22 @@
 
       <div id="welcome-step-2" class="welcome-pane hidden">
         <div class="inst-section">
-          <h3>第 2 步 / 共 4 步 · 网络、代理与中文输入法</h3>
-          <p class="muted-hint" style="margin-top:4px;">Spinel OS 内置 Fcitx5 Wayland 中文拼音与系统级 HTTP/SOCKS 代理同步（自动传递给 Steam 和浏览器）。</p>
+          <h3>第 2 步 / 共 4 步 · 网络、蓝牙音频与中英文输入法</h3>
+          <p class="muted-hint" style="margin-top:4px;">内置极简 Fcitx5 Wayland 中英文输入法（仅保留英文与 Rime 雾凇拼音，Shift 或 Ctrl + Space 切换）与系统级代理自动同步。</p>
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row">
-              <div class="perf-row-info"><strong>当前网络状态</strong><span class="muted-hint" id="wlc-net-status">正在检测网络...</span></div>
-              <button type="button" class="btn small primary" data-cmd="settings:open:wifi">Wi-Fi 与系统代理</button>
+              <div class="perf-row-info"><strong>当前网络与代理</strong><span class="muted-hint" id="wlc-net-status">正在检测网络...</span><span class="muted-hint" id="wlc-proxy-status">未开启</span></div>
+              <div class="footer-actions">
+                <button type="button" class="btn small primary" data-cmd="settings:open:wifi">Wi-Fi 与系统代理</button>
+                <button type="button" class="btn small" data-cmd="settings:open:bt">蓝牙设备与音频</button>
+              </div>
             </div>
             <div class="perf-row">
-              <div class="perf-row-info"><strong>代理同步状态</strong><span class="muted-hint" id="wlc-proxy-status">未开启</span></div>
-              <button type="button" class="btn small" data-cmd="settings:open:bt">蓝牙手柄配对</button>
-            </div>
-            <div class="perf-row">
-              <div class="perf-row-info"><strong>中文输入法切换</strong><span class="muted-hint">默认按 Ctrl + Space 或 Shift 切换中英文，支持 Rime 雾凇拼音</span></div>
-              <button type="button" class="btn small" data-cmd="settings:open:appearance">输入法设置</button>
+              <div class="perf-row-info"><strong>实时中英文切换试写</strong><span class="muted-hint" id="wlc-ime-feedback">点击右侧输入框并按 Shift 或 Ctrl + Space 切换中英文试试</span></div>
+              <div class="footer-actions">
+                <input type="text" id="wlc-ime-test" class="search-input" style="min-width: 220px;" placeholder="在这里输入英文或中文拼音..." />
+                <button type="button" class="btn small" data-cmd="settings:open:appearance">输入法设置</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1868,7 +1879,7 @@
       <div id="welcome-step-3" class="welcome-pane hidden">
         <div class="inst-section">
           <h3>第 3 步 / 共 4 步 · Steam、显卡与游戏模式</h3>
-          <p class="muted-hint" style="margin-top:4px;">出于开源许可合规，专有 Steam 客户端不随系统镜像捆绑，可在下方一键通过应用中心在线安装。</p>
+          <p class="muted-hint" style="margin-top:4px;">出于开源许可合规，专有 Steam 客户端不随系统镜像捆绑，可在下方一键通过应用中心在线安装；蓝牙耳机配对后也会自动接管音频输出。</p>
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row">
               <div class="perf-row-info"><strong>图形设备检测</strong><span class="muted-hint" id="wlc-gpu-status">检测中...</span></div>
@@ -1893,8 +1904,8 @@
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row"><div class="perf-row-info"><strong>全局搜索启动器 (Spotlight)</strong><span class="muted-hint">搜应用、Steam 游戏、系统设置直达页</span></div><span class="kbd-cap">Alt + Space</span></div>
             <div class="perf-row"><div class="perf-row-info"><strong>窗口半屏贴边 / 多工作区</strong><span class="muted-hint">左右分屏、最大化及 4 个工作区切换</span></div><div class="footer-actions"><span class="kbd-cap">Super + ←/→</span><span class="kbd-cap">Ctrl + Alt + ←/→</span></div></div>
-            <div class="perf-row"><div class="perf-row-info"><strong>打开 Spinel 原生终端</strong><span class="muted-hint">Ctrl+T 新建同目录标签、Ctrl+F 搜索</span></div><span class="kbd-cap">Super + Enter</span></div>
-            <div class="perf-row"><div class="perf-row-info"><strong>区域截图 / 锁定屏幕</strong><span class="muted-hint">截图自动保存到 ~/Pictures/Screenshots 与剪贴板</span></div><div class="footer-actions"><span class="kbd-cap">Ctrl + Shift + 4</span><span class="kbd-cap">Super + L</span></div></div>
+            <div class="perf-row"><div class="perf-row-info"><strong>打开 Spinel 原生终端 / 文件预览</strong><span class="muted-hint">终端支持 Ctrl+T 新建标签；文件管理器支持 Space 快速预览</span></div><div class="footer-actions"><span class="kbd-cap">Super + Enter</span><span class="kbd-cap">Space</span></div></div>
+            <div class="perf-row"><div class="perf-row-info"><strong>区域截图 / 锁定屏幕</strong><span class="muted-hint">截图支持框选与标注，自动保存到 ~/Pictures/Screenshots 与剪贴板</span></div><div class="footer-actions"><span class="kbd-cap">Ctrl + Shift + 4</span><span class="kbd-cap">Super + L</span></div></div>
           </div>
         </div>
       </div>

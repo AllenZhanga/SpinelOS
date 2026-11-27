@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1095,10 +1096,71 @@ void apply_iface_ip_config(AppState *state, const std::string &payload) {
     }).detach();
 }
 
+bool route_audio_to_bluetooth_sink(const std::string &mac) {
+    if (!has_executable("pactl") || mac.size() != 17) return false;
+    std::string mac_under_up;
+    std::string mac_under_lo;
+    for (char ch : mac) {
+        char c = (ch == ':') ? '_' : ch;
+        mac_under_up.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        mac_under_lo.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    std::string matched_sink;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        std::string sinks_out;
+        int sinks_rc = 1;
+        if (run_argv_capture({"pactl", "list", "short", "sinks"}, sinks_out, sinks_rc) && sinks_rc == 0) {
+            for (const auto &line : split_lines(sinks_out)) {
+                if (line.find("bluez_output.") == std::string::npos &&
+                    line.find("bluez_sink.") == std::string::npos) {
+                    continue;
+                }
+                if (line.find(mac_under_up) == std::string::npos &&
+                    line.find(mac_under_lo) == std::string::npos) {
+                    continue;
+                }
+                std::istringstream iss(line);
+                std::string id_col, sink_name;
+                if ((iss >> id_col >> sink_name) && !sink_name.empty()) {
+                    matched_sink = sink_name;
+                    break;
+                }
+            }
+        }
+        if (!matched_sink.empty()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    }
+    if (matched_sink.empty()) return false;
+
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"pactl", "set-default-sink", matched_sink}, out, rc) || rc != 0) {
+        return false;
+    }
+
+    std::string inputs_out;
+    int inputs_rc = 1;
+    if (run_argv_capture({"pactl", "list", "short", "sink-inputs"}, inputs_out, inputs_rc) && inputs_rc == 0) {
+        for (const auto &line : split_lines(inputs_out)) {
+            std::istringstream iss(line);
+            std::string input_id;
+            if ((iss >> input_id) && !input_id.empty() &&
+                std::all_of(input_id.begin(), input_id.end(), [](unsigned char c) { return std::isdigit(c); })) {
+                std::string mv_out;
+                int mv_rc = 1;
+                run_argv_capture({"pactl", "move-sink-input", input_id, matched_sink}, mv_out, mv_rc);
+            }
+        }
+    }
+    append_app_log("[BT] 蓝牙音频已连接，自动切换默认输出: " + matched_sink);
+    return true;
+}
+
 void push_bt_state(AppState *state, bool do_scan) {
     if (!state || state->bt_busy.exchange(true)) return;
 
-    std::thread([state, do_scan]() {
+    if (!launch_async_task("", [state, do_scan]() {
         if (do_scan) {
             std::string scan_out;
             int scan_rc = 0;
@@ -1151,29 +1213,37 @@ void push_bt_state(AppState *state, bool do_scan) {
 
         state->bt_busy.store(false);
         sys_internal::post_js_to_main(state, js.str());
-    }).detach();
+    })) {
+        state->bt_busy.store(false);
+    }
 }
 
 void set_bt_power(AppState *state, bool on) {
     if (!state || state->bt_busy.exchange(true)) return;
-    std::thread([state, on]() {
+    if (!launch_async_task("", [state, on]() {
         std::string out;
         int rc = 0;
         run_argv_capture({"bluetoothctl", "power", on ? "on" : "off"}, out, rc);
         state->bt_busy.store(false);
         push_bt_state(state, false);
-    }).detach();
+    })) {
+        state->bt_busy.store(false);
+    }
 }
 
 void bt_device_action(AppState *state, const std::string &action, const std::string &mac) {
     if (!state || !is_valid_mac(mac) || state->bt_busy.exchange(true)) return;
-    std::thread([state, action, mac]() {
+    if (!launch_async_task("", [state, action, mac]() {
         std::string out;
         int rc = 0;
+        bool switched_audio = false;
         if (action == "connect") {
             run_argv_capture({"bluetoothctl", "trust", mac}, out, rc);
             run_argv_capture({"bluetoothctl", "pair", mac}, out, rc);
             run_argv_capture({"bluetoothctl", "connect", mac}, out, rc);
+            if (rc == 0) {
+                switched_audio = route_audio_to_bluetooth_sink(mac);
+            }
         } else if (action == "disconnect") {
             run_argv_capture({"bluetoothctl", "disconnect", mac}, out, rc);
         } else if (action == "remove") {
@@ -1181,10 +1251,23 @@ void bt_device_action(AppState *state, const std::string &action, const std::str
         }
         state->bt_busy.store(false);
 
+        std::string msg = out;
+        if (switched_audio) {
+            msg = trim_copy(msg) + "\n已自动切换系统音频输出至蓝牙设备。";
+        }
         std::ostringstream js;
         js << "window.__spinelBtAction && window.__spinelBtAction("
-           << (rc == 0 ? "true" : "false") << ",\"" << json_escape(out) << "\");";
+           << (rc == 0 ? "true" : "false") << ",\"" << json_escape(msg) << "\");";
         sys_internal::post_js_to_main(state, js.str());
+        if (switched_audio && !state->shutting_down.load()) {
+            g_idle_add(+[](gpointer d) -> gboolean {
+                auto *st = static_cast<AppState *>(d);
+                if (st && !st->shutting_down.load()) native_shell_sync_telemetry(st);
+                return G_SOURCE_REMOVE;
+            }, state);
+        }
         push_bt_state(state, false);
-    }).detach();
+    })) {
+        state->bt_busy.store(false);
+    }
 }

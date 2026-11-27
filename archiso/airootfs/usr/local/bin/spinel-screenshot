@@ -2,6 +2,13 @@
 set -euo pipefail
 
 MODE="${1:-area}"
+ANNOTATE=0
+for arg in "$@"; do
+  case "${arg}" in
+    --annotate|-e) ANNOTATE=1 ;;
+  esac
+done
+
 OUT_DIR="${HOME}/Pictures/Screenshots"
 mkdir -p "${OUT_DIR}"
 OUT_FILE="${OUT_DIR}/SpinelOS_$(date +%Y-%m-%d_%H-%M-%S).png"
@@ -26,7 +33,7 @@ if ! command -v grim >/dev/null 2>&1; then
 fi
 
 if [[ "${MODE}" == "area" ]] && command -v slurp >/dev/null 2>&1; then
-  GEOM="$(slurp 2>/dev/null || true)"
+  GEOM="$(slurp -b '#0f172a55' -c '#38bdf8' -w 2 2>/dev/null || true)"
   if [[ -z "${GEOM}" ]]; then
     exit 0
   fi
@@ -35,8 +42,19 @@ else
   grim "${OUT_FILE}"
 fi
 
-if command -v wl-copy >/dev/null 2>&1 && [[ -s "${OUT_FILE}" ]]; then
-  wl-copy --type image/png < "${OUT_FILE}" 2>/dev/null || true
+if [[ "${ANNOTATE}" -eq 1 ]]; then
+  if command -v satty >/dev/null 2>&1; then
+    satty -f "${OUT_FILE}" --output-filename "${OUT_FILE}" 2>/dev/null || true
+  elif command -v swappy >/dev/null 2>&1; then
+    swappy -f "${OUT_FILE}" -o "${OUT_FILE}" 2>/dev/null || true
+  fi
 fi
 
-notify_shot "截图已保存并复制到剪贴板" "${OUT_FILE}"
+CLIP_NOTE=""
+if command -v wl-copy >/dev/null 2>&1 && [[ -s "${OUT_FILE}" ]]; then
+  if wl-copy --type image/png < "${OUT_FILE}" 2>/dev/null; then
+    CLIP_NOTE="并复制到剪贴板"
+  fi
+fi
+
+notify_shot "截图已保存${CLIP_NOTE}" "$(basename "${OUT_FILE}") → ${OUT_DIR}"

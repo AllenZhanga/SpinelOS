@@ -756,7 +756,30 @@
   if (mode === "store") sendCommand("store:refresh");
   if (mode === "installer") sendCommand("installer:scan-disks");
   if (mode === "games") sendCommand("steam:scan-caches");
-  if (mode === "welcome") setWelcomeStep(1);
+  if (mode === "welcome") {
+    setWelcomeStep(1);
+    document.querySelectorAll("#welcome-step-dots [data-wdot]").forEach((dot) => {
+      dot.addEventListener("click", () => {
+        setWelcomeStep(Number(dot.getAttribute("data-wdot")) || 1);
+      });
+    });
+    const imeInput = document.getElementById("wlc-ime-test");
+    const imeFb = document.getElementById("wlc-ime-feedback");
+    if (imeInput && imeFb) {
+      const updateImeHint = () => {
+        const val = imeInput.value || "";
+        if (!val.trim()) {
+          imeFb.textContent = "点击右侧输入框并按 Shift 或 Ctrl + Space 切换中英文试试";
+        } else if (/[\u4e00-\u9fff]/.test(val)) {
+          imeFb.textContent = "检测到中文输入正常 ✓（可随时按 Shift / Ctrl + Space 切回英文）";
+        } else {
+          imeFb.textContent = "当前为英文直输模式 ✓（按 Shift 或 Ctrl + Space 可切到中文拼音）";
+        }
+      };
+      imeInput.addEventListener("input", updateImeHint);
+      imeInput.addEventListener("compositionend", updateImeHint);
+    }
+  }
   if (mode === "desktop") renderDesktopShortcuts();
   if (mode === "dock") renderDock();
 
