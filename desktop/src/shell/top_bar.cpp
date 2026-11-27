@@ -370,12 +370,11 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_layer_auto_exclusive_zone_enable(win);
     gtk_layer_set_keyboard_mode(win, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
-    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *root = gtk_center_box_new();
     gtk_widget_add_css_class(root, "spinel-topbar");
     gtk_widget_set_size_request(root, -1, 30);
 
     GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-    gtk_widget_set_hexpand(left, TRUE);
     gtk_widget_set_halign(left, GTK_ALIGN_START);
     gtk_widget_set_valign(left, GTK_ALIGN_CENTER);
 
@@ -780,7 +779,6 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
 
     gtk_box_append(GTK_BOX(right), ns->bar_tray_box);
     gtk_box_append(GTK_BOX(right), ns->bar_tray_sep);
-    if (ai_pill) gtk_box_append(GTK_BOX(right), ai_pill);
     gtk_box_append(GTK_BOX(right), ns->bar_sandbox_btn);
     gtk_box_append(GTK_BOX(right), mem_btn);
     gtk_box_append(GTK_BOX(right), ime_btn);
@@ -809,8 +807,12 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         gtk_widget_set_visible(ns->bar_bat_box, FALSE);
     }
 
-    gtk_box_append(GTK_BOX(root), left);
-    gtk_box_append(GTK_BOX(root), right);
+    gtk_center_box_set_start_widget(GTK_CENTER_BOX(root), left);
+    if (ai_pill) {
+        gtk_widget_set_valign(ai_pill, GTK_ALIGN_CENTER);
+        gtk_center_box_set_center_widget(GTK_CENTER_BOX(root), ai_pill);
+    }
+    gtk_center_box_set_end_widget(GTK_CENTER_BOX(root), right);
     gtk_window_set_child(win, root);
 
     ns->bar_win = win;

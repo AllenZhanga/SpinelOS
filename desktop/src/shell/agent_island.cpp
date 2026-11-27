@@ -149,6 +149,27 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
         gtk_box_remove(GTK_BOX(ns->bar_ai_list_box), c);
     }
 
+    // Popover Header Bar
+    {
+        GtkWidget *top_hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_add_css_class(top_hdr, "spinel-ai-pop-hdr");
+        GtkWidget *hdr_lbl = gtk_label_new("Spinel AI 调度中枢");
+        gtk_widget_add_css_class(hdr_lbl, "spinel-ai-pop-title");
+        gtk_widget_set_hexpand(hdr_lbl, TRUE);
+        gtk_widget_set_halign(hdr_lbl, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(top_hdr), hdr_lbl);
+
+        GtkWidget *perm_btn = gtk_button_new_with_label("权限与审计");
+        gtk_widget_add_css_class(perm_btn, "spinel-ai-mini-btn");
+        g_signal_connect(perm_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            if (n->bar_ai_popover) gtk_popover_popdown(GTK_POPOVER(n->bar_ai_popover));
+            trigger_cmd(n->app_state, "settings:open:perms");
+        }), ns);
+        gtk_box_append(GTK_BOX(top_hdr), perm_btn);
+        gtk_box_append(GTK_BOX(ns->bar_ai_list_box), top_hdr);
+    }
+
     // Section 1: Pending Tier 3 Interactive Approvals
     if (!approvals.empty()) {
         GtkWidget *ap_head = gtk_label_new("待人工审批 (Tier 3 权限门禁)");
@@ -241,15 +262,6 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
             agent_island_refresh(n);
         }), ns);
         gtk_box_append(GTK_BOX(sec_head), clr_btn);
-
-        GtkWidget *perm_btn = gtk_button_new_with_label("权限设置");
-        gtk_widget_add_css_class(perm_btn, "spinel-clip-clr");
-        g_signal_connect(perm_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
-            auto *n = static_cast<NativeShellState *>(d);
-            if (n->bar_ai_popover) gtk_popover_popdown(GTK_POPOVER(n->bar_ai_popover));
-            trigger_cmd(n->app_state, "settings:open:perms");
-        }), ns);
-        gtk_box_append(GTK_BOX(sec_head), perm_btn);
         gtk_box_append(GTK_BOX(ns->bar_ai_list_box), sec_head);
     }
 
@@ -506,6 +518,51 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
     }
 }
 
+void draw_island_dot_cb(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer user_data) {
+    auto *ns = static_cast<NativeShellState *>(user_data);
+    std::string cls = ns ? ns->ai_state_cls : "idle";
+    double cx = w * 0.5;
+    double cy = h * 0.5;
+
+    if (cls == "toast") {
+        // Luminous mint core on emerald toast
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.25);
+        cairo_arc(cr, cx, cy, 5.5, 0, 2 * G_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
+        cairo_arc(cr, cx, cy, 3.0, 0, 2 * G_PI);
+        cairo_fill(cr);
+        return;
+    }
+    if (cls == "alert") {
+        cairo_set_source_rgba(cr, 0.96, 0.62, 0.04, 0.28);
+        cairo_arc(cr, cx, cy, 6.0, 0, 2 * G_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.98, 0.75, 0.14, 0.98);
+        cairo_arc(cr, cx, cy, 3.2, 0, 2 * G_PI);
+        cairo_fill(cr);
+        return;
+    }
+    if (cls == "running") {
+        cairo_set_source_rgba(cr, 0.22, 0.74, 0.97, 0.26);
+        cairo_arc(cr, cx, cy, 6.0, 0, 2 * G_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.22, 0.74, 0.97, 0.98);
+        cairo_arc(cr, cx, cy, 3.1, 0, 2 * G_PI);
+        cairo_fill(cr);
+        return;
+    }
+    // Idle: crisp 4-point Spinel AI spark
+    cairo_set_source_rgba(cr, 0.56, 0.78, 1.0, 0.92);
+    cairo_move_to(cr, cx, cy - 5.2);
+    cairo_curve_to(cr, cx + 0.9, cy - 1.4, cx + 1.4, cy - 0.9, cx + 5.2, cy);
+    cairo_curve_to(cr, cx + 1.4, cy + 0.9, cx + 0.9, cy + 1.4, cx, cy + 5.2);
+    cairo_curve_to(cr, cx - 0.9, cy + 1.4, cx - 1.4, cy + 0.9, cx - 5.2, cy);
+    cairo_curve_to(cr, cx - 1.4, cy - 0.9, cx - 0.9, cy - 1.4, cx, cy - 5.2);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
+
 }  // namespace
 
 std::string format_island_pill_summary(const std::vector<spinel::ai::AgentSessionInfo> &sessions,
@@ -518,29 +575,44 @@ std::string format_island_pill_summary(const std::vector<spinel::ai::AgentSessio
 GtkWidget *build_agent_island_widget(NativeShellState *ns) {
     GtkWidget *btn = gtk_menu_button_new();
     gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(btn), FALSE);
-    gtk_widget_add_css_class(btn, "spinel-bar-menubtn");
     gtk_widget_add_css_class(btn, "spinel-ai-pill");
-    gtk_widget_set_tooltip_text(btn, "Spinel AI OS 灵动岛：查看活动 Agent 会话、待人工审批与任务派单箱");
+    gtk_widget_set_valign(btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(btn, "Spinel AI 灵动岛：查看活动 Agent、Tier 3 审批与任务派单箱");
 
-    GtkWidget *lbl = gtk_label_new("◆ AI");
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
+
+    GtkWidget *dot = gtk_drawing_area_new();
+    gtk_widget_set_size_request(dot, 13, 13);
+    gtk_widget_set_halign(dot, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dot), draw_island_dot_cb, ns, nullptr);
+
+    GtkWidget *lbl = gtk_label_new("AI");
     gtk_widget_add_css_class(lbl, "spinel-ai-pill-lbl");
     gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_END);
-    gtk_label_set_max_width_chars(GTK_LABEL(lbl), 34);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(btn), lbl);
+    gtk_label_set_max_width_chars(GTK_LABEL(lbl), 38);
+
+    gtk_box_append(GTK_BOX(row), dot);
+    gtk_box_append(GTK_BOX(row), lbl);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(btn), row);
 
     GtkWidget *pop = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
     gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+    gtk_widget_add_css_class(pop, "spinel-ai-popover");
 
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 470);
-    gtk_widget_set_size_request(scroll, 372, -1);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 490);
+    gtk_widget_set_size_request(scroll, 388, -1);
 
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_top(box, 2);
-    gtk_widget_set_margin_bottom(box, 2);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), box);
     gtk_popover_set_child(GTK_POPOVER(pop), scroll);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn), pop);
@@ -552,6 +624,7 @@ GtkWidget *build_agent_island_widget(NativeShellState *ns) {
     }), ns);
 
     ns->bar_ai_btn = btn;
+    ns->bar_ai_dot_da = dot;
     ns->bar_ai_lbl = lbl;
     ns->bar_ai_popover = pop;
     ns->bar_ai_list_box = box;
@@ -570,6 +643,7 @@ void agent_island_refresh(NativeShellState *ns) {
 
     std::string cls;
     std::string text = format_island_pill_summary(sessions, approvals, ns->ai_toast_text, cls);
+    ns->ai_state_cls = cls;
     gtk_label_set_text(GTK_LABEL(ns->bar_ai_lbl), text.c_str());
 
     for (const char *c : {"is-running", "is-alert", "is-toast"}) {
@@ -578,6 +652,8 @@ void agent_island_refresh(NativeShellState *ns) {
     if (cls == "running") gtk_widget_add_css_class(ns->bar_ai_btn, "is-running");
     else if (cls == "alert") gtk_widget_add_css_class(ns->bar_ai_btn, "is-alert");
     else if (cls == "toast") gtk_widget_add_css_class(ns->bar_ai_btn, "is-toast");
+
+    if (ns->bar_ai_dot_da) gtk_widget_queue_draw(ns->bar_ai_dot_da);
 
     if (ns->bar_ai_popover && gtk_widget_get_visible(ns->bar_ai_popover)) {
         rebuild_ai_popover_contents(ns, sessions, approvals);
@@ -667,30 +743,43 @@ std::string agent_island_css(const NativeShellState *ns) {
     const char *apr_bd = is_light ? "rgba(217, 119, 6, 0.45)" : "rgba(251, 191, 36, 0.45)";
 
     return
-        ".spinel-ai-pill {\n"
-        "  background-color: " + std::string(pill_bg) + ";\n"
+        ".spinel-ai-pill > button {\n"
+        "  background-color: rgba(15, 20, 32, 0.90);\n"
         "  background-image: none;\n"
-        "  border: 1px solid " + t.bar_border + ";\n"
+        "  border: 1px solid rgba(255, 255, 255, 0.16);\n"
         "  border-radius: 999px;\n"
-        "  padding: 1px 10px;\n"
+        "  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);\n"
+        "  padding: 1px 12px 1px 9px;\n"
         "  min-height: 22px;\n"
-        "  transition: all 220ms ease;\n"
+        "  min-width: 56px;\n"
+        "  margin: 0;\n"
+        "  transition: all 220ms cubic-bezier(0.22, 1, 0.36, 1);\n"
         "}\n"
-        ".spinel-ai-pill.is-running {\n"
-        "  border-color: " + t.cc_accent + ";\n"
-        "  background-color: rgba(56, 189, 248, 0.18);\n"
+        ".spinel-ai-pill > button:hover {\n"
+        "  background-color: rgba(24, 32, 50, 0.96);\n"
+        "  border-color: rgba(255, 255, 255, 0.28);\n"
         "}\n"
-        ".spinel-ai-pill.is-alert {\n"
-        "  border-color: " + std::string(apr_bd) + ";\n"
-        "  background-color: " + std::string(apr_bg) + ";\n"
+        ".spinel-ai-pill.is-running > button {\n"
+        "  background-color: rgba(12, 24, 42, 0.94);\n"
+        "  border-color: rgba(56, 189, 248, 0.58);\n"
+        "  box-shadow: 0 2px 12px rgba(56, 189, 248, 0.24);\n"
+        "  padding: 1px 14px 1px 10px;\n"
         "}\n"
-        ".spinel-ai-pill.is-toast {\n"
-        "  border-color: " + t.cc_accent + ";\n"
+        ".spinel-ai-pill.is-alert > button {\n"
+        "  background-color: rgba(34, 22, 8, 0.95);\n"
+        "  border-color: rgba(245, 158, 11, 0.78);\n"
+        "  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.28);\n"
+        "  padding: 1px 14px 1px 10px;\n"
+        "}\n"
+        ".spinel-ai-pill.is-toast > button {\n"
         "  background-color: " + t.cc_accent + ";\n"
-        "  padding: 1px 13px;\n"
+        "  border-color: rgba(255, 255, 255, 0.34);\n"
+        "  box-shadow: 0 3px 14px rgba(37, 99, 235, 0.38);\n"
+        "  padding: 1px 16px 1px 11px;\n"
         "}\n"
-        ".spinel-ai-pill.is-toast .spinel-ai-pill-lbl { color: #ffffff; }\n"
-        ".spinel-ai-pill-lbl { font-size: 11.5px; font-weight: 600; color: " + t.bar_fg + "; }\n"
+        ".spinel-ai-pill-lbl { font-size: 11.5px; font-weight: 600; color: #f8fafc; letter-spacing: 0.01em; }\n"
+        ".spinel-ai-pop-hdr { padding: 2px 4px 4px 4px; }\n"
+        ".spinel-ai-pop-title { font-size: 13px; font-weight: 700; color: " + t.bar_fg + "; }\n"
         ".spinel-ai-sec-title { font-size: 11.5px; font-weight: 700; color: " + t.bar_fg + "; padding: 4px 4px 2px 4px; }\n"
         ".spinel-ai-sec-title.is-alert { color: #f59e0b; }\n"
         ".spinel-ai-item-title { font-size: 12px; font-weight: 600; color: " + t.bar_fg + "; }\n"
@@ -702,7 +791,7 @@ std::string agent_island_css(const NativeShellState *ns) {
         ".spinel-ai-dot.st-done { color: #22c55e; }\n"
         ".spinel-ai-dot.st-err { color: #ef4444; }\n"
         ".spinel-ai-badge {\n"
-        "  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;\n"
+        "  font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 999px;\n"
         "  background-color: " + std::string(pill_bg) + "; color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-ai-badge.t-rev { background-color: rgba(34, 197, 94, 0.22); color: #22c55e; }\n"
@@ -710,20 +799,20 @@ std::string agent_island_css(const NativeShellState *ns) {
         ".spinel-ai-apr-card {\n"
         "  background-color: " + std::string(apr_bg) + ";\n"
         "  border: 1px solid " + std::string(apr_bd) + ";\n"
-        "  border-radius: 10px;\n"
-        "  padding: 8px 10px;\n"
+        "  border-radius: 11px;\n"
+        "  padding: 9px 11px;\n"
         "  margin: 2px 0;\n"
         "}\n"
         ".spinel-ai-task-card {\n"
         "  background-color: " + std::string(card_bg) + ";\n"
         "  border: 1px solid " + t.bar_border + ";\n"
-        "  border-radius: 10px;\n"
-        "  padding: 7px 9px;\n"
+        "  border-radius: 11px;\n"
+        "  padding: 8px 10px;\n"
         "  margin: 1px 0;\n"
         "}\n"
         ".spinel-ai-entry {\n"
-        "  min-height: 28px; font-size: 12px; border-radius: 8px;\n"
-        "  padding: 2px 8px; border: 1px solid " + t.bar_border + ";\n"
+        "  min-height: 30px; font-size: 12px; border-radius: 9px;\n"
+        "  padding: 2px 9px; border: 1px solid " + t.bar_border + ";\n"
         "  background-color: " + std::string(card_bg) + "; color: " + t.bar_fg + ";\n"
         "}\n"
         ".spinel-ai-mini-btn {\n"
@@ -731,13 +820,14 @@ std::string agent_island_css(const NativeShellState *ns) {
         "  background-image: none;\n"
         "  border: 1px solid " + t.bar_border + ";\n"
         "  box-shadow: none;\n"
-        "  border-radius: 7px;\n"
-        "  padding: 2px 8px;\n"
-        "  min-height: 22px;\n"
+        "  border-radius: 8px;\n"
+        "  padding: 3px 9px;\n"
+        "  min-height: 24px;\n"
         "  font-size: 11px;\n"
         "  font-weight: 600;\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
+        ".spinel-ai-mini-btn:hover { background-color: " + std::string(card_bg) + "; }\n"
         ".spinel-ai-mini-btn.is-primary { background-color: " + t.cc_accent + "; border-color: " + t.cc_accent + "; color: #ffffff; }\n"
         ".spinel-ai-mini-btn.is-danger { color: #ef4444; }\n";
 }

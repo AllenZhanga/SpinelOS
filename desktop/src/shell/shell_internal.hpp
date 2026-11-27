@@ -93,6 +93,7 @@ struct NativeShellState {
     GtkWidget *bar_sandbox_btn = nullptr;
     GtkWidget *bar_sandbox_lbl = nullptr;
     GtkWidget *bar_ai_btn = nullptr;
+    GtkWidget *bar_ai_dot_da = nullptr;
     GtkWidget *bar_ai_lbl = nullptr;
     GtkWidget *bar_ai_popover = nullptr;
     GtkWidget *bar_ai_list_box = nullptr;
@@ -100,6 +101,7 @@ struct NativeShellState {
     GFileMonitor *ai_dir_monitor = nullptr;
     guint ai_refresh_timer = 0;
     guint ai_toast_timer = 0;
+    std::string ai_state_cls = "idle";
     std::string ai_toast_text;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_ime_lbl = nullptr;

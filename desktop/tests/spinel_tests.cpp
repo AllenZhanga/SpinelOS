@@ -1590,17 +1590,17 @@ void test_ai_os_stage3_integration() {
 
     // 1. Dynamic Island pill summary formatting across states
     std::string cls;
-    EXPECT(format_agent_island_pill_summary({}, {}, "", cls) == "◆ AI" && cls == "idle");
+    EXPECT(format_agent_island_pill_summary({}, {}, "", cls) == "AI" && cls == "idle");
     AgentSessionInfo s1;
     s1.id = "s1";
     s1.agent = "Codex";
     s1.status = AgentSessionStatus::Running;
-    EXPECT(format_agent_island_pill_summary({s1}, {}, "", cls) == "● Codex" && cls == "running");
+    EXPECT(format_agent_island_pill_summary({s1}, {}, "", cls) == "Codex · 运行中" && cls == "running");
 
     AgentSessionInfo s2 = s1;
     s2.id = "s2";
     s2.agent = "DeepSeekHarness";
-    EXPECT(format_agent_island_pill_summary({s1, s2}, {}, "", cls) == "● 2 运行中" && cls == "running");
+    EXPECT(format_agent_island_pill_summary({s1, s2}, {}, "", cls) == "2 运行中" && cls == "running");
 
     ApprovalRequestInfo ap1;
     ap1.id = "apr_1";

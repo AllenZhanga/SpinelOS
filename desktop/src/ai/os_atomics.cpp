@@ -369,21 +369,21 @@ std::string format_agent_island_pill_summary(const std::vector<AgentSessionInfo>
     int total_wait = waiting + static_cast<int>(approvals.size());
     if (total_wait > 0) {
         out_state_cls = "alert";
-        return "⚠ " + std::to_string(total_wait) + " 待确认";
+        return std::to_string(total_wait) + " 待确认";
     }
     if (running > 0) {
         out_state_cls = "running";
         if (running == 1 && !active_name.empty()) {
-            return "● " + active_name;
+            return active_name + " · 运行中";
         }
-        return "● " + std::to_string(running) + " 运行中";
+        return std::to_string(running) + " 运行中";
     }
     if (errored > 0) {
         out_state_cls = "alert";
-        return "✕ " + std::to_string(errored) + " 异常";
+        return std::to_string(errored) + " 异常";
     }
     out_state_cls = "idle";
-    return "◆ AI";
+    return "AI";
 }
 
 void sync_vram_with_gamemode(bool gamemode_active) {
