@@ -22,11 +22,14 @@
 #include "wine_launcher.hpp"
 
 #include <signal.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -132,6 +135,49 @@ void test_common_utils() {
     EXPECT(write_text_file(p.string(), "first line\nsecond line\n"));
     EXPECT(read_first_line(p.string(), "fallback") == "first line");
     EXPECT(read_first_line((fs::path(home_dir()) / "missing.conf").string(), "fallback") == "fallback");
+
+    // Verify ensure_display_env() recovers DBUS_SESSION_BUS_ADDRESS from $XDG_RUNTIME_DIR/bus even when DISPLAY is set
+    const char *old_rt = std::getenv("XDG_RUNTIME_DIR");
+    const std::string saved_rt = old_rt ? old_rt : "";
+    const bool had_rt = old_rt != nullptr;
+    const char *old_dbus = std::getenv("DBUS_SESSION_BUS_ADDRESS");
+    const std::string saved_dbus = old_dbus ? old_dbus : "";
+    const bool had_dbus = old_dbus != nullptr;
+    const char *old_disp = std::getenv("DISPLAY");
+    const std::string saved_disp = old_disp ? old_disp : "";
+    const bool had_disp = old_disp != nullptr;
+    const char *old_xdg = std::getenv("XDG_CURRENT_DESKTOP");
+    const std::string saved_xdg = old_xdg ? old_xdg : "";
+    const bool had_xdg = old_xdg != nullptr;
+
+    fs::path bus_sock = fs::path(home_dir()) / "bus";
+    int sock_fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    EXPECT(sock_fd >= 0);
+    if (sock_fd >= 0) {
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", bus_sock.c_str());
+        EXPECT(::bind(sock_fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) == 0);
+
+        setenv("XDG_RUNTIME_DIR", home_dir().c_str(), 1);
+        unsetenv("DBUS_SESSION_BUS_ADDRESS");
+        setenv("DISPLAY", ":99", 1);
+        unsetenv("XDG_CURRENT_DESKTOP");
+
+        ensure_display_env();
+
+        const char *got_dbus = std::getenv("DBUS_SESSION_BUS_ADDRESS");
+        EXPECT(got_dbus != nullptr && std::string(got_dbus) == ("unix:path=" + bus_sock.string()));
+        const char *got_xdg = std::getenv("XDG_CURRENT_DESKTOP");
+        EXPECT(got_xdg != nullptr && std::string(got_xdg).find("GNOME") != std::string::npos);
+
+        ::close(sock_fd);
+    }
+
+    if (had_rt) setenv("XDG_RUNTIME_DIR", saved_rt.c_str(), 1); else unsetenv("XDG_RUNTIME_DIR");
+    if (had_dbus) setenv("DBUS_SESSION_BUS_ADDRESS", saved_dbus.c_str(), 1); else unsetenv("DBUS_SESSION_BUS_ADDRESS");
+    if (had_disp) setenv("DISPLAY", saved_disp.c_str(), 1); else unsetenv("DISPLAY");
+    if (had_xdg) setenv("XDG_CURRENT_DESKTOP", saved_xdg.c_str(), 1); else unsetenv("XDG_CURRENT_DESKTOP");
 }
 
 void test_wine_launch() {

@@ -439,14 +439,22 @@ if [ -z "\${DISPLAY:-}" ] && [ -z "\${WAYLAND_DISPLAY:-}" ] && [ "\$(tty 2>/dev/
 fi
 EOF
 
+mkdir -p /mnt/etc/systemd/system/getty@tty1.service.d
 if [[ "$AUTOLOGIN" == "true" ]]; then
-  mkdir -p /mnt/etc/systemd/system/getty@tty1.service.d
   cat > /mnt/etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
 [Service]
+Environment=XDG_SESSION_CLASS=user
 ExecStart=
-ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin ${USERNAME} %I \$TERM
+ExecStart=-/sbin/agetty -o '-p -f -- ${USERNAME}' --noclear --autologin ${USERNAME} %I \$TERM
+EOF
+else
+  cat > /mnt/etc/systemd/system/getty@tty1.service.d/session-class.conf <<EOF
+[Service]
+Environment=XDG_SESSION_CLASS=user
 EOF
 fi
+mkdir -p /mnt/var/lib/systemd/linger
+touch "/mnt/var/lib/systemd/linger/${USERNAME}"
 
 if [[ -f /etc/pacman.d/gnupg/pubring.gpg ]]; then
   rm -rf /mnt/etc/pacman.d/gnupg

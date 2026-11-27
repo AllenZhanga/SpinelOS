@@ -67,6 +67,27 @@ void ensure_display_env() {
         setenv("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME", 1);
     }
 
+    const char *xdg_runtime = std::getenv("XDG_RUNTIME_DIR");
+    std::string runtime_dir = (xdg_runtime && *xdg_runtime)
+        ? std::string(xdg_runtime)
+        : ("/run/user/" + std::to_string(static_cast<unsigned long>(::getuid())));
+    if (!xdg_runtime || !*xdg_runtime) {
+        struct stat rt_st{};
+        if (::stat(runtime_dir.c_str(), &rt_st) == 0 && S_ISDIR(rt_st.st_mode)) {
+            setenv("XDG_RUNTIME_DIR", runtime_dir.c_str(), 1);
+        }
+    }
+
+    const char *dbus_addr = std::getenv("DBUS_SESSION_BUS_ADDRESS");
+    if (!dbus_addr || !*dbus_addr) {
+        std::string bus_path = runtime_dir + "/bus";
+        struct stat bus_st{};
+        if (::stat(bus_path.c_str(), &bus_st) == 0 && S_ISSOCK(bus_st.st_mode)) {
+            std::string addr = "unix:path=" + bus_path;
+            setenv("DBUS_SESSION_BUS_ADDRESS", addr.c_str(), 1);
+        }
+    }
+
     const char *disp = std::getenv("DISPLAY");
     if (disp && *disp) return;
 

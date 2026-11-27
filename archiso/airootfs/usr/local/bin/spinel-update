@@ -343,6 +343,16 @@ apply_stage_and_restart() {
     fc-cache -f >/dev/null 2>&1 || true
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger --subsystem-match=backlight 2>/dev/null || true
+    if [[ -n "${TARGET_USER}" && "${TARGET_USER}" != "root" ]]; then
+      mkdir -p /var/lib/systemd/linger
+      touch "/var/lib/systemd/linger/${TARGET_USER}"
+      mkdir -p /etc/systemd/system/getty@tty1.service.d
+      if [[ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]]; then
+        printf '[Service]\nEnvironment=XDG_SESSION_CLASS=user\nExecStart=\nExecStart=-/sbin/agetty -o '\''-p -f -- %s'\'' --noclear --autologin %s %%I $TERM\n' "${TARGET_USER}" "${TARGET_USER}" > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+      else
+        printf '[Service]\nEnvironment=XDG_SESSION_CLASS=user\n' > /etc/systemd/system/getty@tty1.service.d/session-class.conf
+      fi
+    fi
     systemctl daemon-reload 2>/dev/null || true
     systemctl start systemd-zram-setup@zram0.service 2>/dev/null || true
     for sbin in start-spinel-desktop spinel-install spinel-screenshot spinel-lock; do

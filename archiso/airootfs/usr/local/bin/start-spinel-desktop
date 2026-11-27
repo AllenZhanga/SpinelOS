@@ -12,12 +12,20 @@ export XMODIFIERS=@im=fcitx
 export QT_IM_MODULE=fcitx
 export SDL_IM_MODULE=fcitx
 
-# Ensure runtime dir & session D-Bus exist
+# Ensure runtime dir & session D-Bus exist (even if logind opened tty1 as user-light or dbus.socket is still starting)
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 fi
 mkdir -p "${XDG_RUNTIME_DIR}"
 chmod 700 "${XDG_RUNTIME_DIR}" 2>/dev/null || true
+if [ ! -S "${XDG_RUNTIME_DIR}/bus" ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl --user start dbus.socket 2>/dev/null || true
+  i=0
+  while [ ! -S "${XDG_RUNTIME_DIR}/bus" ] && [ "${i}" -lt 20 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+fi
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then
   export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 fi
@@ -64,9 +72,13 @@ if [ "${IS_VM}" -eq 1 ]; then
   esac
 fi
 
-# Start PipeWire audio services in user session if systemd user instance is ready
+# Propagate desktop env (including DBUS_SESSION_BUS_ADDRESS & XDG_CURRENT_DESKTOP) to systemd user services
 if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user import-environment DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE 2>/dev/null || true
   systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service 2>/dev/null || true
+fi
+if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
+  dbus-update-activation-environment --systemd DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE 2>/dev/null || true
 fi
 
 # Bridge host <-> VM clipboard when running under SPICE/UTM/QEMU
@@ -74,10 +86,18 @@ if [ -e /dev/virtio-ports/com.redhat.spice.0 ] && command -v spice-vdagent >/dev
   spice-vdagent >/dev/null 2>&1 || true
 fi
 
+run_labwc() {
+  if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null 2>&1; then
+    dbus-run-session -- labwc "$@"
+  else
+    labwc "$@"
+  fi
+}
+
 LOG_FILE="/tmp/spinel-labwc.log"
 START_TS="$(date +%s)"
 set +e
-labwc >"${LOG_FILE}" 2>&1
+run_labwc >"${LOG_FILE}" 2>&1
 RC=$?
 END_TS="$(date +%s)"
 set -e
@@ -91,7 +111,7 @@ if [ "${RC}" -ne 0 ] && [ $((END_TS - START_TS)) -lt 5 ] && [ "${WLR_RENDERER:-}
   export WEBKIT_DISABLE_COMPOSITING_MODE=1
   export LIBGL_ALWAYS_SOFTWARE=1
   set +e
-  labwc >>"${LOG_FILE}" 2>&1
+  run_labwc >>"${LOG_FILE}" 2>&1
   RC=$?
   set -e
 fi

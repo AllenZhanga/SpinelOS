@@ -198,6 +198,19 @@ if [ "$MODE" = "full" ]; then
   sudo fc-cache -f >/dev/null 2>&1 || true
   sudo udevadm control --reload-rules 2>/dev/null || true
   sudo udevadm trigger --subsystem-match=backlight 2>/dev/null || true
+  if command -v loginctl >/dev/null 2>&1; then
+    sudo loginctl enable-linger "${USER}" 2>/dev/null || true
+  fi
+  if [ ! -f "/var/lib/systemd/linger/${USER}" ]; then
+    sudo mkdir -p /var/lib/systemd/linger
+    sudo touch "/var/lib/systemd/linger/${USER}"
+  fi
+  sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
+  if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
+    printf '[Service]\nEnvironment=XDG_SESSION_CLASS=user\nExecStart=\nExecStart=-/sbin/agetty -o '\''-p -f -- %s'\'' --noclear --autologin %s %%I $TERM\n' "${USER}" "${USER}" | sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf >/dev/null
+  else
+    printf '[Service]\nEnvironment=XDG_SESSION_CLASS=user\n' | sudo tee /etc/systemd/system/getty@tty1.service.d/session-class.conf >/dev/null
+  fi
   sudo systemctl daemon-reload 2>/dev/null || true
   sudo systemctl start systemd-zram-setup@zram0.service 2>/dev/null || true
   sudo install -Dm755 /tmp/spinel-dev/start-spinel-desktop /usr/local/bin/start-spinel-desktop
