@@ -650,6 +650,21 @@ std::string dispatch_mcp_jsonrpc(const std::string &req_json, McpBusCallFn bus_c
         }
 
         std::string client_label = mcp_client_label();
+        if (!bus_call && tool_name != "agent_report" && client_label != "Antigravity") {
+            std::string auto_id = "mcp-" + sanitize_agent_session_id(client_label) + "-" +
+                                  std::to_string(static_cast<long long>(::getppid() > 1 ? ::getppid() : ::getpid()));
+            std::ostringstream rep;
+            rep << "{\"id\":\"mcp-auto\",\"client\":\"" << json_escape(client_label)
+                << "\",\"method\":\"agent.report\",\"params\":{"
+                << "\"id\":\"" << json_escape(auto_id) << "\","
+                << "\"agent\":\"" << json_escape(client_label) << "\","
+                << "\"pid\":" << static_cast<long long>(::getppid() > 1 ? ::getppid() : ::getpid()) << ","
+                << "\"status\":\"running\","
+                << "\"summary\":\"MCP: " << json_escape(tool_name) << "\"}}";
+            std::string rep_resp;
+            call_agent_bus_socket(agent_bus_socket_path(), rep.str(), rep_resp, 250);
+        }
+
         std::ostringstream bus_req;
         bus_req << "{\"id\":\"mcp\""
                 << ",\"client\":\"" << json_escape(client_label) << "\""

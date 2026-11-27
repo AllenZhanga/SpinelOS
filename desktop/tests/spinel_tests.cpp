@@ -21,6 +21,8 @@
 #include "theme_manager.hpp"
 #include "wine_launcher.hpp"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -28,6 +30,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -1416,6 +1419,81 @@ void test_ai_os_stage1_atomics() {
     EXPECT(list_now.size() == 1 && list_now[0].win_id == 88);
     auto list_expired = reconcile_agent_sessions(static_cast<long long>(std::time(nullptr)) + 600, 300, false, {});
     EXPECT(list_expired.empty());
+
+    // Live Antigravity ConversationService discovery + Running->Done transition
+    {
+        fs::path hub_dir = fs::path(home_dir()) / "agy-daemon-test";
+        std::error_code ec;
+        fs::create_directories(hub_dir, ec);
+        int srv_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        EXPECT(srv_fd >= 0);
+        if (srv_fd >= 0) {
+            int opt = 1;
+            ::setsockopt(srv_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+            sockaddr_in sa{};
+            sa.sin_family = AF_INET;
+            sa.sin_port = 0;
+            sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            EXPECT(::bind(srv_fd, reinterpret_cast<const sockaddr *>(&sa), sizeof(sa)) == 0);
+            socklen_t slen = sizeof(sa);
+            EXPECT(::getsockname(srv_fd, reinterpret_cast<sockaddr *>(&sa), &slen) == 0);
+            int port = ntohs(sa.sin_port);
+            EXPECT(::listen(srv_fd, 8) == 0);
+
+            std::atomic<bool> mock_running{true};
+            std::thread srv_thr([&]() {
+                for (int req_i = 0; req_i < 2; ++req_i) {
+                    int cfd = ::accept(srv_fd, nullptr, nullptr);
+                    if (cfd < 0) break;
+                    char rbuf[2048];
+                    ::recv(cfd, rbuf, sizeof(rbuf), 0);
+                    std::string payload = mock_running.load()
+                        ? R"({"conversations":[{"id":"conv-run-1","annotations":{"title":"Debug Island"},"state":{"runState":"RUN_STATE_RUNNING","summary":"Inspecting hub"}},{"id":"conv-idle-2","annotations":{"title":"Old Chat"},"state":{"runState":"RUN_STATE_IDLE","summary":"Done"}}]})"
+                        : R"({"conversations":[{"id":"conv-run-1","annotations":{"title":"Debug Island"},"state":{"runState":"RUN_STATE_IDLE","summary":"Inspecting hub"}}]})";
+                    std::ostringstream resp;
+                    resp << "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                         << payload.size() << "\r\nConnection: close\r\n\r\n" << payload;
+                    std::string wire = resp.str();
+                    ::send(cfd, wire.data(), wire.size(), 0);
+                    ::close(cfd);
+                }
+            });
+
+            std::string hub_json = "{\"pid\":" + std::to_string(static_cast<long long>(::getpid())) +
+                                   ",\"httpPort\":" + std::to_string(port) +
+                                   ",\"csrfToken\":\"tok-123\"}\n";
+            EXPECT(write_text_file((hub_dir / "hub_mock.json").string(), hub_json));
+            setenv("SPINEL_ANTIGRAVITY_DAEMON_DIR", hub_dir.c_str(), 1);
+            reset_agent_tracker_for_tests();
+
+            long long t0 = static_cast<long long>(std::time(nullptr));
+            auto active_list = reconcile_agent_sessions(t0, 300, true, {{501, "antigravity", "SpinelOS - Antigravity", true}});
+            bool found_running = false;
+            bool found_idle = false;
+            for (const auto &s : active_list) {
+                if (s.id == "agy-conv-run-1" && s.status == AgentSessionStatus::Running && s.title == "Debug Island" && s.win_id == 501) {
+                    found_running = true;
+                }
+                if (s.id == "agy-conv-idle-2") found_idle = true;
+            }
+            EXPECT(found_running && !found_idle);
+
+            mock_running.store(false);
+            auto after_list = reconcile_agent_sessions(t0 + 2, 300, true, {{501, "antigravity", "SpinelOS - Antigravity", true}});
+            bool transitioned_done = false;
+            for (const auto &s : after_list) {
+                if (s.id == "agy-conv-run-1" && s.status == AgentSessionStatus::Done) {
+                    transitioned_done = true;
+                }
+            }
+            EXPECT(transitioned_done);
+
+            ::close(srv_fd);
+            if (srv_thr.joinable()) srv_thr.join();
+            unsetenv("SPINEL_ANTIGRAVITY_DAEMON_DIR");
+            reset_agent_tracker_for_tests();
+        }
+    }
 
     // 5. Mocked desktop context + AF_UNIX agent_bus socket + interactive approval gate
     DesktopContextHooks mock_ctx;

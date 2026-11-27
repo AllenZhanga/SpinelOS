@@ -2,8 +2,13 @@
 #include "ai/json_util.hpp"
 #include "common.hpp"
 
+#include <arpa/inet.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -191,6 +196,235 @@ int status_priority(AgentSessionStatus s) {
         case AgentSessionStatus::Done: return 3;
     }
     return 4;
+}
+
+std::string antigravity_daemon_dir() {
+    if (const char *ov = std::getenv("SPINEL_ANTIGRAVITY_DAEMON_DIR"); ov && *ov) {
+        return ov;
+    }
+    return (fs::path(home_dir()) / ".gemini/antigravity/daemon").string();
+}
+
+std::string decode_chunked_http_body(const std::string &raw) {
+    std::string out;
+    size_t pos = 0;
+    while (pos < raw.size()) {
+        size_t eol = raw.find("\r\n", pos);
+        if (eol == std::string::npos) break;
+        std::string hex_len = trim_copy(raw.substr(pos, eol - pos));
+        auto semi = hex_len.find(';');
+        if (semi != std::string::npos) hex_len = hex_len.substr(0, semi);
+        if (hex_len.empty()) break;
+        size_t chunk_sz = static_cast<size_t>(std::strtoul(hex_len.c_str(), nullptr, 16));
+        pos = eol + 2;
+        if (chunk_sz == 0) break;
+        if (pos + chunk_sz > raw.size()) {
+            out.append(raw.substr(pos));
+            break;
+        }
+        out.append(raw, pos, chunk_sz);
+        pos += chunk_sz;
+        if (pos + 2 <= raw.size() && raw[pos] == '\r' && raw[pos + 1] == '\n') pos += 2;
+    }
+    return out;
+}
+
+bool http_post_loopback_json(int port,
+                             const std::string &path,
+                             const std::string &csrf_token,
+                             const std::string &req_body,
+                             std::string &body_out) {
+    body_out.clear();
+    if (port <= 0 || port > 65535) return false;
+
+    int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return false;
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    int crc = ::connect(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
+    if (crc < 0) {
+        if (errno != EINPROGRESS) {
+            ::close(fd);
+            return false;
+        }
+        pollfd pfd{fd, POLLOUT, 0};
+        if (::poll(&pfd, 1, 150) <= 0 || !(pfd.revents & POLLOUT)) {
+            ::close(fd);
+            return false;
+        }
+        int so_err = 0;
+        socklen_t len = sizeof(so_err);
+        if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &len) != 0 || so_err != 0) {
+            ::close(fd);
+            return false;
+        }
+    }
+
+    std::ostringstream req;
+    req << "POST " << path << " HTTP/1.1\r\n"
+        << "Host: 127.0.0.1:" << port << "\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Connect-Protocol-Version: 1\r\n"
+        << "x-antigravity-csrf-token: " << csrf_token << "\r\n"
+        << "Content-Length: " << req_body.size() << "\r\n"
+        << "Connection: close\r\n\r\n"
+        << req_body;
+    const std::string wire = req.str();
+    size_t sent = 0;
+    while (sent < wire.size()) {
+        ssize_t n = ::send(fd, wire.data() + sent, wire.size() - sent, MSG_NOSIGNAL);
+        if (n > 0) {
+            sent += static_cast<size_t>(n);
+        } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            pollfd pfd{fd, POLLOUT, 0};
+            if (::poll(&pfd, 1, 150) <= 0) {
+                ::close(fd);
+                return false;
+            }
+        } else {
+            ::close(fd);
+            return false;
+        }
+    }
+
+    std::string raw;
+    char buf[4096];
+    size_t header_end = std::string::npos;
+    long long content_len = -1;
+    bool chunked = false;
+    while (raw.size() < 512 * 1024) {
+        pollfd pfd{fd, POLLIN, 0};
+        int pr = ::poll(&pfd, 1, 200);
+        if (pr <= 0) break;
+        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        if (n == 0) break;
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
+            break;
+        }
+        raw.append(buf, static_cast<size_t>(n));
+        if (header_end == std::string::npos) {
+            header_end = raw.find("\r\n\r\n");
+            if (header_end != std::string::npos) {
+                std::string hdrs = to_lower_ascii(raw.substr(0, header_end));
+                if (hdrs.find("transfer-encoding: chunked") != std::string::npos) {
+                    chunked = true;
+                } else {
+                    auto cl_pos = hdrs.find("content-length:");
+                    if (cl_pos != std::string::npos) {
+                        content_len = std::strtoll(hdrs.c_str() + cl_pos + 15, nullptr, 10);
+                    }
+                }
+            }
+        }
+        if (header_end != std::string::npos && !chunked && content_len >= 0 &&
+            raw.size() >= header_end + 4 + static_cast<size_t>(content_len)) {
+            break;
+        }
+        if (chunked && raw.find("\r\n0\r\n\r\n", header_end + 4) != std::string::npos) {
+            break;
+        }
+    }
+    ::close(fd);
+
+    if (header_end == std::string::npos) return false;
+    std::string status_line = raw.substr(0, raw.find("\r\n"));
+    if (status_line.find(" 200 ") == std::string::npos) return false;
+
+    std::string body = raw.substr(header_end + 4);
+    body_out = chunked ? decode_chunked_http_body(body) : body;
+    return !body_out.empty();
+}
+
+std::vector<AgentSessionInfo> scan_antigravity_hub_sessions(long long now_sec, bool &queried_ok) {
+    queried_ok = false;
+    std::vector<AgentSessionInfo> active;
+    std::error_code ec;
+    fs::path ddir = antigravity_daemon_dir();
+    if (!fs::is_directory(ddir, ec)) return active;
+
+    bool any_live_hub = false;
+    bool all_live_succeeded = true;
+
+    for (const auto &de : fs::directory_iterator(ddir, fs::directory_options::skip_permission_denied, ec)) {
+        if (!de.is_regular_file(ec)) continue;
+        std::string fname = de.path().filename().string();
+        if (fname.rfind("hub_", 0) != 0 || de.path().extension() != ".json") continue;
+
+        std::ifstream ifs(de.path());
+        if (!ifs.is_open()) continue;
+        std::string raw((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+
+        pid_t hub_pid = 0;
+        int http_port = 0;
+        std::string csrf_token;
+        json_parse_object_str(raw, [&](const std::string &k, const std::string &v, const std::string &) {
+            if (k == "pid") hub_pid = static_cast<pid_t>(json_scalar_i64(v, 0));
+            else if (k == "httpPort") http_port = static_cast<int>(json_scalar_i64(v, 0));
+            else if (k == "csrfToken") csrf_token = v;
+        });
+        if (hub_pid <= 1 || !pid_is_alive(hub_pid) || http_port <= 0 || csrf_token.empty()) continue;
+
+        any_live_hub = true;
+        std::string resp;
+        if (!http_post_loopback_json(http_port,
+                                     "/product.v1.ConversationService/ListConversations",
+                                     csrf_token,
+                                     R"({"pageSize":20,"includeArchived":false})",
+                                     resp)) {
+            all_live_succeeded = false;
+            continue;
+        }
+
+        std::string convs_raw;
+        json_parse_object_str(resp, [&](const std::string &k, const std::string &, const std::string &r) {
+            if (k == "conversations" && !r.empty() && r.front() == '[') convs_raw = r;
+        });
+        if (convs_raw.empty()) continue;
+
+        json_parse_array_str(convs_raw, [&](const std::string &item_raw) {
+            std::string cid;
+            std::string title;
+            std::string summary;
+            std::string run_state;
+            json_parse_object_str(item_raw, [&](const std::string &k, const std::string &v, const std::string &obj_raw) {
+                if (k == "id") {
+                    cid = v;
+                } else if (k == "annotations" && !obj_raw.empty() && obj_raw.front() == '{') {
+                    json_parse_object_str(obj_raw, [&](const std::string &ak, const std::string &av, const std::string &) {
+                        if (ak == "title") title = trim_copy(av);
+                    });
+                } else if (k == "state" && !obj_raw.empty() && obj_raw.front() == '{') {
+                    json_parse_object_str(obj_raw, [&](const std::string &sk, const std::string &sv, const std::string &) {
+                        if (sk == "runState") run_state = trim_copy(sv);
+                        else if (sk == "summary") summary = trim_copy(sv);
+                    });
+                }
+            });
+            if (cid.empty()) return;
+            if (run_state != "RUN_STATE_RUNNING" && run_state != "RUN_STATE_CANCELLING") return;
+
+            AgentSessionInfo info;
+            info.id = sanitize_agent_session_id("agy-" + cid);
+            info.agent = "Antigravity";
+            info.title = !title.empty() ? title : (summary.size() > 1 ? summary : "对话中");
+            info.summary = (summary.size() > 1 && summary != info.title)
+                               ? summary
+                               : (run_state == "RUN_STATE_CANCELLING" ? "正在中止回合..." : "AI 回合执行中");
+            info.pid = hub_pid;
+            info.status = AgentSessionStatus::Running;
+            info.source = "antigravity_hub";
+            info.updated_at = now_sec;
+            active.push_back(std::move(info));
+        });
+    }
+
+    queried_ok = any_live_hub && all_live_succeeded;
+    return active;
 }
 
 }  // namespace
@@ -451,6 +685,12 @@ std::vector<AgentSessionInfo> reconcile_agent_sessions(long long now_sec,
     std::vector<AgentSessionInfo> result;
     AgentTransitionFn cb_copy;
 
+    bool hub_queried_ok = false;
+    std::vector<AgentSessionInfo> hub_running;
+    if (include_proc_scan) {
+        hub_running = scan_antigravity_hub_sessions(now_sec, hub_queried_ok);
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_tracker_mu);
         cb_copy = g_transition_cb;
@@ -497,13 +737,15 @@ std::vector<AgentSessionInfo> reconcile_agent_sessions(long long now_sec,
                 finished_ttl_sec > 0 && s.updated_at > 0 && (now_sec - s.updated_at) > finished_ttl_sec) {
                 remove_ids.push_back(kv.first);
             } else if (s.status == AgentSessionStatus::Running && s.pid > 1 && !pid_is_alive(s.pid)) {
-                // Process disappeared before reporting final status: mark done and persist.
+                // Process disappeared before reporting final status: mark done.
                 AgentSessionStatus prev = s.status;
                 s.status = AgentSessionStatus::Done;
                 if (s.summary.empty()) s.summary = "会话进程已退出";
                 s.updated_at = std::max(now_sec, s.updated_at + 1);
-                fs::create_directories(dir, ec);
-                write_text_file((dir / (s.id + ".json")).string(), serialize_agent_session_json(s));
+                if (s.source != "antigravity_hub") {
+                    fs::create_directories(dir, ec);
+                    write_text_file((dir / (s.id + ".json")).string(), serialize_agent_session_json(s));
+                }
                 transitions.push_back({s.id, true, prev, s.status, s});
             }
         }
@@ -513,6 +755,33 @@ std::vector<AgentSessionInfo> reconcile_agent_sessions(long long now_sec,
         }
 
         if (include_proc_scan) {
+            // 1. Live Antigravity ConversationService runs (authoritative running vs idle).
+            std::map<std::string, AgentSessionInfo> hub_map;
+            for (auto &hs : hub_running) hub_map[hs.id] = hs;
+            if (hub_queried_ok) {
+                for (auto &kv : g_sessions) {
+                    if (kv.second.source == "antigravity_hub" &&
+                        kv.second.status == AgentSessionStatus::Running &&
+                        hub_map.find(kv.first) == hub_map.end()) {
+                        AgentSessionStatus prev = kv.second.status;
+                        kv.second.status = AgentSessionStatus::Done;
+                        kv.second.summary = "回合已完成";
+                        kv.second.updated_at = std::max(now_sec, kv.second.updated_at + 1);
+                        transitions.push_back({kv.first, true, prev, kv.second.status, kv.second});
+                    }
+                }
+            }
+            for (const auto &kv : hub_map) {
+                auto it = g_sessions.find(kv.first);
+                if (it == g_sessions.end()) {
+                    transitions.push_back({kv.first, false, kv.second.status, kv.second.status, kv.second});
+                } else if (it->second.status != kv.second.status) {
+                    transitions.push_back({kv.first, true, it->second.status, kv.second.status, kv.second});
+                }
+                g_sessions[kv.first] = kv.second;
+            }
+
+            // 2. CLI Agent /proc probe (Codex, Claude, GeminiCLI, OpenCode, Aider, DeepSeekHarness).
             auto procs = scan_proc_agents_unlocked(now_sec);
             for (auto &p : procs) {
                 // Skip /proc entry if a drop-in/ctl session already owns this PID.
