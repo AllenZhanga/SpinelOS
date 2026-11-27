@@ -112,6 +112,17 @@ set_source_files_properties(src/shell/sandbox_pip.cpp src/spinel_sandbox_hostd.c
     OBJECT_DEPENDS "${SCREENCOPY_HDR};${VPOINTER_HDR};${VKEYBOARD_HDR}"
 )
 
+set(SPINEL_SYS_SOURCES
+    src/sys/network.cpp
+    src/sys/display_input.cpp
+    src/sys/audio_power.cpp
+    src/sys/devices.cpp
+    src/sys/doctor_logs.cpp
+    src/sys/clipboard_notifications.cpp
+    src/sys/snapshots_sandbox.cpp
+    src/sys/relay_ipc.cpp
+)
+
 add_executable(spinel-shell
     src/main.cpp
     src/ipc_router.cpp
@@ -120,11 +131,7 @@ add_executable(spinel-shell
     src/relay_client.cpp
     src/sandbox_stream_codec.cpp
     src/steam_library.cpp
-    src/sys/network.cpp
-    src/sys/display_input.cpp
-    src/sys/audio_power.cpp
-    src/sys/devices.cpp
-    src/sys/doctor_logs.cpp
+    ${SPINEL_SYS_SOURCES}
     src/desktop_apps.cpp
     src/wine_launcher.cpp
     src/temp_memory.cpp
@@ -135,6 +142,8 @@ add_executable(spinel-shell
     src/shell/sni_tray.cpp
     src/shell/desktop_monitors.cpp
     src/shell/dock.cpp
+    src/shell/launcher.cpp
+    src/shell/shell_css.cpp
     src/shell/overlays.cpp
     src/shell/sandbox_pip.cpp
     src/window_tracker.cpp
@@ -191,11 +200,7 @@ add_executable(spinel-webui
     src/relay_client.cpp
     src/sandbox_stream_codec.cpp
     src/steam_library.cpp
-    src/sys/network.cpp
-    src/sys/display_input.cpp
-    src/sys/audio_power.cpp
-    src/sys/devices.cpp
-    src/sys/doctor_logs.cpp
+    ${SPINEL_SYS_SOURCES}
     src/installer.cpp
     src/desktop_apps.cpp
     src/wine_launcher.cpp
@@ -349,6 +354,9 @@ configure_file(../archiso/airootfs/usr/local/bin/spinel-wine spinel-wine COPYONL
 
 add_executable(spinel-tests
     tests/spinel_tests.cpp
+    tests/test_core.cpp
+    tests/test_sys.cpp
+    tests/test_sandbox_ai.cpp
     src/file_associations.cpp
     src/ipc_router.cpp
     src/common.cpp
@@ -361,11 +369,7 @@ add_executable(spinel-tests
     src/desktop_apps.cpp
     src/steam_library.cpp
     src/shell/sni_tray.cpp
-    src/sys/network.cpp
-    src/sys/display_input.cpp
-    src/sys/audio_power.cpp
-    src/sys/devices.cpp
-    src/sys/doctor_logs.cpp
+    ${SPINEL_SYS_SOURCES}
     src/ai/json_util.cpp
     src/ai/agent_perms.cpp
     src/ai/agent_tracker.cpp
@@ -383,6 +387,7 @@ target_compile_definitions(spinel-tests PRIVATE
 
 target_include_directories(spinel-tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests"
 )
 
 target_link_libraries(spinel-tests PRIVATE
@@ -397,7 +402,9 @@ target_compile_options(spinel-tests PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
-add_test(NAME spinel_unit_tests COMMAND spinel-tests)
+add_test(NAME spinel_unit_tests_core COMMAND spinel-tests --suite core)
+add_test(NAME spinel_unit_tests_sys COMMAND spinel-tests --suite sys)
+add_test(NAME spinel_unit_tests_ai COMMAND spinel-tests --suite ai)
 
 install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl spinel-os-mcp DESTINATION bin)
 install(PROGRAMS ../archiso/airootfs/usr/local/bin/spinel-wine DESTINATION bin)

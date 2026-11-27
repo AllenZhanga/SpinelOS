@@ -336,7 +336,9 @@ void build_native_dock(GtkApplication *app, NativeShellState *ns);
 // Overlays (Control Center, Launcher, Splash, OSD & CSS)
 void build_native_control_center(GtkApplication *app, NativeShellState *ns);
 void apply_native_css(NativeShellState *ns);
+void set_launcher_visible(NativeShellState *ns, bool visible);
 void build_native_launcher(GtkApplication *app, NativeShellState *ns);
+void close_switcher(NativeShellState *ns, bool activate_selected);
 void build_native_switcher(GtkApplication *app, NativeShellState *ns);
 void close_startup_splash(NativeShellState *ns);
 void show_desktop_startup_splash(GtkApplication *app, NativeShellState *ns);
