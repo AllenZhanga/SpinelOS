@@ -74,5 +74,8 @@ bool launch_in_sandbox(const std::vector<std::string> &cmd_args,
 
 void ensure_sandbox_clipboard_sync(bool enabled);
 void stop_sandbox_clipboard_sync();
+void ensure_sandbox_shell_running(const SandboxConfig &cfg,
+                                  const std::string &rt_dir,
+                                  const std::string &fake_home);
 int run_sandbox_clipboard_daemon();
 int handle_sandbox_clipboard_push(const std::string &side);

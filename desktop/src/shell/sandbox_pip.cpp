@@ -1406,6 +1406,8 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
                         if (n && n->sandbox_pip) sandbox_pip_sync_action(n, "show");
                         return G_SOURCE_REMOVE;
                     }, ns);
+                } else if (!err.empty()) {
+                    append_app_log("[SandboxPiP] start failed: " + err);
                 }
             }).detach();
             return;
@@ -1413,6 +1415,8 @@ void sandbox_pip_sync_action(NativeShellState *ns, const std::string &action) {
             pip->takeover = false;
             pip->minimized = true;
         } else {
+            SandboxConfig cfg = load_sandbox_config();
+            ensure_sandbox_shell_running(cfg, sandbox_runtime_dir(), sandbox_home_dir());
             pip->visible = true;
             pip->minimized = false;
         }

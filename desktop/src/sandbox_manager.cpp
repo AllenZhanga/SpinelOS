@@ -745,11 +745,6 @@ SandboxStatus query_sandbox_status() {
     st.home_path = sandbox_home_dir();
     st.home_size_mb = calc_dir_size_mb(st.home_path);
 
-    int spid = read_pid_file(sandbox_shell_pid_file());
-    if (is_pid_alive(spid)) {
-        ::kill(spid, SIGTERM);
-    }
-
     int pid = read_pid_file(sandbox_pid_file());
     std::error_code ec;
     bool sock = fs::exists(st.runtime_dir + "/" + sandbox_socket_name(), ec);

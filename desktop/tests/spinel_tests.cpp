@@ -14,6 +14,8 @@
 #include "theme_manager.hpp"
 #include "wine_launcher.hpp"
 
+#include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -1163,6 +1165,29 @@ void test_parallel_sandbox() {
     ipc_rep.clear();
     EXPECT(dispatch_ipc_command(&sb_state, "{\"id\":102,\"method\":\"launcher:toggle\"}", {}, &ipc_rep));
     EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
+
+    // Regression guard: querying sandbox status must never kill sandbox shell.pid
+    {
+        std::error_code ec;
+        std::string sh_pid_path = sandbox_runtime_dir() + "/shell.pid";
+        fs::create_directories(sandbox_runtime_dir(), ec);
+        pid_t child = ::fork();
+        if (child == 0) {
+            for (;;) ::pause();
+            _exit(0);
+        }
+        EXPECT(child > 1);
+        std::ofstream pf(sh_pid_path);
+        pf << child << "\n";
+        pf.close();
+        (void)query_sandbox_status();
+        int wst = 0;
+        EXPECT(::waitpid(child, &wst, WNOHANG) == 0);
+        EXPECT(::kill(child, 0) == 0);
+        ::kill(child, SIGKILL);
+        ::waitpid(child, &wst, 0);
+        fs::remove(sh_pid_path, ec);
+    }
 }
 
 void test_relay_crypto_and_stream() {
