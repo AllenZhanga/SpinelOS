@@ -529,7 +529,7 @@
             </label>
             <label class="field">
               <span>Spinel 账号名</span>
-              <input type="text" id="relay-account-input" placeholder="例如 allen" />
+              <input type="text" id="relay-account-input" placeholder="输入 Spinel ID 账号名称" />
             </label>
             <label class="field">
               <span>账号密码（至少 6 位）</span>
@@ -1226,7 +1226,7 @@
         <p id="dev-fstab-desc" class="muted-hint">将磁盘写入 /etc/fstab，实现开机自动挂载到 /mnt 目录（自动附加 nofail 保护，防止拔盘卡死）。</p>
         <div id="dev-fstab-name-wrap">
           <label class="muted-hint" for="dev-fstab-name-input" style="display:block;margin-bottom:4px;">挂载目录名（位于 /mnt/ 下，仅限英文、数字、下划线或连字符）</label>
-          <input type="text" id="dev-fstab-name-input" class="modal-input" placeholder="例如: jd_ssd3000" />
+          <input type="text" id="dev-fstab-name-input" class="modal-input" placeholder="例如: games_ssd" />
         </div>
         <div id="dev-fstab-mode-wrap">
           <label class="muted-hint" for="dev-fstab-mode-select" style="display:block;margin-bottom:4px;">挂载读写权限</label>
@@ -1392,7 +1392,7 @@
           </label>
           <label class="field">
             <span>用户名（小写字母/数字）</span>
-            <input type="text" id="inst-username" value="gamer" autocomplete="off" />
+            <input type="text" id="inst-username" value="" placeholder="例如 user" autocomplete="off" />
           </label>
           <label class="field">
             <span>主机名</span>
@@ -1540,7 +1540,7 @@
           <button type="button" class="btn small ghost" data-cmd="store:pass-cancel">取消</button>
         </div>
         <p class="muted-hint">请输入当前用户管理员密码以执行系统级软件变更。</p>
-        <input type="password" id="store-pass-input" class="modal-input" placeholder="请输入当前用户（gamer）密码..." />
+        <input type="password" id="store-pass-input" class="modal-input" placeholder="请输入当前用户 sudo 密码..." />
         <div class="modal-footer" style="margin-top: 4px;">
           <span class="muted-hint">仅用于本次 sudo 授权，不会保存</span>
           <div class="footer-actions">

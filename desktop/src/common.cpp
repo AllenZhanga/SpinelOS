@@ -1,6 +1,7 @@
 #include "common.hpp"
 
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -50,7 +51,14 @@ std::string trim_copy(const std::string &s) {
 
 std::string home_dir() {
     const char *h = std::getenv("HOME");
-    return (h && *h) ? std::string(h) : "/home/gamer";
+    if (h && *h) return std::string(h);
+    struct passwd pwd {};
+    struct passwd *res = nullptr;
+    std::array<char, 1024> buf{};
+    if (getpwuid_r(getuid(), &pwd, buf.data(), buf.size(), &res) == 0 && res && res->pw_dir && *res->pw_dir) {
+        return std::string(res->pw_dir);
+    }
+    return "/tmp";
 }
 
 void ensure_display_env() {
