@@ -80,6 +80,10 @@ constexpr StoreAppEntry kCatalog[] = {
      "Rootless 免守护进程 OCI 容器引擎，与 Docker CLI 兼容", "podman", "Pacman 原生", "", false},
     {"git", "Git 版本控制", "开发工具", "pacman", "git",
      "分布式代码版本控制基础工具", "git", "Pacman 原生", "", false},
+    {"github-desktop", "GitHub Desktop", "开发工具", "native", "github-desktop",
+     "GitHub 桌面客户端（shiftkey 原生版：直观管理分支、提交、PR 与冲突，含密钥环记忆登录）", "github-desktop", "原生安装", "", false},
+    {"gitg", "gitg Git 客户端", "开发工具", "pacman", "gitg",
+     "GNOME GTK 原生 Git 图形界面，国内镜像极速直装，轻量查看提交树、暂存与 Diff", "gitg", "Pacman 原生", "", false},
     {"nodejs", "Node.js + npm", "开发工具", "native", "nodejs",
      "Node.js 运行时与 npm 包管理器，前端及 AI CLI 工具必备", "node", "原生环境", "", false},
     {"python", "Python + uv 工具链", "开发工具", "native", "python",
@@ -204,6 +208,10 @@ bool is_native_app_installed(const std::string &app_id, const std::unordered_set
         return has_executable("code") ||
                fs::exists("/opt/vscode/code", ec);
     }
+    if (app_id == "github-desktop") {
+        return has_executable("github-desktop") ||
+               fs::exists("/opt/github-desktop/AppRun", ec);
+    }
     if (app_id == "docker") {
         return has_executable("docker") ||
                is_pacman_pkg_installed("docker", pkg_set);
@@ -238,12 +246,6 @@ bool is_native_app_installed(const std::string &app_id, const std::unordered_set
                fs::exists("/opt/gravitymark/run_browser.sh", ec);
     }
     return false;
-}
-
-bool is_supported_native_app_id(const std::string &app_id) {
-    return app_id == "chrome" || app_id == "heroic" || app_id == "protonup" || app_id == "gravitymark" ||
-           app_id == "libreoffice" || app_id == "printing" || app_id == "vscode" || app_id == "docker" ||
-           app_id == "nodejs" || app_id == "python" || app_id == "ollama" || app_id == "vllm";
 }
 
 void detect_gpu_vendors(bool &has_nvidia, bool &has_amd) {
@@ -1362,6 +1364,50 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                         "rm -rf /opt/vscode /usr/bin/code /usr/share/applications/vscode.desktop /usr/share/icons/hicolor/512x512/apps/vscode.png; "
                         "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
                         "echo '==> 已卸载 Visual Studio Code。'"
+                    });
+                }
+            } else if (app_id == "github-desktop") {
+                if (action == "install") {
+                    if (proxy_envs.empty()) {
+                        emit_store_line(state, "[提示] GitHub Desktop 从 github.com/shiftkey/desktop 下载（支持断点续传）；若直连较慢建议先开启系统代理，或先试用官方镜像直装的 gitg Git 客户端。");
+                    }
+                    emit_store_line(state, "==> 正在查询 GitHub Desktop (Linux 原生版) 最新版本并安装运行依赖...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; " + dl_fn +
+                        "STG=$(mktemp -d /tmp/spinel-ghd-XXXXXX); "
+                        "trap 'rm -rf \"$STG\"' EXIT; "
+                        "echo '__SPINEL_PROG__:3:正在安装 Git / 密钥环与桌面依赖...'; "
+                        "pacman -Sy --noconfirm --needed git gnome-keyring libsecret gtk3 nss libnotify xdg-utils curl; "
+                        "echo '__SPINEL_PROG__:6:正在获取 GitHub Desktop 最新版本信息...'; "
+                        "URL=$(curl -fsSL --connect-timeout 15 'https://api.github.com/repos/shiftkey/desktop/releases/latest' | grep -m1 -oE 'https://[^\"]+GitHubDesktop-linux-x86_64-[^\"]+\\.AppImage'); "
+                        "[ -n \"$URL\" ] || { echo '[ERROR] 未获取到 GitHub Desktop 官方 AppImage 下载地址'; exit 1; }; "
+                        "echo \"==> 正在下载 $URL ...\"; "
+                        "dl_progress \"$URL\" \"$STG/GitHubDesktop.AppImage\" '正在下载 GitHub Desktop'; "
+                        "chmod +x \"$STG/GitHubDesktop.AppImage\"; "
+                        "echo '__SPINEL_PROG__:94:正在解包安装 GitHub Desktop 到 /opt/github-desktop ...'; "
+                        "(cd \"$STG\" && ./GitHubDesktop.AppImage --appimage-extract >/dev/null); "
+                        "rm -rf /opt/github-desktop; "
+                        "mv \"$STG/squashfs-root\" /opt/github-desktop; "
+                        "find /opt/github-desktop -maxdepth 4 -name chrome-sandbox -exec chown root:root {} \\; -exec chmod 4755 {} \\; || true; "
+                        "printf '#!/bin/sh\\nexec /opt/github-desktop/AppRun --ozone-platform-hint=auto --enable-wayland-ime \"$@\"\\n' > /usr/bin/github-desktop; "
+                        "chmod 755 /usr/bin/github-desktop; "
+                        "ICON_SRC=$(find /opt/github-desktop -maxdepth 5 \\( -name 'github-desktop.png' -o -name '.DirIcon' \\) | head -n1 || true); "
+                        "[ -n \"$ICON_SRC\" ] && install -Dm644 \"$ICON_SRC\" /usr/share/icons/hicolor/256x256/apps/github-desktop.png || true; "
+                        "printf '[Desktop Entry]\\nType=Application\\nName=GitHub Desktop\\nComment=Simple collaboration from your desktop\\nComment[zh_CN]=GitHub 桌面客户端（管理仓库、分支与 PR）\\nExec=/usr/bin/github-desktop %%U\\nIcon=github-desktop\\nStartupWMClass=GitHub Desktop\\nCategories=Development;RevisionControl;\\nTerminal=false\\n' > /usr/share/applications/github-desktop.desktop; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> GitHub Desktop 宿主机原生安装完成！'"
+                    });
+                } else {
+                    emit_store_line(state, "==> 正在卸载宿主机原生 GitHub Desktop ...");
+                    cmd.insert(cmd.end(), {
+                        "sh", "-c",
+                        "set -eu; "
+                        "rm -rf /opt/github-desktop /usr/bin/github-desktop /usr/share/applications/github-desktop.desktop /usr/share/icons/hicolor/*/apps/github-desktop.*; "
+                        "update-desktop-database /usr/share/applications >/dev/null 2>&1 || true; "
+                        "gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true; "
+                        "echo '==> 已卸载 GitHub Desktop。'"
                     });
                 }
             } else if (app_id == "libreoffice") {

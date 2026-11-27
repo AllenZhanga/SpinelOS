@@ -436,6 +436,9 @@ void test_dock_quit_and_store_helpers() {
     EXPECT(is_valid_https_url("https://antigravity.google"));
     EXPECT(!is_valid_https_url("http://example.com"));
     EXPECT(!is_valid_https_url("https://evil.com/\"rm -rf\""));
+    EXPECT(is_supported_native_app_id("github-desktop"));
+    EXPECT(is_supported_native_app_id("vscode"));
+    EXPECT(!is_supported_native_app_id("unknown-native-app"));
 
     // Dock mode config & Btrfs Snapper parsing / validation
     EXPECT(is_valid_dock_mode("magnify"));
