@@ -1235,12 +1235,24 @@ void test_relay_crypto_and_stream() {
     EXPECT(sandbox_stream::decode_tile_frame(dec_st, pkt.data(), pkt.size()));
     EXPECT(dec_st.bgra == fb);
 
-    // 4. Relay Config & IPC routing
+    // 4. Relay Config, unique device naming & IPC routing
     RelayConfig rc = load_relay_config();
+    EXPECT(!rc.device_name.empty());
+    std::string fallback_nm = default_device_name_for_id("a1b2c3d4e5f60000");
+    EXPECT(!fallback_nm.empty() && fallback_nm != "spinelos");
+
     rc.server_addr = "127.0.0.1:7443";
     rc.allow_remote = true;
     EXPECT(save_relay_config(rc));
     EXPECT(load_relay_config().server_addr == "127.0.0.1:7443");
+
+    rc.account.clear();
+    rc.token.clear();
+    save_relay_config(rc);
+    std::string rename_err;
+    EXPECT(relay_set_device_name("客厅测试机", rename_err));
+    RelayConfig renamed = load_relay_config();
+    EXPECT(renamed.device_name == "客厅测试机" && renamed.device_name_custom);
 
     AppState dummy;
     std::string ipc_rep;

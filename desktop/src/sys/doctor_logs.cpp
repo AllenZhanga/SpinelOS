@@ -2420,6 +2420,39 @@ void relay_set_allow_remote_ipc(AppState *state, const std::string &payload) {
     push_relay_state(state, false);
 }
 
+void relay_set_device_name_ipc(AppState *state, const std::string &payload) {
+    std::string name;
+    for (const auto &line : split_lines(payload)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim_copy(line.substr(0, eq)) == "name") {
+            name = trim_copy(line.substr(eq + 1));
+        }
+    }
+    std::thread([state, name]() {
+        std::string err;
+        bool ok = relay_set_device_name(name, err);
+        struct RenameCtx {
+            AppState *state;
+            bool ok;
+            std::string msg;
+        };
+        auto *ctx = new RenameCtx{
+            state,
+            ok,
+            ok ? ("本机设备名称已更新为「" + name + "」，并同步至同账号设备列表。") : err
+        };
+        g_idle_add(+[](gpointer d) -> gboolean {
+            std::unique_ptr<RenameCtx> p(static_cast<RenameCtx *>(d));
+            if (p->state && !p->state->shutting_down.load()) {
+                emit_relay_feedback(p->state, p->ok, p->msg);
+                push_relay_state(p->state, true);
+            }
+            return G_SOURCE_REMOVE;
+        }, ctx);
+    }).detach();
+}
+
 void relay_device_remove_ipc(AppState *state, const std::string &payload) {
     std::string id;
     for (const auto &line : split_lines(payload)) {

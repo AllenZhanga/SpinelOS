@@ -86,6 +86,12 @@ std::string default_hostname() {
     return "SpinelOS";
 }
 
+bool is_generic_hostname(const std::string &name) {
+    std::string low = trim_copy(name);
+    for (char &c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return low.empty() || low == "spinelos" || low == "localhost" || low == "archlinux" || low == "archiso";
+}
+
 bool split_host_port(const std::string &addr, std::string &host, int &port, int def_port) {
     std::string s = trim_copy(addr);
     if (s.empty()) return false;
@@ -657,9 +663,22 @@ std::string relay_config_path() { return relay_config_dir() + "/relay.conf"; }
 std::string relay_identity_key_path() { return relay_config_dir() + "/device_id.pem"; }
 std::string relay_hostd_pid_file() { return runtime_base_dir() + "/spinel-sandbox-hostd.pid"; }
 
+std::string default_device_name_for_id(const std::string &device_id) {
+    std::string host = trim_copy(default_hostname());
+    if (!is_generic_hostname(host)) return host;
+    std::string suffix;
+    for (char c : device_id) {
+        if (std::isxdigit(static_cast<unsigned char>(c))) {
+            suffix.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+            if (suffix.size() >= 4) break;
+        }
+    }
+    return suffix.empty() ? "SpinelOS" : ("SpinelOS-" + suffix);
+}
+
 RelayConfig load_relay_config() {
     RelayConfig cfg;
-    cfg.device_name = default_hostname();
+    bool need_save = false;
     std::ifstream in(relay_config_path());
     if (in) {
         std::string line;
@@ -677,6 +696,7 @@ RelayConfig load_relay_config() {
             else if (k == "token") cfg.token = v;
             else if (k == "device_id") cfg.device_id = v;
             else if (k == "device_name" && !v.empty()) cfg.device_name = v;
+            else if (k == "device_name_custom") cfg.device_name_custom = (v == "true" || v == "1");
             else if (k == "allow_remote") cfg.allow_remote = (v == "true" || v == "1");
         }
     }
@@ -684,8 +704,16 @@ RelayConfig load_relay_config() {
         uint8_t rnd[16]{};
         RAND_bytes(rnd, sizeof(rnd));
         cfg.device_id = to_hex(rnd, sizeof(rnd));
-        save_relay_config(cfg);
+        need_save = true;
     }
+    if (cfg.device_name.empty() || (!cfg.device_name_custom && is_generic_hostname(cfg.device_name))) {
+        std::string next_name = default_device_name_for_id(cfg.device_id);
+        if (next_name != cfg.device_name) {
+            cfg.device_name = next_name;
+            need_save = true;
+        }
+    }
+    if (need_save) save_relay_config(cfg);
     if (cfg.udp_port <= 0 || cfg.udp_port > 65535) cfg.udp_port = 7444;
     return cfg;
 }
@@ -703,6 +731,7 @@ bool save_relay_config(const RelayConfig &cfg) {
     oss << "token=" << cfg.token << "\n";
     oss << "device_id=" << cfg.device_id << "\n";
     oss << "device_name=" << cfg.device_name << "\n";
+    oss << "device_name_custom=" << (cfg.device_name_custom ? "true" : "false") << "\n";
     oss << "allow_remote=" << (cfg.allow_remote ? "true" : "false") << "\n";
     bool ok = write_text_file(relay_config_path(), oss.str());
     ::chmod(relay_config_path().c_str(), 0600);
@@ -1112,6 +1141,45 @@ bool relay_remove_device(const std::string &target_device_id, std::string &out_e
     if (!conn.rpc(build_device_meta_json("login", "dr1", cfg, pub_hex, extra), r, out_error)) return false;
     if (!conn.rpc("{\"type\":\"device_remove\",\"req_id\":\"dr2\",\"target_device_id\":\"" +
                       json_escape(target_device_id) + "\"}", r, out_error)) {
+        return false;
+    }
+    return true;
+}
+
+bool relay_set_device_name(const std::string &new_name, std::string &out_error) {
+    std::string cleaned = trim_copy(new_name);
+    for (char &ch : cleaned) {
+        if (ch == '\r' || ch == '\n') ch = ' ';
+    }
+    cleaned = trim_copy(cleaned);
+    if (cleaned.empty() || cleaned.size() > 48) {
+        out_error = "设备名称不能为空，且长度不能超过 48 个字符";
+        return false;
+    }
+
+    RelayConfig cfg = load_relay_config();
+    cfg.device_name = cleaned;
+    cfg.device_name_custom = true;
+    if (!save_relay_config(cfg)) {
+        out_error = "保存设备名称到本地配置失败";
+        return false;
+    }
+    if (cfg.server_addr.empty() || cfg.account.empty() || cfg.token.empty()) {
+        return true;
+    }
+
+    std::string pub_hex;
+    if (!ensure_device_ed25519_key(pub_hex, out_error)) return false;
+    TlsRelayConn conn;
+    std::string rpc_err;
+    if (!conn.connect_server(cfg, rpc_err)) {
+        out_error = "已保存到本机，但同步至云端失败: " + rpc_err;
+        return false;
+    }
+    std::string extra = "\"account\":\"" + json_escape(cfg.account) + "\",\"token\":\"" + json_escape(cfg.token) + "\",\"ephemeral\":true";
+    JsonVal r;
+    if (!conn.rpc(build_device_meta_json("login", "rn1", cfg, pub_hex, extra), r, rpc_err)) {
+        out_error = "已保存到本机，但云端更新名称失败: " + rpc_err;
         return false;
     }
     return true;

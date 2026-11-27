@@ -15,6 +15,7 @@ struct RelayConfig {
     std::string token;
     std::string device_id;
     std::string device_name;
+    bool device_name_custom = false;
     bool allow_remote = false;
 };
 
@@ -50,6 +51,8 @@ std::string relay_identity_key_path();
 std::string relay_hostd_pid_file();
 RelayConfig load_relay_config();
 bool save_relay_config(const RelayConfig &cfg);
+std::string default_device_name_for_id(const std::string &device_id);
+bool relay_set_device_name(const std::string &new_name, std::string &out_error);
 bool ensure_device_ed25519_key(std::string &out_pub_hex, std::string &error_out);
 bool sign_ed25519_hex(const std::string &message, std::string &out_sig_hex);
 bool verify_ed25519_hex(const std::string &pub_hex, const std::string &message, const std::string &sig_hex);

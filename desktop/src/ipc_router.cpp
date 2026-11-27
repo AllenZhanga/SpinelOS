@@ -766,6 +766,9 @@ bool dispatch_ipc_command(AppState *state,
         {"relay:set-allow-remote", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             relay_set_allow_remote_ipc(s, r.legacy_raw);
         }},
+        {"relay:set-device-name", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            relay_set_device_name_ipc(s, r.legacy_raw);
+        }},
         {"relay:device-remove", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             relay_device_remove_ipc(s, r.legacy_raw);
         }},

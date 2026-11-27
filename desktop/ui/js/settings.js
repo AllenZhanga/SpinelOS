@@ -1676,6 +1676,7 @@
     const udpInput = document.getElementById("relay-udp-input");
     const fpInput = document.getElementById("relay-fp-input");
     const accInput = document.getElementById("relay-account-input");
+    const devNameInput = document.getElementById("relay-device-name-input");
     const accLbl = document.getElementById("relay-account-label");
     const devLbl = document.getElementById("relay-device-label");
     const swAllow = document.getElementById("sw-relay-allow-remote");
@@ -1694,6 +1695,9 @@
 
     if (accLbl) accLbl.textContent = `当前账号: ${data.account || "--"} · 服务器 ${data.server_addr || "--"}`;
     if (devLbl) devLbl.textContent = `本机名: ${data.device_name || "--"} · 设备ID: ${data.device_id || "--"}`;
+    if (devNameInput && document.activeElement !== devNameInput && data.device_name) {
+      devNameInput.value = data.device_name;
+    }
     if (swAllow) swAllow.classList.toggle("is-on", Boolean(data.allow_remote));
     if (hostDesc) {
       hostDesc.textContent = data.allow_remote
@@ -1785,5 +1789,17 @@
   document.getElementById("sw-relay-allow-remote")?.addEventListener("click", () => {
     const next = !(lastRelayState && lastRelayState.allow_remote);
     sendCommand(`relay:set-allow-remote\nallow=${next ? "true" : "false"}`);
+  });
+  const submitRelayRename = () => {
+    const nm = (document.getElementById("relay-device-name-input")?.value || "").trim();
+    if (!nm) return;
+    sendCommand(`relay:set-device-name\nname=${nm}`);
+  };
+  document.getElementById("btn-relay-rename")?.addEventListener("click", submitRelayRename);
+  document.getElementById("relay-device-name-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      submitRelayRename();
+    }
   });
 })();

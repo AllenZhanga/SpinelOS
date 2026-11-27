@@ -558,6 +558,16 @@
             </div>
             <div class="status-row">
               <div>
+                <strong>本机设备显示名称</strong>
+                <div class="muted-hint">用于在同账号互联设备列表和 Mac 端菜单栏中区分多台 SpinelOS</div>
+              </div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input type="text" id="relay-device-name-input" class="search-input" style="max-width: 190px;" placeholder="例如 客厅主机 / 工作室台式机" />
+                <button type="button" class="btn small" id="btn-relay-rename">修改名称</button>
+              </div>
+            </div>
+            <div class="status-row">
+              <div>
                 <strong>允许其他同账号设备远程接管本机平行沙箱</strong>
                 <div class="muted-hint" id="relay-hostd-desc">开启后本机台式机在后台待命，供外出的笔记本一键投流接管</div>
               </div>

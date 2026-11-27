@@ -243,6 +243,7 @@ void relay_auth_ipc(AppState *state, const std::string &payload, bool is_registe
 void relay_pair_create_ipc(AppState *state);
 void relay_pair_claim_ipc(AppState *state, const std::string &payload);
 void relay_set_allow_remote_ipc(AppState *state, const std::string &payload);
+void relay_set_device_name_ipc(AppState *state, const std::string &payload);
 void relay_device_remove_ipc(AppState *state, const std::string &payload);
 void relay_reset_fp_ipc(AppState *state);
 void relay_logout_ipc(AppState *state);
