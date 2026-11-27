@@ -417,6 +417,54 @@ void emit_store_done(AppState *state, int exit_code, const std::string &target_i
     g_idle_add(on_store_idle, new StoreIdleMsg{state, StoreIdleKind::Done, "", exit_code, target_id, action});
 }
 
+bool has_installed_flatpak_apps() {
+    if (!has_flatpak_cli()) return false;
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"flatpak", "list", "--app", "--columns=application"}, out, rc) || rc != 0) {
+        return false;
+    }
+    return !trim_copy(out).empty();
+}
+
+void ensure_flathub_china_mirror(AppState *state,
+                                 const std::vector<std::string> *base_sudo,
+                                 const std::string &pwd_in) {
+    if (!has_flatpak_cli()) return;
+    static constexpr const char *kSjtuFlathubUrl = "https://mirror.sjtu.edu.cn/flathub";
+    std::string remotes_out;
+    int rc = 1;
+    bool changed = false;
+    if (run_argv_capture({"flatpak", "remotes", "--user", "--columns=name,url"}, remotes_out, rc) && rc == 0) {
+        if (remotes_out.find("flathub") != std::string::npos &&
+            remotes_out.find(kSjtuFlathubUrl) == std::string::npos) {
+            std::string mod_out;
+            int mod_rc = 1;
+            if (run_argv_capture({"flatpak", "remote-modify", "--user", "flathub",
+                                  std::string("--url=") + kSjtuFlathubUrl}, mod_out, mod_rc) && mod_rc == 0) {
+                changed = true;
+            }
+        }
+    }
+    remotes_out.clear();
+    if (base_sudo && run_argv_capture({"flatpak", "remotes", "--system", "--columns=name,url"}, remotes_out, rc) && rc == 0) {
+        if (remotes_out.find("flathub") != std::string::npos &&
+            remotes_out.find(kSjtuFlathubUrl) == std::string::npos) {
+            std::vector<std::string> cmd = *base_sudo;
+            cmd.insert(cmd.end(), {"flatpak", "remote-modify", "--system", "flathub",
+                                   std::string("--url=") + kSjtuFlathubUrl});
+            std::string mod_out;
+            int mod_rc = 1;
+            if (run_argv_stdin_capture(cmd, pwd_in, mod_out, mod_rc) && mod_rc == 0) {
+                changed = true;
+            }
+        }
+    }
+    if (changed && state) {
+        emit_store_line(state, "==> 已将 Flathub 切换为上海交大国内镜像（https://mirror.sjtu.edu.cn/flathub，注：索引元数据仍回源官方，大文件走国内镜像加速）。");
+    }
+}
+
 std::vector<std::pair<std::string, std::string>> build_proxy_env_pairs() {
     return build_effective_proxy_envs();
 }
@@ -828,8 +876,19 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                 emit_store_line(state, "==> 正在全面更新 Spinel OS 系统软件包...");
                 rc = run_streaming_command(state, cmd, pwd_in);
                 if (rc == 0 && !state->store_cancel_requested.load() && has_flatpak_cli()) {
-                    emit_store_line(state, "==> 正在同步更新 Flatpak 应用...");
-                    run_streaming_command(state, {"flatpak", "update", "-y", "--noninteractive"}, "", proxy_envs);
+                    if (!has_installed_flatpak_apps()) {
+                        emit_store_line(state, "==> 未安装 Flatpak 应用，已跳过 Flatpak 同步。");
+                    } else {
+                        if (proxy_envs.empty()) {
+                            ensure_flathub_china_mirror(state, &base_sudo, pwd_in);
+                        }
+                        emit_store_line(state, "==> 正在同步更新 Flatpak 应用（限时 90 秒，防止海外元数据卡死）...");
+                        int f_rc = run_streaming_command(
+                            state, {"timeout", "90", "flatpak", "update", "-y", "--noninteractive"}, "", proxy_envs);
+                        if (f_rc == 124) {
+                            emit_store_line(state, "[提示] Flatpak 更新超时（Flathub 索引元数据仍需访问海外服务器）；Arch 系统软件包已升级完成，开启系统代理后可再更新 Flatpak。");
+                        }
+                    }
                 }
             } else if (action == "spinel-ota" || action == "spinel-ota-full" || action == "spinel-ota-offline") {
                 std::string updater = has_executable("spinel-update") ? "spinel-update" : "";
@@ -885,6 +944,9 @@ void start_store_action(AppState *state, const std::string &action, const std::s
                         sync_cmd.insert(sync_cmd.end(), {"pacman", "-Syy", "--noconfirm"});
                         emit_store_line(state, "==> 测速完成，正在刷新软件包索引...");
                         rc = run_streaming_command(state, sync_cmd, pwd_in);
+                        if (rc == 0) {
+                            ensure_flathub_china_mirror(state, &base_sudo, pwd_in);
+                        }
                     }
                 }
             } else if (action == "keyring-fix") {
@@ -902,13 +964,19 @@ void start_store_action(AppState *state, const std::string &action, const std::s
         } else if (backend == "flatpak") {
             if (action == "install") {
                 if (proxy_envs.empty()) {
-                    emit_store_line(state, "[提示] Flathub 为海外软件源，国内直连较慢；可随时点击「停止下载」，并在「系统设置 → 网络」开启代理或优先安装 Chromium / Firefox。");
+                    emit_store_line(state, "[提示] Flathub 索引元数据需访问海外服务器，正在配置上海交大国内镜像加速软件包下载；若超时卡住建议在「系统设置 → 网络」开启代理。");
                 }
                 emit_store_line(state, "==> 确保 Flathub 用户仓库已配置...");
+                const char *repo_url = proxy_envs.empty()
+                    ? "https://mirror.sjtu.edu.cn/flathub/flathub.flatpakrepo"
+                    : "https://dl.flathub.org/repo/flathub.flatpakrepo";
                 rc = run_streaming_command(state, {
                     "flatpak", "remote-add", "--user", "--if-not-exists",
-                    "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"
+                    "flathub", repo_url
                 }, "", proxy_envs);
+                if (rc == 0 && proxy_envs.empty()) {
+                    ensure_flathub_china_mirror(state, nullptr, "");
+                }
                 if (rc == 0 && !state->store_cancel_requested.load()) {
                     emit_store_line(state, "==> 正在从 Flathub 安装 " + pkg + " ...");
                     rc = run_streaming_command(state, {
