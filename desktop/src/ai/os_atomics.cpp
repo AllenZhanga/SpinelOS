@@ -1,4 +1,6 @@
 #include "ai/os_atomics.hpp"
+#include "ai/agent_perms.hpp"
+#include "ai/task_inbox.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "sandbox_manager.hpp"
@@ -286,6 +288,121 @@ bool launch_in_guarded_sandbox(const std::string &cmd, std::string &error_out) {
 
 std::string query_sandbox_status_json() {
     return sandbox_state_json();
+}
+
+std::string build_work_context_bundle(const std::string &task_id) {
+    std::ostringstream oss;
+    oss << "# SpinelOS 工作现场上下文\n\n";
+    if (!task_id.empty()) {
+        for (const auto &t : list_tasks()) {
+            if (t.id == task_id) {
+                oss << "## 关联任务\n"
+                    << "- ID: " << t.id << "\n"
+                    << "- 标题: " << t.title << "\n"
+                    << "- 状态: " << task_status_str(t.status) << "\n";
+                if (!t.repo_path.empty()) oss << "- 仓库目录: " << t.repo_path << "\n";
+                if (!t.notes.empty()) oss << "- 备注: " << t.notes << "\n";
+                oss << "\n";
+                break;
+            }
+        }
+    }
+    oss << "## 当前桌面状态 (JSON)\n```json\n"
+        << collect_desktop_context_json()
+        << "\n```\n\n## 近期剪贴板 (最多 2 条)\n```json\n"
+        << collect_clipboard_recent_json(2)
+        << "\n```\n";
+    return oss.str();
+}
+
+std::string build_ai_os_live_snapshot_json() {
+    AgentPermConfig perms = load_agent_perms();
+    auto sessions = reconcile_agent_sessions(0, 300, true, query_desktop_windows());
+    auto approvals = list_pending_approvals();
+    auto tasks = list_tasks();
+    auto audits = tail_agent_audit(30);
+
+    std::ostringstream oss;
+    oss << "{"
+        << "\"perms\":" << serialize_agent_perms_json(perms) << ","
+        << "\"sessions\":" << serialize_agent_sessions_json(sessions) << ","
+        << "\"approvals\":" << serialize_approvals_json(approvals) << ","
+        << "\"tasks\":" << serialize_tasks_json(tasks) << ","
+        << "\"audit\":" << serialize_audit_entries_json(audits)
+        << "}";
+    return oss.str();
+}
+
+bool evaluate_vram_yield_for_gamemode(bool gamemode_active,
+                                      bool vram_yield_enabled,
+                                      bool vllm_is_active,
+                                      std::string &out_action) {
+    if (!gamemode_active || !vram_yield_enabled || !vllm_is_active) {
+        out_action = "none";
+        return false;
+    }
+    out_action = "stop_vllm";
+    return true;
+}
+
+std::string format_agent_island_pill_summary(const std::vector<AgentSessionInfo> &sessions,
+                                             const std::vector<ApprovalRequestInfo> &approvals,
+                                             const std::string &toast_text,
+                                             std::string &out_state_cls) {
+    if (!toast_text.empty()) {
+        out_state_cls = "toast";
+        return toast_text;
+    }
+    int waiting = 0, running = 0, errored = 0;
+    std::string active_name;
+    for (const auto &s : sessions) {
+        if (s.status == AgentSessionStatus::WaitingUser) {
+            ++waiting;
+            if (active_name.empty()) active_name = s.agent;
+        } else if (s.status == AgentSessionStatus::Running) {
+            ++running;
+            if (active_name.empty()) active_name = s.agent;
+        } else if (s.status == AgentSessionStatus::Error) {
+            ++errored;
+        }
+    }
+    int total_wait = waiting + static_cast<int>(approvals.size());
+    if (total_wait > 0) {
+        out_state_cls = "alert";
+        return "⚠ " + std::to_string(total_wait) + " 待确认";
+    }
+    if (running > 0) {
+        out_state_cls = "running";
+        if (running == 1 && !active_name.empty()) {
+            return "● " + active_name;
+        }
+        return "● " + std::to_string(running) + " 运行中";
+    }
+    if (errored > 0) {
+        out_state_cls = "alert";
+        return "✕ " + std::to_string(errored) + " 异常";
+    }
+    out_state_cls = "idle";
+    return "◆ AI";
+}
+
+void sync_vram_with_gamemode(bool gamemode_active) {
+    AgentPermConfig perms = load_agent_perms();
+    std::string status_out;
+    int rc = 1;
+    bool vllm_active = run_argv_capture({"systemctl", "--user", "is-active", "--quiet", "spinel-vllm.service"},
+                                        status_out, rc) && rc == 0;
+    std::string act;
+    if (!evaluate_vram_yield_for_gamemode(gamemode_active, perms.vram_yield_on_gamemode, vllm_active, act)) {
+        return;
+    }
+    std::string stop_out;
+    int stop_rc = 1;
+    bool stopped = run_argv_capture({"systemctl", "--user", "stop", "spinel-vllm.service"}, stop_out, stop_rc) &&
+                   stop_rc == 0;
+    append_agent_audit("gamemode", "action.vram_yield", PermDecision::Allow,
+                       stopped ? "yielded spinel-vllm.service for GameMode"
+                               : ("failed to stop spinel-vllm.service: " + trim_copy(stop_out)));
 }
 
 bool focus_workspace_or_window(int workspace_1based, uint64_t win_id, std::string &error_out) {

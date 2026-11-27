@@ -131,6 +131,7 @@ add_executable(spinel-shell
     src/theme_manager.cpp
     src/shell/shell_core.cpp
     src/shell/top_bar.cpp
+    src/shell/agent_island.cpp
     src/shell/sni_tray.cpp
     src/shell/desktop_monitors.cpp
     src/shell/dock.cpp
@@ -201,6 +202,12 @@ add_executable(spinel-webui
     src/temp_memory.cpp
     src/app_store.cpp
     src/theme_manager.cpp
+    src/ai/json_util.cpp
+    src/ai/agent_perms.cpp
+    src/ai/agent_tracker.cpp
+    src/ai/task_inbox.cpp
+    src/ai/os_atomics.cpp
+    src/ai/agent_bus_client.cpp
 )
 
 target_compile_definitions(spinel-webui PRIVATE
@@ -271,6 +278,7 @@ add_executable(spinel-sandbox
     src/sandbox_manager.cpp
     src/relay_client.cpp
     src/sandbox_stream_codec.cpp
+    src/ai/agent_bus_client.cpp
     src/common.cpp
     "${SCREENCOPY_HDR}"
     "${SCREENCOPY_SRC}"

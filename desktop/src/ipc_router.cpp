@@ -1,4 +1,8 @@
 #include "ipc_router.hpp"
+#include "ai/agent_bus.hpp"
+#include "ai/agent_perms.hpp"
+#include "ai/json_util.hpp"
+#include "ai/os_atomics.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "native_shell.hpp"
@@ -220,6 +224,38 @@ void post_ipc_reply_to_views(AppState *state, const std::string &reply_json) {
     eval_js(state->store_view, js);
     eval_js(state->installer_view, js);
     eval_js(state->welcome_view, js);
+}
+
+void push_ai_os_state(AppState *s) {
+    if (!s || !s->settings_view) return;
+    std::string payload;
+    // Try live agent_bus in spinel-shell first so active sessions + approvals match Dynamic Island.
+    std::string bus_sess, bus_apr, bus_tasks, bus_perms, bus_audit;
+    const std::string sock = spinel::ai::agent_bus_socket_path();
+    bool live_ok =
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":1,"client":"settings","method":"agent.list","params":{"include_proc":false}})", bus_sess, 800) &&
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":2,"client":"settings","method":"approval.list","params":{}})", bus_apr, 800) &&
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":3,"client":"settings","method":"todo.list","params":{}})", bus_tasks, 800) &&
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":4,"client":"settings","method":"perms.get","params":{}})", bus_perms, 800) &&
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":5,"client":"settings","method":"audit.tail","params":{"limit":25}})", bus_audit, 800);
+
+    if (live_ok) {
+        auto extract_res = [](const std::string &env, const char *def) {
+            std::string res_raw = def;
+            spinel::ai::json_parse_object_str(env, [&](const std::string &k, const std::string &, const std::string &raw) {
+                if (k == "result" && !raw.empty()) res_raw = raw;
+            });
+            return res_raw;
+        };
+        payload = "{\"perms\":" + extract_res(bus_perms, "{}") +
+                  ",\"sessions\":" + extract_res(bus_sess, "[]") +
+                  ",\"approvals\":" + extract_res(bus_apr, "[]") +
+                  ",\"tasks\":" + extract_res(bus_tasks, "[]") +
+                  ",\"audit\":" + extract_res(bus_audit, "[]") + "}";
+    } else {
+        payload = spinel::ai::build_ai_os_live_snapshot_json();
+    }
+    eval_js(s->settings_view, "window.__spinelAiState && window.__spinelAiState(" + payload + ");");
 }
 
 using HandlerFn = void (*)(AppState *state, const IpcRequest &req, const IpcHostActions &actions);
@@ -699,6 +735,24 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"settings:perms-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_perms_state(s);
+            push_ai_os_state(s);
+        }},
+        {"ai:state-get", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            push_ai_os_state(s);
+        }},
+        {"ai:perms-set", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            std::string body = r.legacy_raw;
+            auto nl = body.find('\n');
+            std::string kv = (nl != std::string::npos) ? body.substr(nl + 1) : body;
+            spinel::ai::AgentPermConfig updated;
+            bool ok = spinel::ai::update_agent_perms_kv(kv, updated);
+            if (s && s->settings_view) {
+                std::string msg = ok ? "AI Agent 能力权限配置已保存（即时生效）" : "写入 agent_perms.conf 失败";
+                eval_js(s->settings_view,
+                        "window.__spinelAiFeedback && window.__spinelAiFeedback(" +
+                            std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+            }
+            push_ai_os_state(s);
         }},
         {"settings:perms-polkit", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             restart_polkit_agent(s);
@@ -1010,6 +1064,23 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"perms:reset:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             reset_flatpak_app_perms(s, arg_or_param(r, "perms:reset:", {"app", "id"}));
+        }},
+        {"ai:copy-snippet:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            std::string target = arg_or_param(r, "ai:copy-snippet:", {"target"});
+            std::string snip;
+            if (target == "codex") {
+                snip = "[mcp_servers.spinel_os]\ncommand = \"/usr/local/bin/spinel-os-mcp\"\nenv = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
+            } else {
+                std::string c = (target == "claude") ? "Claude"
+                                : (target == "gemini" ? "GeminiCLI"
+                                : (target == "deepseek" ? "DeepSeekHarness" : "Agent"));
+                snip = "{\n  \"mcpServers\": {\n    \"spinel-os\": {\n      \"type\": \"stdio\",\n      \"command\": \"/usr/local/bin/spinel-os-mcp\",\n      \"env\": { \"SPINEL_AGENT_CLIENT\": \"" + c + "\" }\n    }\n  }\n}\n";
+            }
+            copy_text_to_clipboard(snip);
+            if (s && s->settings_view) {
+                eval_js(s->settings_view,
+                        "window.__spinelAiFeedback && window.__spinelAiFeedback(true,\"已复制 spinel-os-mcp 配置片段到剪贴板\");");
+            }
         }},
         {"procs:kill:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             kill_process_by_pid(s, std::atoi(arg_or_param(r, "procs:kill:", {"pid"}).c_str()), false);

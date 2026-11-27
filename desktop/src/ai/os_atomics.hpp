@@ -67,6 +67,27 @@ bool launch_in_guarded_sandbox(const std::string &cmd, std::string &error_out);
 /// Query current Spinel parallel sandbox status as JSON.
 std::string query_sandbox_status_json();
 
+/// Package active window, workspace, clipboard tail, and optional Task Inbox item into a pasteable prompt bundle.
+std::string build_work_context_bundle(const std::string &task_id = "");
+
+/// Build consolidated live AI OS state JSON (perms, sessions, approvals, tasks, recent audit logs).
+std::string build_ai_os_live_snapshot_json();
+
+/// Pure decision logic for GameMode <-> local inference VRAM coordination.
+bool evaluate_vram_yield_for_gamemode(bool gamemode_active,
+                                      bool vram_yield_enabled,
+                                      bool vllm_is_active,
+                                      std::string &out_action);
+
+/// Compute Dynamic Island pill display label and visual state class ("idle"|"running"|"alert"|"toast").
+std::string format_agent_island_pill_summary(const std::vector<AgentSessionInfo> &sessions,
+                                             const std::vector<ApprovalRequestInfo> &approvals,
+                                             const std::string &toast_text,
+                                             std::string &out_state_cls);
+
+/// Yield local user-scoped heavy inference (`spinel-vllm.service`) when GameMode activates.
+void sync_vram_with_gamemode(bool gamemode_active);
+
 /// Focus a tracked workspace (1-based) and/or window via installed desktop hooks.
 bool focus_workspace_or_window(int workspace_1based, uint64_t win_id, std::string &error_out);
 

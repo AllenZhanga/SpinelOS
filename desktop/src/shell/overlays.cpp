@@ -1,4 +1,5 @@
 #include "shell_internal.hpp"
+#include "shell/agent_island.hpp"
 #include "shell/sandbox_pip.hpp"
 #include "common.hpp"
 #include "steam_library.hpp"
@@ -1086,6 +1087,7 @@ void apply_native_css(NativeShellState *ns) {
         "  border-radius: 999px;\n"
         "  padding: 1px 8px;\n"
         "}\n" +
+        agent_island_css(ns) +
         sandbox_pip_css(ns);
 
     GdkDisplay *display = gdk_display_get_default();

@@ -1573,6 +1573,82 @@ void test_ai_os_stage2_mcp() {
     reset_os_atomics_for_tests();
 }
 
+void test_ai_os_stage3_integration() {
+    using namespace spinel::ai;
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+
+    fs::path base = fs::path(home_dir()) / ".spinel_ai_stage3_test";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(base, ec);
+
+    setenv("SPINEL_AGENT_RUNTIME_DIR", (base / "rt/agents").c_str(), 1);
+    setenv("SPINEL_TASK_INBOX_FILE", (base / "tasks.json").c_str(), 1);
+    setenv("SPINEL_AGENT_PERMS_FILE", (base / "agent_perms.conf").c_str(), 1);
+    setenv("SPINEL_AGENT_BUS_SOCK", (base / "rt/agent.sock").c_str(), 1);
+
+    // 1. Dynamic Island pill summary formatting across states
+    std::string cls;
+    EXPECT(format_agent_island_pill_summary({}, {}, "", cls) == "◆ AI" && cls == "idle");
+    AgentSessionInfo s1;
+    s1.id = "s1";
+    s1.agent = "Codex";
+    s1.status = AgentSessionStatus::Running;
+    EXPECT(format_agent_island_pill_summary({s1}, {}, "", cls) == "● Codex" && cls == "running");
+
+    AgentSessionInfo s2 = s1;
+    s2.id = "s2";
+    s2.agent = "DeepSeekHarness";
+    EXPECT(format_agent_island_pill_summary({s1, s2}, {}, "", cls) == "● 2 运行中" && cls == "running");
+
+    ApprovalRequestInfo ap1;
+    ap1.id = "apr_1";
+    EXPECT(format_agent_island_pill_summary({s1}, {ap1}, "", cls).find("1 待确认") != std::string::npos && cls == "alert");
+    EXPECT(format_agent_island_pill_summary({s1}, {ap1}, "✓ Codex · 完成", cls) == "✓ Codex · 完成" && cls == "toast");
+
+    // 2. GameMode <-> vLLM VRAM yield arbitration & persistence
+    std::string vram_act;
+    EXPECT(evaluate_vram_yield_for_gamemode(true, true, true, vram_act) && vram_act == "stop_vllm");
+    EXPECT(!evaluate_vram_yield_for_gamemode(true, false, true, vram_act) && vram_act == "none");
+    EXPECT(!evaluate_vram_yield_for_gamemode(false, true, true, vram_act) && vram_act == "none");
+
+    // 3. Work context bundle & consolidated live snapshot JSON
+    AgentTaskItem task;
+    EXPECT(create_task("Stage 3 联调", "/tmp/SpinelOS", "Antigravity", "high", "检查热路径", task));
+    std::string bundle = build_work_context_bundle(task.id);
+    EXPECT(bundle.find("Stage 3 联调") != std::string::npos);
+    EXPECT(bundle.find("\"windows\":") != std::string::npos);
+
+    std::string snap = build_ai_os_live_snapshot_json();
+    EXPECT(snap.find("\"vram_yield_on_gamemode\":true") != std::string::npos);
+    EXPECT(snap.find("Stage 3 联调") != std::string::npos);
+
+    // 4. WebUI IPC router routes for AI Settings (ai:perms-set, ai:state-get, ai:copy-snippet:)
+    AppState dummy_state;
+    IpcHostActions acts;
+    std::string reply;
+    EXPECT(dispatch_ipc_command(
+        &dummy_state,
+        R"({"id":701,"method":"ai:perms-set","params":{"tier1_clipboard":"true","vram_yield_on_gamemode":"false"}})",
+        acts, &reply));
+    EXPECT(reply.find("\"ok\":true") != std::string::npos);
+    AgentPermConfig loaded = load_agent_perms();
+    EXPECT(loaded.tier1_clipboard == true);
+    EXPECT(loaded.vram_yield_on_gamemode == false);
+
+    reply.clear();
+    EXPECT(dispatch_ipc_command(&dummy_state, R"({"id":702,"method":"ai:state-get","params":{}})", acts, &reply));
+    EXPECT(reply.find("\"ok\":true") != std::string::npos);
+
+    unsetenv("SPINEL_AGENT_RUNTIME_DIR");
+    unsetenv("SPINEL_TASK_INBOX_FILE");
+    unsetenv("SPINEL_AGENT_PERMS_FILE");
+    unsetenv("SPINEL_AGENT_BUS_SOCK");
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+}
+
 }  // namespace
 
 int main() {
@@ -1594,6 +1670,7 @@ int main() {
     test_relay_crypto_and_stream();
     test_ai_os_stage1_atomics();
     test_ai_os_stage2_mcp();
+    test_ai_os_stage3_integration();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

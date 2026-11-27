@@ -1,4 +1,5 @@
 #include "shell_internal.hpp"
+#include "shell/agent_island.hpp"
 #include "shell/sni_tray.hpp"
 #include "common.hpp"
 
@@ -775,8 +776,11 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_widget_set_visible(sandbox_btn, FALSE);
     ns->bar_sandbox_btn = sandbox_btn;
 
+    GtkWidget *ai_pill = sb ? nullptr : build_agent_island_widget(ns);
+
     gtk_box_append(GTK_BOX(right), ns->bar_tray_box);
     gtk_box_append(GTK_BOX(right), ns->bar_tray_sep);
+    if (ai_pill) gtk_box_append(GTK_BOX(right), ai_pill);
     gtk_box_append(GTK_BOX(right), ns->bar_sandbox_btn);
     gtk_box_append(GTK_BOX(right), mem_btn);
     gtk_box_append(GTK_BOX(right), ime_btn);

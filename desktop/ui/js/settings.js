@@ -260,6 +260,115 @@
 
   /* ---------------- Permissions & Security ---------------- */
   window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);
+  window.__spinelAiFeedback = (ok, msg) => showFeedback("ai-perms-feedback", msg || "", !ok);
+
+  let lastAiPerms = {
+    tier0_observe: true,
+    tier1_clipboard: false,
+    tier1_screenshot: false,
+    tier1_logs: false,
+    tier2_sandbox: true,
+    tier2_snapshot: true,
+    vram_yield_on_gamemode: true,
+    tier3_policy: "ask"
+  };
+
+  function renderAiMcpSnippet() {
+    const pre = document.getElementById("ai-mcp-snippet");
+    const sel = document.getElementById("sel-ai-mcp-client");
+    if (!pre || !sel) return;
+    const t = sel.value || "codex";
+    if (t === "codex") {
+      pre.textContent =
+        '# ~/.codex/config.toml\n[mcp_servers.spinel_os]\ncommand = "/usr/local/bin/spinel-os-mcp"\nenv = { SPINEL_AGENT_CLIENT = "Codex" }';
+    } else {
+      const cname = t === "claude" ? "Claude" : (t === "deepseek" ? "DeepSeekHarness" : "GeminiCLI");
+      pre.textContent = JSON.stringify({
+        mcpServers: {
+          "spinel-os": {
+            type: "stdio",
+            command: "/usr/local/bin/spinel-os-mcp",
+            env: { SPINEL_AGENT_CLIENT: cname }
+          }
+        }
+      }, null, 2);
+    }
+  }
+
+  window.__spinelAiState = (data) => {
+    if (!data) return;
+    if (data.perms) lastAiPerms = { ...lastAiPerms, ...data.perms };
+
+    const countChip = document.getElementById("ai-agent-count-chip");
+    if (countChip) {
+      const sess = Array.isArray(data.sessions) ? data.sessions : [];
+      const active = sess.filter((s) => s.status === "running" || s.status === "waiting_user").length;
+      const pend = Array.isArray(data.approvals) ? data.approvals.length : 0;
+      countChip.textContent = pend > 0 ? `${active} 活跃 · ${pend} 待审批` : `${active} 活跃会话`;
+    }
+
+    document.querySelectorAll("[data-ai-perm]").forEach((btn) => {
+      const k = btn.getAttribute("data-ai-perm");
+      const on = Boolean(lastAiPerms[k]);
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-checked", String(on));
+    });
+
+    const t3 = document.getElementById("sel-ai-tier3-policy");
+    if (t3 && lastAiPerms.tier3_policy) {
+      t3.value = lastAiPerms.tier3_policy;
+    }
+
+    const auditList = document.getElementById("ai-audit-list");
+    if (auditList) {
+      auditList.innerHTML = "";
+      const logs = Array.isArray(data.audit) ? data.audit.slice().reverse() : [];
+      if (logs.length === 0) {
+        auditList.innerHTML = '<div class="disk-empty">暂无 MCP 调用记录</div>';
+      } else {
+        logs.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = "status-row";
+          const left = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = `${entry.client || "local"} → ${entry.capability}`;
+          const sub = document.createElement("div");
+          sub.className = "muted-hint";
+          const dt = entry.ts ? new Date(Number(entry.ts) * 1000).toLocaleTimeString() : "--:--:--";
+          sub.textContent = `${dt}${entry.detail ? " · " + entry.detail : ""}`;
+          left.append(title, sub);
+
+          const tag = document.createElement("span");
+          tag.className = "status-chip";
+          tag.textContent = entry.decision === "allow" ? "已放行" : (entry.decision === "require_approval" ? "需审批" : "已拦截");
+          row.append(left, tag);
+          auditList.appendChild(row);
+        });
+      }
+    }
+    renderAiMcpSnippet();
+  };
+
+  document.querySelectorAll("[data-ai-perm]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-ai-perm");
+      if (!k) return;
+      const next = !Boolean(lastAiPerms[k]);
+      sendCommand(`ai:perms-set\n${k}=${next ? "true" : "false"}`);
+    });
+  });
+
+  document.getElementById("sel-ai-tier3-policy")?.addEventListener("change", (ev) => {
+    const val = ev.target.value || "ask";
+    sendCommand(`ai:perms-set\ntier3_policy=${val}`);
+  });
+
+  document.getElementById("sel-ai-mcp-client")?.addEventListener("change", renderAiMcpSnippet);
+  document.getElementById("btn-ai-copy-mcp")?.addEventListener("click", () => {
+    const t = document.getElementById("sel-ai-mcp-client")?.value || "codex";
+    sendCommand(`ai:copy-snippet:${t}`);
+  });
+  renderAiMcpSnippet();
 
   window.__spinelPermsData = (data) => {
     if (!data) return;

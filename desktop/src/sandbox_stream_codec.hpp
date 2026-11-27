@@ -16,6 +16,8 @@ enum MsgType : uint8_t {
     MSG_LAUNCH_APP = 8,
     MSG_KEYFRAME_REQ = 9,
     MSG_BYE        = 10,
+    MSG_AI_STATE   = 11,
+    MSG_AI_ACTION  = 12,
 };
 
 struct TileEncoderState {

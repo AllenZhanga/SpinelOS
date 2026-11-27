@@ -1,4 +1,5 @@
 #include "shell_internal.hpp"
+#include "shell/agent_island.hpp"
 #include "shell/sni_tray.hpp"
 #include "shell/sandbox_pip.hpp"
 #include "ai/agent_bus.hpp"
@@ -1190,6 +1191,7 @@ void init_native_shell(GtkApplication *app, AppState *state) {
         };
         spinel::ai::set_desktop_context_hooks(std::move(ai_hooks));
         spinel::ai::start_agent_bus_server();
+        shell_internal::init_agent_island(ns);
     }
     shell_internal::sync_top_bar_workspaces(ns);
     if (!sb_mode) {
@@ -1221,6 +1223,7 @@ void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
     shutdown_sandbox_pip(ns);
+    shell_internal::shutdown_agent_island(ns);
     spinel::ai::stop_agent_bus_server();
     shutdown_sni_tray();
     shell_internal::close_startup_splash(ns);

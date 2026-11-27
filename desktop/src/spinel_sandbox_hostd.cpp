@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "ai/agent_bus.hpp"
 #include "relay_client.hpp"
 #include "sandbox_manager.hpp"
 #include "sandbox_stream_codec.hpp"
@@ -366,6 +367,14 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
                         launch_in_sandbox({bin}, "", lerr);
                     }
                     break;
+                case sandbox_stream::MSG_AI_ACTION:
+                    if (!data.empty()) {
+                        std::string req_json(data.begin(), data.end());
+                        std::string resp;
+                        spinel::ai::call_agent_bus_socket(
+                            spinel::ai::agent_bus_socket_path(), req_json, resp, 4000);
+                    }
+                    break;
                 case sandbox_stream::MSG_BYE:
                     sess_done.store(true);
                     break;
@@ -380,8 +389,29 @@ void serve_remote_session(std::unique_ptr<E2eeTunnel> tun) {
     sandbox_stream::TileEncoderState enc;
     std::vector<uint8_t> pkt;
     bool logged_first_frame = false;
+    auto last_ai_push = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+    std::string last_ai_state;
     while (!g_stop_hostd.load() && !sess_done.load() && g_session_epoch.load() == my_epoch && tun->is_open()) {
         if (!query_sandbox_status().running) break;
+
+        if (std::chrono::steady_clock::now() - last_ai_push >= std::chrono::milliseconds(1500)) {
+            last_ai_push = std::chrono::steady_clock::now();
+            std::string sess_r, apr_r;
+            if (spinel::ai::call_agent_bus_socket(
+                    spinel::ai::agent_bus_socket_path(),
+                    R"({"id":"r1","client":"relay-hostd","method":"agent.list","params":{"include_proc":false}})",
+                    sess_r, 800) &&
+                spinel::ai::call_agent_bus_socket(
+                    spinel::ai::agent_bus_socket_path(),
+                    R"({"id":"r2","client":"relay-hostd","method":"approval.list","params":{}})",
+                    apr_r, 800)) {
+                std::string bundle = "{\"sessions\":" + sess_r + ",\"approvals\":" + apr_r + "}";
+                if (bundle != last_ai_state) {
+                    last_ai_state = bundle;
+                    tun->send_msg(sandbox_stream::MSG_AI_STATE, bundle.data(), bundle.size());
+                }
+            }
+        }
 
         {
             std::lock_guard<std::mutex> lk(wl_mu);

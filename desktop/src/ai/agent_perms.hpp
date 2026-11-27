@@ -31,6 +31,7 @@ struct AgentPermConfig {
     bool tier1_logs = false;
     bool tier2_sandbox = true;
     bool tier2_snapshot = true;
+    bool vram_yield_on_gamemode = true;
     Tier3Policy tier3_policy = Tier3Policy::Ask;
 };
 

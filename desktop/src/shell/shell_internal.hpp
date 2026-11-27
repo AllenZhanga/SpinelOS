@@ -92,6 +92,15 @@ struct NativeShellState {
     GtkWidget *bar_tray_sep = nullptr;
     GtkWidget *bar_sandbox_btn = nullptr;
     GtkWidget *bar_sandbox_lbl = nullptr;
+    GtkWidget *bar_ai_btn = nullptr;
+    GtkWidget *bar_ai_lbl = nullptr;
+    GtkWidget *bar_ai_popover = nullptr;
+    GtkWidget *bar_ai_list_box = nullptr;
+    GtkWidget *bar_ai_task_entry = nullptr;
+    GFileMonitor *ai_dir_monitor = nullptr;
+    guint ai_refresh_timer = 0;
+    guint ai_toast_timer = 0;
+    std::string ai_toast_text;
     GtkWidget *bar_mem_lbl = nullptr;
     GtkWidget *bar_ime_lbl = nullptr;
     GtkWidget *bar_vol_btn = nullptr;

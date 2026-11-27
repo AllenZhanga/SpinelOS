@@ -1,5 +1,6 @@
 #include "system_control.hpp"
 #include "sys_internal.hpp"
+#include "ai/os_atomics.hpp"
 #include "common.hpp"
 #include "native_shell.hpp"
 #include "steam_library.hpp"
@@ -577,6 +578,7 @@ void update_perf_config(AppState *state, const std::string &payload) {
              << "render_res=" << cfg.render_res << "\n";
     write_text_file((sys_internal::config_dir() / "perf.conf").string(), perf_out.str());
     sync_mangohud_config(cfg);
+    spinel::ai::sync_vram_with_gamemode(cfg.gamemode);
     push_perf_config(state);
     native_shell_sync_perf(state);
 

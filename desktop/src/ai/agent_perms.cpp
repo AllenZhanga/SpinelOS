@@ -35,6 +35,7 @@ constexpr CapabilityMeta kCapabilityTable[] = {
     {"audit.tail", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查看近期 Agent 能力审计日志"},
     {"action.proxy_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询系统网络代理状态"},
     {"action.sandbox_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询平行沙箱运行状态"},
+    {"action.vram_yield", AgentCapabilityTier::Tier0Observe, "tier0_observe", "GameMode 自动协同释放推理显存"},
     {"action.service_status", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询本地 AI/容器/打印服务状态"},
     {"approval.list", AgentCapabilityTier::Tier0Observe, "tier0_observe", "查询待审批请求列表"},
 
@@ -121,6 +122,7 @@ AgentPermConfig load_agent_perms() {
         else if (k == "tier1_logs") cfg.tier1_logs = parse_bool_str(v, cfg.tier1_logs);
         else if (k == "tier2_sandbox") cfg.tier2_sandbox = parse_bool_str(v, cfg.tier2_sandbox);
         else if (k == "tier2_snapshot") cfg.tier2_snapshot = parse_bool_str(v, cfg.tier2_snapshot);
+        else if (k == "vram_yield_on_gamemode") cfg.vram_yield_on_gamemode = parse_bool_str(v, cfg.vram_yield_on_gamemode);
         else if (k == "tier3_policy") cfg.tier3_policy = parse_tier3_policy(v);
     }
     return cfg;
@@ -136,6 +138,7 @@ bool save_agent_perms(const AgentPermConfig &cfg) {
         << "tier1_logs=" << (cfg.tier1_logs ? "true" : "false") << "\n"
         << "tier2_sandbox=" << (cfg.tier2_sandbox ? "true" : "false") << "\n"
         << "tier2_snapshot=" << (cfg.tier2_snapshot ? "true" : "false") << "\n"
+        << "vram_yield_on_gamemode=" << (cfg.vram_yield_on_gamemode ? "true" : "false") << "\n"
         << "tier3_policy=" << tier3_policy_str(cfg.tier3_policy) << "\n";
     return write_text_file(agent_perms_conf_path(), oss.str());
 }
@@ -155,6 +158,7 @@ bool update_agent_perms_kv(const std::string &payload, AgentPermConfig &out_cfg)
         else if (k == "tier1_logs") next.tier1_logs = parse_bool_str(v, next.tier1_logs);
         else if (k == "tier2_sandbox") next.tier2_sandbox = parse_bool_str(v, next.tier2_sandbox);
         else if (k == "tier2_snapshot") next.tier2_snapshot = parse_bool_str(v, next.tier2_snapshot);
+        else if (k == "vram_yield_on_gamemode") next.vram_yield_on_gamemode = parse_bool_str(v, next.vram_yield_on_gamemode);
         else if (k == "tier3_policy") next.tier3_policy = parse_tier3_policy(v);
     }
     if (!save_agent_perms(next)) return false;
@@ -222,6 +226,7 @@ std::string serialize_agent_perms_json(const AgentPermConfig &cfg) {
         << "\"tier1_logs\":" << (cfg.tier1_logs ? "true" : "false") << ","
         << "\"tier2_sandbox\":" << (cfg.tier2_sandbox ? "true" : "false") << ","
         << "\"tier2_snapshot\":" << (cfg.tier2_snapshot ? "true" : "false") << ","
+        << "\"vram_yield_on_gamemode\":" << (cfg.vram_yield_on_gamemode ? "true" : "false") << ","
         << "\"tier3_policy\":\"" << tier3_policy_str(cfg.tier3_policy) << "\""
         << "}";
     return oss.str();
