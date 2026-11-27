@@ -79,6 +79,16 @@ std::string collect_logs_bundle_text(const std::string &source) {
         return "=== /tmp/spinel-labwc.log ===\n" + txt;
     }
 
+    if (source == "mcp") {
+        fs::path audit_log = fs::path(spinel_state_dir()) / "mcp_audit.log";
+        std::string txt = read_tail_lines(audit_log, 250);
+        if (txt.empty()) {
+            txt = "暂无 MCP 能力调用审计记录。\n当外部 Coding Agent (Antigravity / Codex / Claude 等) 调用 spinel-os-mcp 时，放行、挂起与拦截记录将记录在:\n" +
+                  audit_log.string();
+        }
+        return "=== MCP 能力调用审计日志 (" + audit_log.string() + ") ===\n" + txt;
+    }
+
     if (source == "system") {
         std::ostringstream oss;
         oss << "=== 运行环境与图形诊断 ===\n";
@@ -401,7 +411,9 @@ pid_t g_clip_watcher_pid = -1;
 
 void push_system_logs(AppState *state, const std::string &source) {
     if (!state || (!state->monitor_view && !state->settings_view)) return;
-    std::string src = (source == "shell" || source == "compositor" || source == "system") ? source : "apps";
+    std::string src = (source == "shell" || source == "compositor" || source == "system" || source == "mcp")
+                          ? source
+                          : "apps";
     std::thread([state, src]() {
         std::string txt = collect_logs_bundle_text(src);
         std::ostringstream js;
@@ -415,10 +427,15 @@ void push_system_logs(AppState *state, const std::string &source) {
 
 void clear_system_logs(AppState *state, const std::string &source) {
     if (!state) return;
-    fs::path app_log = fs::path(spinel_state_dir()) / "apps.log";
     std::error_code ec;
-    fs::resize_file(app_log, 0, ec);
-    append_app_log("[Logs] 已清空应用启动日志");
+    if (source == "mcp") {
+        fs::path audit_log = fs::path(spinel_state_dir()) / "mcp_audit.log";
+        fs::resize_file(audit_log, 0, ec);
+    } else {
+        fs::path app_log = fs::path(spinel_state_dir()) / "apps.log";
+        fs::resize_file(app_log, 0, ec);
+        append_app_log("[Logs] 已清空应用启动日志");
+    }
     push_system_logs(state, source);
 }
 

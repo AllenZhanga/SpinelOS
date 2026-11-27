@@ -12,16 +12,18 @@
      - `● Agent` / `● N 运行中`：正在运行的 Coding Agent（自动来自 `/proc` 探针、`spinel-agent-ctl` 上报或 `spinel-os-mcp`）
      - `⚠ N 待确认`：存在 `waiting_user` 会话或 **Tier 3 交互审批请求**
      - 状态跃迁至完成/失败/待确认时，胶囊会横向展宽约 3.8 秒显示结论摘要。
-   - **点击展开三段浮窗**：
+   - **点击展开浮窗**：
      1. **待人工审批卡片（Tier 3）**：支持 **[允许]**、**[快照后允许]**（自动先创建 Btrfs 保护点再放行）、**[沙箱]**、**[拒绝]**。
      2. **活动 AI 会话**：点击普通会话直接跳转到对应工作区与窗口；点击沙箱会话直接弹出 `spinel-sandbox` 画中画接管。
-     3. **任务收件箱 (Task Inbox)**：顶部可一行速记待办，支持 **[复制当前现场]**（打包当前窗口/工作区与剪贴板）、**[终端派单]**、**[沙箱执行]** 与 **[验收通过] / [重开]**。
+     3. **底部快捷操作栏**：提供 **[复制当前现场]**（打包当前窗口/工作区与剪贴板）与 **[权限与审计]** 入口。
 
-2. **系统设置 →「权限与安全」→ AI Agent 能力与分级权限**
-   - 分项切换 Tier 0–2 开关与 **Tier 3 审批策略**（`ask` / `allow` / `deny`）
-   - 开关 **GameMode 显存协同**（启动全屏游戏/开启 GameMode 时自动停让用户态 `spinel-vllm.service`）
-   - 一键切换并复制 **Codex / Claude Code / DeepSeekHarness / Gemini CLI** 的 `spinel-os-mcp` 配置
-   - 实时查看 `~/.local/state/spinelos/mcp_audit.log` 审计记录
+2. **系统设置 →「权限与安全」**（按 3 个独立子页签分组展示）
+   - **AI Agent 权限**：分项切换 Tier 0–2 开关与 **Tier 3 审批策略**（`ask` / `allow` / `deny`）、一键复制 **Antigravity / Codex / Claude Code / DeepSeekHarness / Gemini CLI** 的 `spinel-os-mcp` 配置，以及快捷跳转至审计日志。
+   - **平行沙箱桌面**：控制沙箱启停、网络/剪贴板开关、持久化目录与自启应用白名单。
+   - **系统与软件授权**：管理管理员密码弹窗 (Polkit)、XDG 隐私弹窗记录与第三方应用权限。
+
+3. **系统监视器 →「系统日志」→「AI / MCP 审计」**
+   - 实时查看或清空 `~/.local/state/spinelos/mcp_audit.log` 审计记录（包含每次能力调用来源、动作与裁决）。
 
 ---
 

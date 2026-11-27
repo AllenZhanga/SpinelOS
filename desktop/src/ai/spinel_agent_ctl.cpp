@@ -43,7 +43,7 @@ void print_usage() {
         "  spinel-agent-ctl snapshot <description>\n"
         "  spinel-agent-ctl approvals\n"
         "  spinel-agent-ctl approve <approval_id> <allow|sandbox|deny>\n"
-        "  spinel-agent-ctl mcp-snippet [codex|claude|gemini|deepseek|json]\n"
+        "  spinel-agent-ctl mcp-snippet [antigravity|codex|claude|gemini|deepseek|json]\n"
         "  spinel-agent-ctl wrap --agent <name> [--repo <dir>] [--task <task_id>] [--title <text>] [--sandbox] -- <cmd...>\n"
         "  spinel-agent-ctl doctor [--json]\n";
 }
@@ -110,7 +110,8 @@ void print_mcp_snippet(const std::string &target) {
         return;
     }
     std::string client = target.empty() ? "Agent" : target;
-    if (client == "gemini") client = "GeminiCLI";
+    if (client == "antigravity") client = "Antigravity";
+    else if (client == "gemini") client = "GeminiCLI";
     else if (client == "deepseek") client = "DeepSeekHarness";
     else if (client == "json") client = "Agent";
     std::cout << "{\n"

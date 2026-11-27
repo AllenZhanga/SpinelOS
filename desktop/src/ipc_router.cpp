@@ -934,7 +934,10 @@ bool dispatch_ipc_command(AppState *state,
         {"monitor:open:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &a) {
             std::string tab = arg_or_param(r, "monitor:open:", {"tab", "id"});
             native_shell_set_cc_visible(s, false);
-            if (a.open_monitor) a.open_monitor(s, tab == "logs" ? "logs" : "procs");
+            if (a.open_monitor) {
+                if (tab == "logs:mcp") a.open_monitor(s, "logs:mcp");
+                else a.open_monitor(s, tab == "logs" ? "logs" : "procs");
+            }
         }},
         {"devices:mount:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             mount_block_device(s, arg_or_param(r, "devices:mount:", {"dev", "path"}), false);
@@ -1071,7 +1074,8 @@ bool dispatch_ipc_command(AppState *state,
             if (target == "codex") {
                 snip = "[mcp_servers.spinel_os]\ncommand = \"/usr/local/bin/spinel-os-mcp\"\nenv = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
             } else {
-                std::string c = (target == "claude") ? "Claude"
+                std::string c = (target == "antigravity") ? "Antigravity"
+                                : (target == "claude") ? "Claude"
                                 : (target == "gemini" ? "GeminiCLI"
                                 : (target == "deepseek" ? "DeepSeekHarness" : "Agent"));
                 snip = "{\n  \"mcpServers\": {\n    \"spinel-os\": {\n      \"type\": \"stdio\",\n      \"command\": \"/usr/local/bin/spinel-os-mcp\",\n      \"env\": { \"SPINEL_AGENT_CLIENT\": \"" + c + "\" }\n    }\n  }\n}\n";

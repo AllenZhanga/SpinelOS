@@ -1048,227 +1048,242 @@
     </div>
 
     <div id="tab-perms" class="win-body hidden">
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div>
-            <h3>系统弹窗授权保护</h3>
-            <p class="muted-hint">当软件请求管理员密码、读写文件、录屏或使用麦克风时，系统会自动弹出确认框。保持开启即可，日常无需操作。</p>
-          </div>
-          <div class="footer-actions">
-            <button class="btn small" data-cmd="settings:perms-get">刷新状态</button>
-          </div>
+      <div class="perms-subbar">
+        <div class="tab-bar" id="perms-subtabs">
+          <button type="button" class="tab-btn active" data-perms-tab="ai">AI Agent 权限</button>
+          <button type="button" class="tab-btn" data-perms-tab="sandbox">平行沙箱桌面</button>
+          <button type="button" class="tab-btn" data-perms-tab="system">系统与软件授权</button>
         </div>
-        <div class="status-list" id="perms-infra-list">
-          <div class="status-row">
-            <div>
-              <strong>管理员密码确认弹窗</strong>
-              <div class="muted-hint" id="perms-polkit-desc">安装软件或改硬盘等敏感操作时弹窗输密码</div>
-            </div>
-            <button class="btn small" data-cmd="settings:perms-polkit">启用 / 重启</button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>应用拍照 / 录屏 / 文件访问询问</strong>
-              <div class="muted-hint" id="perms-portal-desc">软件想访问摄像头、录屏或打开文件时先征求你的同意</div>
-            </div>
-            <button class="btn small" data-cmd="settings:perms-portal">刷新服务</button>
-          </div>
-        </div>
-        <div id="perms-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
+        <button type="button" class="btn small" data-cmd="settings:perms-get">刷新状态</button>
       </div>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div>
-            <h3>已安装外部应用权限管理</h3>
-            <p class="muted-hint">从「应用中心」下载的第三方软件默认在沙箱中隔离运行。如果发现某软件读不到存档目录或手柄，可在这里一键开启对应权限。</p>
+      <!-- Sub-tab 1: AI Agent Capabilities & MCP -->
+      <div id="perms-pane-ai" class="perms-pane">
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>AI Agent 能力与分级权限</h3>
+              <p class="muted-hint">控制接入 SpinelOS 的 Antigravity / Codex / Claude 等调用系统原子能力的默认边界。</p>
+            </div>
+            <div class="footer-actions">
+              <span class="status-chip" id="ai-agent-count-chip">0 活跃会话</span>
+              <button type="button" class="btn small ghost" data-cmd="monitor:open:logs:mcp">查看调用日志 →</button>
+            </div>
           </div>
-        </div>
-        <div id="perms-app-list" class="disk-list">
-          <div class="disk-empty">正在扫描已安装的外部应用...</div>
-        </div>
-      </div>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div>
-            <h3>Agent 平行沙箱桌面（内核级全隔离）</h3>
-            <p class="muted-hint">为 AI Agent 或不可信软件提供独立隐藏主目录与虚拟显示器，仅持久保存下方白名单目录；共享本机网络与剪贴板。</p>
-          </div>
-          <span class="badge" id="sandbox-status-chip">检测中</span>
-        </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px;">
-          <button class="btn small primary" id="btn-sandbox-start">启动 / 打开画中画</button>
-          <button class="btn small" id="btn-sandbox-stop">停止沙箱</button>
-          <button class="btn small danger" id="btn-sandbox-reset">重置临时环境</button>
-        </div>
-        <div class="status-grid" style="margin-bottom: 10px;">
-          <div class="status-row">
-            <div>
-              <strong>共享本机网络</strong>
-              <div class="muted-hint">开启后可联网并直连本地 Ollama / 系统代理；关闭则完全断网隔离</div>
+          <div class="perf-row-list">
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 0 · 基础观测与会话感知</strong>
+                <span class="muted-hint">允许上报执行状态、读取当前专注应用与网络代理概况</span>
+              </div>
+              <button type="button" class="sp-switch is-on" data-ai-perm="tier0_observe" aria-label="Tier 0 基础观测"><span class="sp-switch-thumb"></span></button>
             </div>
-            <button type="button" class="sp-switch is-on" id="sw-sandbox-net" aria-label="共享本机网络"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>剪贴板双向同步</strong>
-              <div class="muted-hint">开启后宿主桌面与平行桌面可互相复制粘贴文本（随时可关闭）</div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 1 · 读取剪贴板近期历史</strong>
+                <span class="muted-hint">允许通过工作现场向 Agent 提供近期复制的报错与代码片段</span>
+              </div>
+              <button type="button" class="sp-switch" data-ai-perm="tier1_clipboard" aria-label="Tier 1 剪贴板"><span class="sp-switch-thumb"></span></button>
             </div>
-            <button type="button" class="sp-switch is-on" id="sw-sandbox-clip" aria-label="剪贴板双向同步"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>算力配额模式</strong>
-              <div class="muted-hint">限制平行桌面最大 CPU / 内存优先级，防止 AI 任务卡死宿主机</div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 1 · 桌面与窗口截图回传</strong>
+                <span class="muted-hint">允许 MCP 调用无头截图以多模态 PNG 回传给 Coding Agent</span>
+              </div>
+              <button type="button" class="sp-switch" data-ai-perm="tier1_screenshot" aria-label="Tier 1 截图"><span class="sp-switch-thumb"></span></button>
             </div>
-            <select id="sel-sandbox-perf" class="spinel-select" style="min-width: 140px;">
-              <option value="host-priority">宿主优先（推荐）</option>
-              <option value="balanced">均衡分配</option>
-            </select>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 1 · Doctor 体检与脱敏日志</strong>
+                <span class="muted-hint">允许读取已脱敏的系统诊断与运行日志，自动定位服务报错</span>
+              </div>
+              <button type="button" class="sp-switch" data-ai-perm="tier1_logs" aria-label="Tier 1 体检日志"><span class="sp-switch-thumb"></span></button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 2 · 平行沙箱自动隔离运行</strong>
+                <span class="muted-hint">允许在 spinel-sandbox 中运行高风险测试并供画中画实时接管</span>
+              </div>
+              <button type="button" class="sp-switch is-on" data-ai-perm="tier2_sandbox" aria-label="Tier 2 平行沙箱"><span class="sp-switch-thumb"></span></button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 2 · Btrfs 保护性还原点快照</strong>
+                <span class="muted-hint">允许高危修改前通过 Snapper 创建只增不减系统还原点</span>
+              </div>
+              <button type="button" class="sp-switch is-on" data-ai-perm="tier2_snapshot" aria-label="Tier 2 保护快照"><span class="sp-switch-thumb"></span></button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>Tier 3 · 宿主机控制动作策略</strong>
+                <span class="muted-hint">启停服务（ollama / vllm / docker）或切换宿主机窗口时的放行方式</span>
+              </div>
+              <select id="sel-ai-tier3-policy" class="spinel-select" style="min-width: 164px;">
+                <option value="ask">灵动岛逐次询问（推荐）</option>
+                <option value="allow">始终允许</option>
+                <option value="deny">一律拒绝</option>
+              </select>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>全屏游戏时自动暂让 vLLM 显存</strong>
+                <span class="muted-hint">启用 GameMode 时释放用户态本地重推理显存占用</span>
+              </div>
+              <button type="button" class="sp-switch is-on" data-ai-perm="vram_yield_on_gamemode" aria-label="显存协同"><span class="sp-switch-thumb"></span></button>
+            </div>
           </div>
+          <div id="ai-perms-feedback" class="feedback-banner hidden"></div>
         </div>
-        <div class="section-head" style="margin-bottom: 6px;">
-          <div>
-            <strong>持久保留目录白名单</strong>
-            <div class="muted-hint" id="sandbox-home-info">沙箱临时主目录: --</div>
-          </div>
-          <div style="display:flex; gap:6px;">
-            <button class="btn small" id="btn-sandbox-add-rw">+ 添加可写目录</button>
-            <button class="btn small ghost" id="btn-sandbox-add-ro">+ 添加只读目录</button>
-          </div>
-        </div>
-        <div id="sandbox-dir-list" class="disk-list">
-          <div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>
-        </div>
-        <div class="section-head" style="margin-top: 14px; margin-bottom: 6px;">
-          <div>
-            <strong>可启动应用与默认自启</strong>
-            <div class="muted-hint">配置画中画「+ 应用」快捷菜单，以及开启平行沙箱时自动打开哪些应用</div>
-          </div>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <select id="sel-sandbox-app-add" class="spinel-select" style="min-width: 180px;"></select>
-            <button class="btn small" id="btn-sandbox-app-add">+ 添加应用</button>
-          </div>
-        </div>
-        <div id="sandbox-app-list" class="disk-list">
-          <div class="disk-empty">暂未配置沙箱应用</div>
-        </div>
-        <div id="sandbox-feedback" class="feedback-banner hidden" style="margin-top: 10px;"></div>
-      </div>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div>
-            <h3>已记住的弹窗授权记录</h3>
-            <p class="muted-hint">如果不小心点了“始终拒绝/允许”录屏或摄像头，可以在这里撤销，让软件下次重新弹出询问框。</p>
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>接入外部 Coding Agent (`spinel-os-mcp`)</h3>
+              <p class="muted-hint">复制下方片段写入对应客户端 MCP 配置，即可连接工作现场、Doctor 体检与平行沙箱。</p>
+            </div>
+            <div class="footer-actions">
+              <select id="sel-ai-mcp-client" class="spinel-select" style="min-width: 146px;">
+                <option value="antigravity">Antigravity</option>
+                <option value="codex">Codex (TOML)</option>
+                <option value="claude">Claude Code</option>
+                <option value="deepseek">DeepSeekHarness</option>
+                <option value="gemini">Gemini CLI</option>
+              </select>
+              <button type="button" class="btn small primary" id="btn-ai-copy-mcp">复制配置</button>
+            </div>
           </div>
-        </div>
-        <div id="perms-portal-list" class="disk-list">
-          <div class="disk-empty">暂无已记住的弹窗记录</div>
+          <pre id="ai-mcp-snippet" class="log-box selectable" style="max-height: 168px;"></pre>
         </div>
       </div>
 
-      <div class="inst-section">
-        <div class="section-head" style="margin-bottom: 10px;">
-          <div>
-            <h3>AI Agent 能力与分级权限 (MCP Tier 0–3)</h3>
-            <p class="muted-hint">控制接入 SpinelOS 的 Codex / Antigravity / Claude / DeepSeekHarness 等可调用的系统原子能力与默认安全边界。</p>
+      <!-- Sub-tab 2: Parallel Sandbox Desktop -->
+      <div id="perms-pane-sandbox" class="perms-pane hidden">
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>Agent 平行沙箱桌面（内核级全隔离）</h3>
+              <p class="muted-hint">独立隐藏主目录与虚拟显示器，仅持久保存下方白名单目录；可随时开启画中画人工接管。</p>
+            </div>
+            <div class="footer-actions">
+              <span class="status-chip" id="sandbox-status-chip">检测中</span>
+              <button class="btn small primary" id="btn-sandbox-start">启动 / 画中画</button>
+              <button class="btn small" id="btn-sandbox-stop">停止</button>
+              <button class="btn small danger" id="btn-sandbox-reset">重置环境</button>
+            </div>
           </div>
-          <div class="footer-actions">
-            <span class="status-chip" id="ai-agent-count-chip">0 活跃会话</span>
-            <button type="button" class="btn small" id="btn-ai-refresh" data-cmd="ai:state-get">刷新</button>
+          <div class="perf-row-list">
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>共享本机网络</strong>
+                <span class="muted-hint">开启后可联网并直连本地 Ollama / 系统代理；关闭则完全断网隔离</span>
+              </div>
+              <button type="button" class="sp-switch is-on" id="sw-sandbox-net" aria-label="共享本机网络"><span class="sp-switch-thumb"></span></button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>剪贴板双向同步</strong>
+                <span class="muted-hint">开启后宿主桌面与平行桌面可互相复制粘贴文本</span>
+              </div>
+              <button type="button" class="sp-switch is-on" id="sw-sandbox-clip" aria-label="剪贴板双向同步"><span class="sp-switch-thumb"></span></button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>算力配额模式</strong>
+                <span class="muted-hint">限制平行桌面最大 CPU / 内存优先级，防止后台任务卡死宿主机</span>
+              </div>
+              <select id="sel-sandbox-perf" class="spinel-select" style="min-width: 146px;">
+                <option value="host-priority">宿主优先（推荐）</option>
+                <option value="balanced">均衡分配</option>
+              </select>
+            </div>
           </div>
+          <div id="sandbox-feedback" class="feedback-banner hidden"></div>
         </div>
-        <div class="status-list" style="margin-bottom: 10px;">
-          <div class="status-row">
-            <div>
-              <strong>Tier 0 · 基础观测与待办中枢</strong>
-              <div class="muted-hint">允许 Agent 上报进度、认领 Task Inbox 待办并读取当前专注应用与代理概况</div>
-            </div>
-            <button type="button" class="sp-switch is-on" data-ai-perm="tier0_observe" aria-label="Tier 0 基础观测"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 1 · 读取剪贴板近期历史</strong>
-              <div class="muted-hint">允许通过工作现场总线向 Agent 喂入近期复制的报错与代码片段</div>
-            </div>
-            <button type="button" class="sp-switch" data-ai-perm="tier1_clipboard" aria-label="Tier 1 剪贴板"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 1 · 桌面与窗口截图回传</strong>
-              <div class="muted-hint">允许 MCP 调用 grim 截取当前画面以多模态 PNG 回传给 Coding Agent</div>
-            </div>
-            <button type="button" class="sp-switch" data-ai-perm="tier1_screenshot" aria-label="Tier 1 截图"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 1 · Doctor 体检与脱敏日志</strong>
-              <div class="muted-hint">允许读取已脱敏的系统诊断与运行日志，自动定位服务报错</div>
-            </div>
-            <button type="button" class="sp-switch" data-ai-perm="tier1_logs" aria-label="Tier 1 体检日志"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 2 · 平行沙箱自动隔离运行</strong>
-              <div class="muted-hint">允许在 spinel-sandbox 中运行测试/浏览器验证并供画中画实时接管</div>
-            </div>
-            <button type="button" class="sp-switch is-on" data-ai-perm="tier2_sandbox" aria-label="Tier 2 平行沙箱"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 2 · Btrfs 保护性还原点快照</strong>
-              <div class="muted-hint">允许高危修改前通过 Snapper 创建只增不减系统还原点</div>
-            </div>
-            <button type="button" class="sp-switch is-on" data-ai-perm="tier2_snapshot" aria-label="Tier 2 保护快照"><span class="sp-switch-thumb"></span></button>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>Tier 3 · 宿主机控制动作策略</strong>
-              <div class="muted-hint">启停服务（ollama/vllm/docker）或切换宿主机窗口时的放行方式</div>
-            </div>
-            <select id="sel-ai-tier3-policy" class="spinel-select" style="min-width: 158px;">
-              <option value="ask">灵动岛逐次询问（推荐）</option>
-              <option value="allow">始终允许</option>
-              <option value="deny">一律拒绝</option>
-            </select>
-          </div>
-          <div class="status-row">
-            <div>
-              <strong>GameMode 显存协同（自动停让 vLLM）</strong>
-              <div class="muted-hint">开启全屏游戏加速时，自动暂缓用户态本地重推理服务释放显存，避免与游戏抢占 VRAM</div>
-            </div>
-            <button type="button" class="sp-switch is-on" data-ai-perm="vram_yield_on_gamemode" aria-label="GameMode 显存协同"><span class="sp-switch-thumb"></span></button>
-          </div>
-        </div>
-        <div id="ai-perms-feedback" class="feedback-banner hidden" style="margin-bottom: 10px;"></div>
 
-        <div class="section-head" style="margin-top: 14px; margin-bottom: 8px;">
-          <div>
-            <strong>一键接入外部 Coding Agent (spinel-os-mcp)</strong>
-            <div class="muted-hint">复制配置写入对应客户端配置文件，即可立即拥有 Task Inbox、工作现场与平行沙箱能力</div>
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>持久保留目录白名单</h3>
+              <p class="muted-hint" id="sandbox-home-info">沙箱临时主目录: --</p>
+            </div>
+            <div class="footer-actions">
+              <button class="btn small" id="btn-sandbox-add-rw">+ 可写目录</button>
+              <button class="btn small ghost" id="btn-sandbox-add-ro">+ 只读目录</button>
+            </div>
           </div>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <select id="sel-ai-mcp-client" class="spinel-select" style="min-width: 146px;">
-              <option value="codex">Codex (TOML)</option>
-              <option value="claude">Claude Code</option>
-              <option value="deepseek">DeepSeekHarness</option>
-              <option value="gemini">Gemini CLI</option>
-            </select>
-            <button type="button" class="btn small primary" id="btn-ai-copy-mcp">复制配置</button>
+          <div id="sandbox-dir-list" class="perf-row-list">
+            <div class="perms-empty-row">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>
           </div>
         </div>
-        <pre id="ai-mcp-snippet" class="log-box" style="max-height: 150px; margin-bottom: 14px;"></pre>
 
-        <div class="section-head" style="margin-bottom: 8px;">
-          <div>
-            <strong>MCP 能力调用审计日志 (mcp_audit.log)</strong>
-            <div class="muted-hint">记录外部 Agent 对系统接口的每一次放行、挂起审批与拦截记录</div>
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>可启动应用与默认自启</h3>
+              <p class="muted-hint">配置画中画「+ 应用」快捷菜单，以及开启平行沙箱时自动打开哪些应用。</p>
+            </div>
+            <div class="footer-actions">
+              <select id="sel-sandbox-app-add" class="spinel-select" style="min-width: 180px;"></select>
+              <button class="btn small" id="btn-sandbox-app-add">+ 添加应用</button>
+            </div>
+          </div>
+          <div id="sandbox-app-list" class="perf-row-list">
+            <div class="perms-empty-row">暂未配置沙箱应用</div>
           </div>
         </div>
-        <div id="ai-audit-list" class="disk-list">
-          <div class="disk-empty">暂无 MCP 调用记录</div>
+      </div>
+
+      <!-- Sub-tab 3: System & Software Authorizations -->
+      <div id="perms-pane-system" class="perms-pane hidden">
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>系统弹窗授权保护</h3>
+              <p class="muted-hint">软件请求管理员密码、拍照、录屏或打开文件时自动弹出确认框，保持开启即可。</p>
+            </div>
+          </div>
+          <div class="perf-row-list" id="perms-infra-list">
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>管理员密码确认弹窗 (Polkit)</strong>
+                <span class="muted-hint" id="perms-polkit-desc">安装软件或改硬盘等敏感操作时弹窗输密码</span>
+              </div>
+              <button class="btn small" data-cmd="settings:perms-polkit">启用 / 重启</button>
+            </div>
+            <div class="perf-row">
+              <div class="perf-row-info">
+                <strong>应用拍照 / 录屏 / 文件访问询问 (Portal)</strong>
+                <span class="muted-hint" id="perms-portal-desc">软件想访问摄像头、录屏或打开文件时先征求你的同意</span>
+              </div>
+              <button class="btn small" data-cmd="settings:perms-portal">刷新服务</button>
+            </div>
+          </div>
+          <div id="perms-feedback" class="feedback-banner hidden"></div>
+        </div>
+
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>已记住的弹窗授权记录</h3>
+              <p class="muted-hint">如果不小心点了“始终拒绝/允许”录屏或摄像头，可在这里撤销让软件下次重询。</p>
+            </div>
+          </div>
+          <div id="perms-portal-list" class="perf-row-list">
+            <div class="perms-empty-row">暂无已记住的弹窗记录</div>
+          </div>
+        </div>
+
+        <div class="perms-group">
+          <div class="section-head">
+            <div>
+              <h3>第三方沙箱应用权限</h3>
+              <p class="muted-hint">若 Flatpak 沙箱应用读不到存档目录或外设，可在这里按项放开权限。</p>
+            </div>
+          </div>
+          <div id="perms-app-list" class="perf-row-list">
+            <div class="perms-empty-row">正在扫描已安装的沙箱应用...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1470,6 +1485,7 @@
           <button class="pill-btn active" data-cmd="monitor:logs:apps">应用与 Steam</button>
           <button class="pill-btn" data-cmd="monitor:logs:shell">桌面壳 (spinel-shell)</button>
           <button class="pill-btn" data-cmd="monitor:logs:compositor">合成器 (labwc)</button>
+          <button class="pill-btn" data-cmd="monitor:logs:mcp">AI / MCP 审计</button>
           <button class="pill-btn" data-cmd="monitor:logs:system">系统与内核</button>
         </div>
         <div class="footer-actions">

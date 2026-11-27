@@ -60,8 +60,9 @@
     else if (target === "snapshots") sendCommand("settings:snapshots-get");
   }
 
-  function switchMonitorTab(tab) {
+  function switchMonitorTab(tab, logSource) {
     const target = tab === "logs" ? "logs" : "procs";
+    if (logSource) activeLogSource = logSource;
     const procsView = document.getElementById("monitor-view-procs");
     const logsView = document.getElementById("monitor-view-logs");
     if (procsView) procsView.classList.toggle("hidden", target !== "procs");
@@ -93,7 +94,7 @@
   });
 
   window.__spinelOpenSettings = (tab) => switchSettingsTab(tab);
-  window.__spinelOpenMonitor = (tab) => switchMonitorTab(tab);
+  window.__spinelOpenMonitor = (tab, logSource) => switchMonitorTab(tab, logSource);
 
   /* ---------------- Dock Display Mode ---------------- */
   const dockModeDescs = {
@@ -262,6 +263,22 @@
   window.__spinelPermsFeedback = (ok, msg) => showFeedback("perms-feedback", msg || "", !ok);
   window.__spinelAiFeedback = (ok, msg) => showFeedback("ai-perms-feedback", msg || "", !ok);
 
+  let activePermsSubtab = "ai";
+  function switchPermsSubtab(sub) {
+    const allowed = ["ai", "sandbox", "system"];
+    activePermsSubtab = allowed.includes(sub) ? sub : "ai";
+    allowed.forEach((k) => {
+      document.getElementById(`perms-pane-${k}`)?.classList.toggle("hidden", k !== activePermsSubtab);
+    });
+    document.querySelectorAll("#perms-subtabs [data-perms-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-perms-tab") === activePermsSubtab);
+    });
+  }
+  document.querySelectorAll("#perms-subtabs [data-perms-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => switchPermsSubtab(btn.getAttribute("data-perms-tab") || "ai"));
+  });
+  switchPermsSubtab("ai");
+
   let lastAiPerms = {
     tier0_observe: true,
     tier1_clipboard: false,
@@ -277,12 +294,14 @@
     const pre = document.getElementById("ai-mcp-snippet");
     const sel = document.getElementById("sel-ai-mcp-client");
     if (!pre || !sel) return;
-    const t = sel.value || "codex";
+    const t = sel.value || "antigravity";
     if (t === "codex") {
       pre.textContent =
         '# ~/.codex/config.toml\n[mcp_servers.spinel_os]\ncommand = "/usr/local/bin/spinel-os-mcp"\nenv = { SPINEL_AGENT_CLIENT = "Codex" }';
     } else {
-      const cname = t === "claude" ? "Claude" : (t === "deepseek" ? "DeepSeekHarness" : "GeminiCLI");
+      const cname = t === "antigravity"
+        ? "Antigravity"
+        : (t === "claude" ? "Claude" : (t === "deepseek" ? "DeepSeekHarness" : "GeminiCLI"));
       pre.textContent = JSON.stringify({
         mcpServers: {
           "spinel-os": {
@@ -317,34 +336,7 @@
     const t3 = document.getElementById("sel-ai-tier3-policy");
     if (t3 && lastAiPerms.tier3_policy) {
       t3.value = lastAiPerms.tier3_policy;
-    }
-
-    const auditList = document.getElementById("ai-audit-list");
-    if (auditList) {
-      auditList.innerHTML = "";
-      const logs = Array.isArray(data.audit) ? data.audit.slice().reverse() : [];
-      if (logs.length === 0) {
-        auditList.innerHTML = '<div class="disk-empty">暂无 MCP 调用记录</div>';
-      } else {
-        logs.forEach((entry) => {
-          const row = document.createElement("div");
-          row.className = "status-row";
-          const left = document.createElement("div");
-          const title = document.createElement("strong");
-          title.textContent = `${entry.client || "local"} → ${entry.capability}`;
-          const sub = document.createElement("div");
-          sub.className = "muted-hint";
-          const dt = entry.ts ? new Date(Number(entry.ts) * 1000).toLocaleTimeString() : "--:--:--";
-          sub.textContent = `${dt}${entry.detail ? " · " + entry.detail : ""}`;
-          left.append(title, sub);
-
-          const tag = document.createElement("span");
-          tag.className = "status-chip";
-          tag.textContent = entry.decision === "allow" ? "已放行" : (entry.decision === "require_approval" ? "需审批" : "已拦截");
-          row.append(left, tag);
-          auditList.appendChild(row);
-        });
-      }
+      if (typeof enhanceSelect === "function") enhanceSelect(t3);
     }
     renderAiMcpSnippet();
   };
@@ -390,7 +382,7 @@
       appList.innerHTML = "";
       const apps = Array.isArray(data.apps) ? data.apps : [];
       if (apps.length === 0) {
-        appList.innerHTML = '<div class="disk-empty">目前没有需要单独限权的沙箱应用（从「应用中心」安装浏览器、Discord、OBS、Heroic 等软件后会在这里出现开关）。</div>';
+        appList.innerHTML = '<div class="perms-empty-row">当前暂无 Flatpak 沙箱应用（原生安装包由系统弹窗保护守护）。</div>';
       } else {
         const permDefs = [
           { key: "home", label: "访问个人文件夹" },
@@ -401,9 +393,8 @@
           { key: "audio", label: "声音与麦克风" }
         ];
         apps.forEach((app) => {
-          const card = document.createElement("div");
-          card.className = "part-section";
-          card.style.marginBottom = "10px";
+          const block = document.createElement("div");
+          block.className = "perms-app-block";
 
           const head = document.createElement("div");
           head.className = "section-head";
@@ -411,8 +402,9 @@
           const titleWrap = document.createElement("div");
           const strong = document.createElement("strong");
           strong.textContent = app.name || app.id;
-          const small = document.createElement("div");
+          const small = document.createElement("span");
           small.className = "muted-hint";
+          small.style.marginLeft = "8px";
           small.textContent = app.id;
           titleWrap.append(strong, small);
 
@@ -447,8 +439,8 @@
             pills.appendChild(row);
           });
 
-          card.append(head, pills);
-          appList.appendChild(card);
+          block.append(head, pills);
+          appList.appendChild(block);
         });
       }
     }
@@ -458,15 +450,16 @@
       portalList.innerHTML = "";
       const entries = Array.isArray(data.portal_entries) ? data.portal_entries : [];
       if (entries.length === 0) {
-        portalList.innerHTML = '<div class="disk-empty">暂无已记住的弹窗记录（外部软件弹窗询问并选择“允许/拒绝”后会显示在这里）。</div>';
+        portalList.innerHTML = '<div class="perms-empty-row">暂无已记住的弹窗记录（外部软件弹窗询问并选择“允许/拒绝”后会显示在这里）。</div>';
       } else {
         entries.forEach((pe) => {
           const row = document.createElement("div");
-          row.className = "status-row";
+          row.className = "perf-row";
           const info = document.createElement("div");
+          info.className = "perf-row-info";
           const title = document.createElement("strong");
           title.textContent = `${pe.app} · ${pe.table}/${pe.id}`;
-          const sub = document.createElement("div");
+          const sub = document.createElement("span");
           sub.className = "muted-hint";
           sub.textContent = `当前状态: ${pe.perms || "已记录"}`;
           info.append(title, sub);
@@ -909,6 +902,10 @@
       const cmd = b.getAttribute("data-cmd") || "";
       b.classList.toggle("active", cmd === `monitor:logs:${activeLogSource}` || cmd === `settings:logs:${activeLogSource}`);
     });
+    const clrBtn = document.getElementById("btn-logs-clear");
+    if (clrBtn) {
+      clrBtn.textContent = activeLogSource === "mcp" ? "清空审计日志" : "清空应用日志";
+    }
     const box = document.getElementById("sys-logs-box");
     if (box) {
       box.textContent = data.text || "(暂无日志内容)";
@@ -1627,21 +1624,21 @@
       (Array.isArray(data.rw_dirs) ? data.rw_dirs : []).forEach((p) => entries.push({ path: p, rw: true }));
       (Array.isArray(data.ro_dirs) ? data.ro_dirs : []).forEach((p) => entries.push({ path: p, rw: false }));
       if (entries.length === 0) {
-        dirList.innerHTML = '<div class="disk-empty">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>';
+        dirList.innerHTML = '<div class="perms-empty-row">暂无白名单目录（在文件管理器右键文件夹也可“在平行沙箱中打开工作区”）</div>';
       } else {
         entries.forEach((ent) => {
           const item = document.createElement("div");
-          item.className = "disk-item";
+          item.className = "perf-row";
           const left = document.createElement("div");
-          const title = document.createElement("div");
-          title.className = "disk-title";
+          left.className = "perf-row-info";
+          const title = document.createElement("strong");
           title.textContent = ent.path;
-          const sub = document.createElement("div");
-          sub.className = "disk-sub";
+          const sub = document.createElement("span");
+          sub.className = "muted-hint";
           sub.textContent = ent.rw ? "可读写 (RW) · 沙箱内改动将持久保留到宿主对应目录" : "仅只读 (RO) · 沙箱内不可修改此目录文件";
           left.append(title, sub);
           const actions = document.createElement("div");
-          actions.className = "disk-tags";
+          actions.className = "footer-actions";
           const tag = document.createElement("span");
           tag.className = "tag";
           tag.textContent = ent.rw ? "可写" : "只读";
@@ -1662,22 +1659,22 @@
       appList.innerHTML = "";
       const apps = Array.isArray(data.apps) ? data.apps : [];
       if (apps.length === 0) {
-        appList.innerHTML = '<div class="disk-empty">暂未配置可启动应用，可在上方选择系统应用添加。</div>';
+        appList.innerHTML = '<div class="perms-empty-row">暂未配置可启动应用，可在上方选择系统应用添加。</div>';
       } else {
         apps.forEach((app) => {
           const item = document.createElement("div");
-          item.className = "disk-item";
+          item.className = "perf-row";
           const left = document.createElement("div");
-          const title = document.createElement("div");
-          title.className = "disk-title";
+          left.className = "perf-row-info";
+          const title = document.createElement("strong");
           title.textContent = app.name || app.cmd;
-          const sub = document.createElement("div");
-          sub.className = "disk-sub";
+          const sub = document.createElement("span");
+          sub.className = "muted-hint";
           sub.textContent = app.cmd;
           left.append(title, sub);
 
           const actions = document.createElement("div");
-          actions.className = "disk-tags";
+          actions.className = "footer-actions";
           const autoLbl = document.createElement("span");
           autoLbl.className = "muted-hint";
           autoLbl.style.marginRight = "4px";

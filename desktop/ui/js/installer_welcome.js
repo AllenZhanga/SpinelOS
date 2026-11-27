@@ -750,7 +750,7 @@
 
   syncAllCustomSelects();
   if (mode === "settings") hooks.switchSettingsTab?.(initialTab);
-  if (mode === "monitor") hooks.switchMonitorTab?.(initialTab);
+  if (mode === "monitor") hooks.switchMonitorTab?.(initialTab, UI.params?.get("source") || "");
   if (mode === "doctor") sendCommand("settings:doctor-scan");
   if (mode === "store") sendCommand("store:refresh");
   if (mode === "installer") sendCommand("installer:scan-disks");

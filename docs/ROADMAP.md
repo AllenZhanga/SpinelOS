@@ -51,12 +51,5 @@
 3. **Stage 2：协议出口层 (`spinel-os-mcp`)**
    - 提供轻量独立 `spinel-os-mcp`（`stdio`）网关，把 Stage 1 原子能力按权限暴露给所有支持 MCP 的外部 Agent 接入与联调。
 4. **Stage 3：桌面业务展示与协同闭环**
-   - 在 `spinel-shell` 顶栏构建原生 **Agent 灵动岛**（会话聚合、展开 Todo 派单箱、一键跳窗/进沙箱 PiP、Tier 3 交互审批卡片），并在设置中心接入权限/审计开关、GameMode 显存仲裁与 Cloud Relay 跨端协同。
+   - 在 `spinel-shell` 顶栏构建原生 **Agent 灵动岛**（会话聚合、一键跳窗/进沙箱 PiP、Tier 3 交互审批卡片），并在「系统设置 → 权限与安全」与「系统监视器 → 系统日志」接入分级权限配置、MCP 接入生成与审计日志查看，联动 Cloud Relay 跨端协同。
    - 完整技术方案、数据结构与验收标准见 [docs/AI_OS_PLAN.md](AI_OS_PLAN.md)。
-
----
-
-## 第四步：Game 持续打磨与发布规范
-
-- 完成真实物理机（AMD / Intel / NVIDIA RTX & 老架构兼容说明）多屏高刷、VRR、手柄大屏及存档备份导入/导出闭环。
-- 补充 `.github/workflows/ci.yml`（每次 Push/PR 自动运行 C++ 编译与 `ctest` 单元测试）并同步构建与发版流程。

@@ -262,13 +262,16 @@ void open_doctor_window(AppState *state) {
 }
 
 void open_monitor_window(AppState *state, const std::string &tab) {
-    std::string clean_tab = (tab == "logs") ? "logs" : "procs";
+    bool is_mcp_logs = (tab == "logs:mcp");
+    std::string clean_tab = (tab == "logs" || is_mcp_logs) ? "logs" : "procs";
+    std::string query = "?mode=monitor&tab=" + clean_tab + (is_mcp_logs ? "&source=mcp" : "");
     bool existed = (state->monitor_win != nullptr);
     ensure_app_window(state, &state->monitor_win, &state->monitor_view,
-                      "系统监视器 · Spinel Monitor", "?mode=monitor&tab=" + clean_tab, 1020, 680);
+                      "系统监视器 · Spinel Monitor", query, 1020, 680);
     if (existed) {
         eval_js(state->monitor_view,
-                "window.__spinelOpenMonitor && window.__spinelOpenMonitor('" + clean_tab + "');");
+                "window.__spinelOpenMonitor && window.__spinelOpenMonitor('" + clean_tab + "'" +
+                    (is_mcp_logs ? ",'mcp'" : "") + ");");
     }
     push_theme_state(state);
     push_telemetry_to_view(state->monitor_view);
@@ -314,7 +317,8 @@ void open_settings_window(AppState *, const std::string &tab) {
 void open_welcome_window(AppState *) { launch_webui_cmd("welcome:open"); }
 void open_doctor_window(AppState *) { launch_webui_cmd("doctor:open"); }
 void open_monitor_window(AppState *, const std::string &tab) {
-    launch_webui_cmd("monitor:open:" + (tab == "logs" ? std::string("logs") : std::string("procs")));
+    std::string arg = (tab == "logs:mcp") ? "logs:mcp" : (tab == "logs" ? "logs" : "procs");
+    launch_webui_cmd("monitor:open:" + arg);
 }
 
 #endif  // SPINEL_HAS_WEBKIT

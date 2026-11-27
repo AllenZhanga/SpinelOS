@@ -1221,6 +1221,47 @@ body.low-fx .lg-orb {
   border-top: 1px solid var(--border);
 }
 
+.perms-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.perms-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.perms-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.perms-group h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.perms-empty-row {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.perms-app-block {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.perms-app-block:last-child {
+  border-bottom: none;
+}
+
 .status-row {
   display: flex;
   align-items: center;
