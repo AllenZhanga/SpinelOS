@@ -1202,6 +1202,13 @@ void test_parallel_sandbox() {
     EXPECT(remove_sandbox_mount_dir(norm));
     EXPECT(load_sandbox_config().rw_dirs.empty());
 
+    {
+        // Default apps are seeded from host-installed executables; start from an explicit empty list for determinism.
+        SandboxConfig base = load_sandbox_config();
+        base.apps.clear();
+        base.apps_configured = true;
+        EXPECT(save_sandbox_config(base));
+    }
     EXPECT(add_sandbox_app("My Terminal", "launch:terminal", true, err));
     EXPECT(add_sandbox_app("Browser", "launch:browser", false, err));
     auto apps = load_sandbox_config().apps;
