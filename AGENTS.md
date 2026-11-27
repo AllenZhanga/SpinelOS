@@ -57,11 +57,16 @@ bash -n scripts/dev-deploy.sh
   ```bash
   ./scripts/dev-deploy.sh <user>@<ip> --full
   ```
-- **四端一致性检查**：增删系统包、自启服务、桌面入口或二进制文件时，需同步确认以下 4 处是否一致：
+- **多端一致性检查**：增删系统包、自启服务、桌面入口、二进制文件或系统配置时，需同步确认以下 6 处是否一致：
   1. [archiso/packages.custom.x86_64](archiso/packages.custom.x86_64)
   2. [docker/build-inside-container.sh](docker/build-inside-container.sh)
   3. [archiso/airootfs/usr/local/bin/spinel-install](archiso/airootfs/usr/local/bin/spinel-install)
   4. [scripts/dev-deploy.sh](scripts/dev-deploy.sh)
+  5. [scripts/release-ota.sh](scripts/release-ota.sh)
+  6. [archiso/airootfs/usr/local/bin/spinel-update](archiso/airootfs/usr/local/bin/spinel-update)
+- **云端 OTA 与 Relay 发布**：
+  - OTA 分发与远程沙箱共用同一个 `spinel-relay` 服务端（`:7443` TLS + `/var/lib/spinel-relay/ota` + 同账号鉴权）；测试机仅运行 `dev-deploy.sh` 不会自动同步云端 OTA。
+  - 完成阶段性功能或关键修复并本地验证通过后，按 [docs/OTA_RELEASE_GUIDE.md](docs/OTA_RELEASE_GUIDE.md) 运行 `./scripts/release-ota.sh` 打包签名并上传云端 OTA；若修改了 `server/spinel-relay/` 需同时用 `./scripts/build-relay.sh` 升级中继服务端。
 - **账户无关性**：严禁硬编码 `/home/gamer` 或 `/home/allen`，一律通过 `home_dir()` 或 `$HOME` 读取。
 
 ---
