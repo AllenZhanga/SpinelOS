@@ -64,6 +64,8 @@ struct AppState {
     std::atomic<pid_t> store_child_pgid{-1};
     std::thread install_thread;
     std::thread store_thread;
+    std::thread store_refresh_thread;
+    std::atomic<bool> store_refresh_running{false};
 
     std::atomic<bool> bt_busy{false};
     std::atomic<bool> wifi_busy{false};

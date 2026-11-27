@@ -1654,8 +1654,8 @@
       </div>
       <div class="footer-actions" style="gap: 10px; flex-wrap: wrap;">
         <div class="tab-bar" id="store-view-tabs">
-          <button type="button" class="tab-btn active" data-store-view="market">应用市场</button>
-          <button type="button" class="tab-btn" data-store-view="installed">我的应用</button>
+          <button type="button" class="tab-btn active" data-store-view="installed">我的应用</button>
+          <button type="button" class="tab-btn" data-store-view="market">应用市场</button>
         </div>
         <button type="button" class="btn small" data-cmd="games:open">游戏中心</button>
         <button type="button" class="btn small" data-cmd="settings:open:updates">系统更新 →</button>
@@ -1663,7 +1663,7 @@
     </header>
 
     <div class="app-scroll">
-      <div id="store-view-market" class="store-subview">
+      <div id="store-view-market" class="store-subview hidden">
         <div class="store-top-bar glass" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div class="tab-bar" id="store-cat-tabs">
             <button class="tab-btn active" data-store-cat="all">全部</button>
@@ -1722,28 +1722,30 @@
         </div>
       </div>
 
-      <div id="store-view-installed" class="store-subview hidden">
+      <div id="store-view-installed" class="store-subview">
         <section class="library-section glass">
           <div class="section-head">
             <div class="lib-title-wrap">
-              <h3 id="launchpad-heading" tabindex="-1">全部桌面应用程序</h3>
+              <h3 id="launchpad-heading" tabindex="-1">我的应用</h3>
               <span id="launchpad-count-badge" class="status-chip">0 个应用</span>
             </div>
             <div class="footer-actions">
               <input type="text" id="launchpad-search-input" class="search-input" placeholder="筛选已安装应用..." />
               <button type="button" class="btn small" data-cmd="store:refresh">刷新列表</button>
-              <button type="button" class="btn small primary" data-store-view="market">浏览应用市场</button>
+              <button type="button" class="btn small primary" data-store-view="market">去应用市场</button>
             </div>
           </div>
           <div id="launchpad-feedback" class="feedback-banner hidden" role="status"></div>
-          <div id="launchpad-app-grid" class="launchpad-grid"></div>
+          <div id="launchpad-app-grid" class="launchpad-grid">
+            <div class="lib-empty">正在加载已安装应用...</div>
+          </div>
         </section>
       </div>
     </div>
 
     <div id="launchpad-context-menu" class="ctx-menu glass hidden" role="menu" aria-label="应用操作">
       <button type="button" role="menuitem" id="launchpad-open-location">打开所在目录</button>
-      <button type="button" role="menuitem" id="launchpad-remove-shortcut">移除快捷方式</button>
+      <button type="button" role="menuitem" id="launchpad-remove-shortcut" class="danger">移除快捷方式</button>
     </div>
   </section>
 

@@ -270,10 +270,10 @@
 
   /* ---------------- 5. SpinelOS App Center & Settings Updates ---------------- */
   let storeCategory = "all";
-  let storeSubview = UI.params?.get("tab") === "installed" ? "installed" : "market";
+  let storeSubview = (UI.params?.get("tab") === "market" || UI.params?.get("focus")) ? "market" : "installed";
 
   function switchStoreSubview(nextView) {
-    storeSubview = nextView === "installed" ? "installed" : "market";
+    storeSubview = nextView === "market" ? "market" : "installed";
     document.getElementById("store-view-market")?.classList.toggle("hidden", storeSubview !== "market");
     document.getElementById("store-view-installed")?.classList.toggle("hidden", storeSubview !== "installed");
     document.querySelectorAll("#store-view-tabs [data-store-view]").forEach((btn) => {
@@ -281,6 +281,8 @@
     });
     if (storeSubview === "installed") {
       UI.renderLaunchpadApps?.();
+    } else {
+      renderStoreApps();
     }
   }
   window.__spinelOpenStoreView = switchStoreSubview;
@@ -334,13 +336,18 @@
       if (el && drvText) el.textContent = drvText;
     });
 
-    const totalUpd = Number(ss.updates_total || 0);
+    const rawUpd = ss.updates_total;
+    const totalUpd = (rawUpd === undefined || rawUpd === null) ? -1 : Number(rawUpd);
     const gpuUpds = Array.isArray(ss.gpu_updates) ? ss.gpu_updates : [];
     const sysUpdBtn = document.getElementById("btn-sys-update");
     ["store-update-chip", "upd-update-chip"].forEach((id) => {
       const updChip = document.getElementById(id);
       if (!updChip) return;
-      if (totalUpd > 0) {
+      if (totalUpd < 0) {
+        updChip.textContent = "索引检查中...";
+        updChip.style.background = "";
+        updChip.style.color = "";
+      } else if (totalUpd > 0) {
         updChip.textContent = gpuUpds.length > 0
           ? `可更新 ${totalUpd} 项（含显卡/内核 ${gpuUpds.length} 项）`
           : `可更新 ${totalUpd} 项`;
@@ -639,7 +646,9 @@
   });
 
   window.__spinelFocusStoreApp = (appId) => {
-    state.pendingStoreFocus = String(appId || "").trim();
+    const id = String(appId || "").trim();
+    state.pendingStoreFocus = id;
+    if (id) switchStoreSubview("market");
   };
 
   window.__spinelStoreData = (data) => {

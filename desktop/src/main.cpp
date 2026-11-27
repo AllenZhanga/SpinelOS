@@ -743,6 +743,9 @@ int main(int argc, char **argv) {
     if (state.store_thread.joinable()) {
         state.store_thread.join();
     }
+    if (state.store_refresh_thread.joinable()) {
+        state.store_refresh_thread.join();
+    }
     g_object_unref(app);
     return status;
 #else

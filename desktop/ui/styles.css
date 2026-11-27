@@ -379,6 +379,14 @@ html, body {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
 }
 
+#launchpad-context-menu button.danger {
+  color: #f87171;
+}
+
+#launchpad-context-menu button.danger:hover {
+  background: rgba(248, 113, 113, 0.16);
+}
+
 #launchpad-context-menu button:focus-visible {
   background: var(--surface-hover);
   outline: 2px solid var(--accent);
@@ -1478,12 +1486,18 @@ body.low-fx .lg-orb {
 
 .launchpad-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
   gap: 12px;
 }
 
+.launchpad-card {
+  position: relative;
+}
+
 .launchpad-item {
-  padding: 12px 8px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 8px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
@@ -1493,11 +1507,58 @@ body.low-fx .lg-orb {
   gap: 8px;
   cursor: pointer;
   color: var(--text);
+  transition: background 0.14s ease, border-color 0.14s ease;
 }
 
-.launchpad-item:hover {
+.launchpad-card:hover .launchpad-item,
+.launchpad-item:hover,
+.launchpad-item:focus-visible {
   background: rgba(56, 189, 248, 0.12);
   border-color: rgba(56, 189, 248, 0.45);
+}
+
+.launchpad-more-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.55);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+}
+
+.launchpad-card:hover .launchpad-more-btn,
+.launchpad-card:focus-within .launchpad-more-btn,
+.launchpad-more-btn:focus-visible {
+  opacity: 1;
+}
+
+.launchpad-more-btn:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.launchpad-user-badge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  pointer-events: none;
 }
 
 .launchpad-item img,
@@ -1510,6 +1571,7 @@ body.low-fx .lg-orb {
 .launchpad-item span {
   font-size: 12px;
   text-align: center;
+  word-break: break-word;
 }
 
 .lib-empty {
@@ -2235,6 +2297,15 @@ body.theme-light .wp-card,
 body.theme-light .launchpad-item {
   background: rgba(15, 23, 42, 0.045);
   border-color: rgba(15, 23, 42, 0.12);
+}
+
+body.theme-light .launchpad-more-btn {
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+}
+
+body.theme-light #launchpad-context-menu button.danger {
+  color: #dc2626;
 }
 
 body.theme-light .part-section,

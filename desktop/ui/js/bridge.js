@@ -850,16 +850,24 @@
     launchpadMenuAnchor = null;
   }
 
-  function openLaunchpadMenu(ev, app) {
+  function openLaunchpadMenu(ev, app, anchorOverride = null) {
     ev.preventDefault();
-    launchpadMenuAnchor = ev.currentTarget;
+    ev.stopPropagation();
+    const targetAnchor = anchorOverride || ev.currentTarget;
+    if (launchpadMenuApp && launchpadMenuApp.id === app.id && launchpadMenuAnchor === targetAnchor &&
+        !launchpadMenu.classList.contains("hidden")) {
+      closeLaunchpadMenu(true);
+      return;
+    }
+    launchpadMenuAnchor = targetAnchor;
     launchpadMenuApp = app;
-    launchpadRemoveShortcut.classList.toggle("hidden", !app.user_shortcut);
+    launchpadRemoveShortcut.textContent = app.user_shortcut ? "移除快捷方式" : "从我的应用隐藏";
+    launchpadRemoveShortcut.classList.remove("hidden");
     launchpadMenu.classList.remove("hidden");
     const menu = launchpadMenu.getBoundingClientRect();
     const anchor = launchpadMenuAnchor.getBoundingClientRect();
-    const x = ev.clientX || anchor.left;
-    const y = ev.clientY || anchor.bottom;
+    const x = ev.clientX && !anchorOverride ? ev.clientX : anchor.right - menu.width;
+    const y = ev.clientY && !anchorOverride ? ev.clientY : anchor.bottom + 6;
     launchpadMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.width - 8))}px`;
     launchpadMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.height - 8))}px`;
     launchpadOpenLocation.focus({ preventScroll: true });
@@ -874,8 +882,8 @@
   }
 
   if (launchpadMenu) {
-    launchpadOpenLocation.addEventListener("click", () => sendLaunchpadAction("app.open-location"));
-    launchpadRemoveShortcut.addEventListener("click", () => sendLaunchpadAction("app.remove-shortcut"));
+    launchpadOpenLocation.addEventListener("click", () => sendLaunchpadAction("app:open-location"));
+    launchpadRemoveShortcut.addEventListener("click", () => sendLaunchpadAction("app:remove-shortcut"));
     launchpadMenu.addEventListener("keydown", (ev) => {
       if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && !launchpadRemoveShortcut.classList.contains("hidden")) {
         ev.preventDefault();
@@ -883,6 +891,7 @@
       }
     });
     document.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest(".launchpad-more-btn")) return;
       if (!launchpadMenu.contains(ev.target)) closeLaunchpadMenu();
     });
     document.addEventListener("keydown", (ev) => {
@@ -897,8 +906,9 @@
     const grid = document.getElementById("launchpad-app-grid");
     if (!grid) return;
     const focused = launchpadMenuAnchor || document.activeElement;
-    const focusIndex = Array.from(grid.children).indexOf(focused);
-    const focusId = focusIndex >= 0 ? focused.dataset.appId : null;
+    const focusedCard = focused?.closest?.(".launchpad-card") || focused;
+    const focusIndex = Array.from(grid.children).indexOf(focusedCard);
+    const focusId = focusedCard?.dataset?.appId || null;
     closeLaunchpadMenu();
     grid.innerHTML = "";
     const query = (document.getElementById("launchpad-search-input")?.value || "").trim().toLowerCase();
@@ -912,15 +922,20 @@
       return;
     }
     list.forEach((app) => {
+      const card = document.createElement("div");
+      card.className = "launchpad-card";
+      card.dataset.appId = app.id;
+
       const btn = document.createElement("button");
+      btn.type = "button";
       btn.className = "launchpad-item";
       btn.dataset.appId = app.id;
       btn.setAttribute("data-cmd", `app:launch:${app.id}`);
       if (launchpadMenu) {
         btn.setAttribute("aria-haspopup", "menu");
-        btn.addEventListener("contextmenu", (ev) => openLaunchpadMenu(ev, app));
+        card.addEventListener("contextmenu", (ev) => openLaunchpadMenu(ev, app, btn));
         btn.addEventListener("keydown", (ev) => {
-          if (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) openLaunchpadMenu(ev, app);
+          if (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) openLaunchpadMenu(ev, app, btn);
         });
       }
       const kind = matchAppKind(`${app.id} ${app.name}`);
@@ -938,12 +953,33 @@
       const label = document.createElement("span");
       label.textContent = app.name;
       btn.appendChild(label);
-      grid.appendChild(btn);
+      card.appendChild(btn);
+
+      if (app.user_shortcut) {
+        const tag = document.createElement("span");
+        tag.className = "launchpad-user-badge";
+        tag.textContent = "自建";
+        tag.title = "本地自定义快捷方式";
+        card.appendChild(tag);
+      }
+
+      if (launchpadMenu) {
+        const moreBtn = document.createElement("button");
+        moreBtn.type = "button";
+        moreBtn.className = "launchpad-more-btn";
+        moreBtn.textContent = "⋯";
+        moreBtn.title = "打开所在目录 / 移除快捷方式";
+        moreBtn.setAttribute("aria-label", `${app.name} 更多操作`);
+        moreBtn.addEventListener("click", (ev) => openLaunchpadMenu(ev, app, moreBtn));
+        card.appendChild(moreBtn);
+      }
+
+      grid.appendChild(card);
     });
     if (focusIndex >= 0) {
-      const replacement = Array.from(grid.children).find((button) => button.dataset.appId === focusId)
-        || grid.children[Math.min(focusIndex, grid.children.length - 1)]
-        || document.getElementById("launchpad-heading");
+      const targetCard = Array.from(grid.children).find((el) => el.dataset.appId === focusId)
+        || grid.children[Math.min(focusIndex, grid.children.length - 1)];
+      const replacement = targetCard?.querySelector(".launchpad-item") || document.getElementById("launchpad-heading");
       replacement?.focus({ preventScroll: true });
     }
   }

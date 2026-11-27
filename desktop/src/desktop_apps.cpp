@@ -19,10 +19,12 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -53,12 +55,28 @@ std::string resolve_icon_path(const std::string &icon_raw) {
                               (icon.front() == '\'' && icon.back() == '\''))) {
         icon = icon.substr(1, icon.size() - 2);
     }
-    std::error_code ec;
-    if (icon.front() == '/' && fs::exists(icon, ec) && fs::is_regular_file(icon, ec)) {
-        return icon;
+    const std::string home = home_dir();
+    const std::string cache_key = home + "\n" + icon;
+    static std::mutex s_icon_mu;
+    static std::unordered_map<std::string, std::string> s_icon_cache;
+    {
+        std::lock_guard<std::mutex> lock(s_icon_mu);
+        auto it = s_icon_cache.find(cache_key);
+        if (it != s_icon_cache.end()) return it->second;
     }
 
-    const std::string home = home_dir();
+    auto cache_return = [&](std::string result) {
+        std::lock_guard<std::mutex> lock(s_icon_mu);
+        if (s_icon_cache.size() > 1024) s_icon_cache.clear();
+        s_icon_cache[cache_key] = result;
+        return result;
+    };
+
+    std::error_code ec;
+    if (icon.front() == '/' && fs::exists(icon, ec) && fs::is_regular_file(icon, ec)) {
+        return cache_return(icon);
+    }
+
     const fs::path local_icons = fs::path(g_get_user_data_dir()) / "icons/hicolor";
     const fs::path flatpak_user_icons = fs::path(home) / ".local/share/flatpak/exports/share/icons/hicolor";
     const fs::path flatpak_sys_icons = "/var/lib/flatpak/exports/share/icons/hicolor";
@@ -84,7 +102,7 @@ std::string resolve_icon_path(const std::string &icon_raw) {
             for (const auto &ext : exts) {
                 fs::path p = dir / (icon + ext);
                 if (fs::exists(p, ec) && fs::is_regular_file(p, ec)) {
-                    return p.string();
+                    return cache_return(p.string());
                 }
             }
         }
@@ -95,7 +113,7 @@ std::string resolve_icon_path(const std::string &icon_raw) {
         for (const auto &ext : exts) {
             fs::path p = pdir / (icon + ext);
             if (fs::exists(p, ec) && fs::is_regular_file(p, ec)) {
-                return p.string();
+                return cache_return(p.string());
             }
         }
     }
@@ -123,11 +141,11 @@ std::string resolve_icon_path(const std::string &icon_raw) {
                     g_object_unref(gf);
                 }
                 g_object_unref(paintable);
-                if (!resolved.empty()) return resolved;
+                if (!resolved.empty()) return cache_return(resolved);
             }
         }
     }
-    return "";
+    return cache_return("");
 }
 
 std::vector<std::string> split_exec_args(const std::string &exec, const DesktopApp *app = nullptr) {
@@ -292,7 +310,8 @@ bool is_hidden_utility_app(const std::string &id, bool is_terminal) {
     return hidden_ids.count(id) > 0;
 }
 
-bool parse_desktop_file(const fs::path &path, DesktopApp &app, bool for_catalog = true) {
+bool parse_desktop_file(const fs::path &path, DesktopApp &app, bool for_catalog = true, bool *out_masked = nullptr) {
+    if (out_masked) *out_masked = false;
     std::ifstream ifs(path);
     if (!ifs.is_open()) return false;
 
@@ -334,11 +353,16 @@ bool parse_desktop_file(const fs::path &path, DesktopApp &app, bool for_catalog 
         else if (k == "OnlyShowIn") only_show_in = v;
     }
 
-    if (type != "Application" || hidden || (app.exec.empty() && (for_catalog || !app.dbus_activatable))) return false;
-    if (for_catalog && (no_display || (!only_show_in.empty() && only_show_in.find("GNOME") == std::string::npos &&
-        only_show_in.find("SpinelOS") == std::string::npos))) {
+    if (hidden) {
+        if (out_masked) *out_masked = true;
         return false;
     }
+    if (for_catalog && (no_display || (!only_show_in.empty() && only_show_in.find("GNOME") == std::string::npos &&
+        only_show_in.find("SpinelOS") == std::string::npos))) {
+        if (out_masked) *out_masked = true;
+        return false;
+    }
+    if (type != "Application" || (app.exec.empty() && (for_catalog || !app.dbus_activatable))) return false;
 
     app.id = path.stem().string();
     if (for_catalog && is_hidden_utility_app(app.id, app.terminal)) return false;
@@ -400,26 +424,37 @@ std::string reveal_app_path(const DesktopApp &app) {
     return app.desktop_file.string();
 }
 
-std::vector<DesktopApp> scan_all_apps() {
-    const auto user_dirs = user_application_dirs();
-    auto dirs = user_dirs;
-    dirs.insert(dirs.end(), {
+std::vector<fs::path> system_application_dirs() {
+    return {
         fs::path(home_dir()) / ".local/share/flatpak/exports/share/applications",
         fs::path("/var/lib/flatpak/exports/share/applications"),
         fs::path("/usr/local/share/applications"),
         fs::path("/usr/share/applications")
-    });
+    };
+}
+
+std::vector<DesktopApp> scan_all_apps() {
+    const auto user_dirs = user_application_dirs();
+    auto dirs = user_dirs;
+    const auto sys_dirs = system_application_dirs();
+    dirs.insert(dirs.end(), sys_dirs.begin(), sys_dirs.end());
 
     std::map<std::string, DesktopApp> by_id;
+    std::set<std::string> masked_ids;
     std::error_code ec;
     for (const auto &d : dirs) {
         if (!fs::is_directory(d, ec)) continue;
         for (const auto &entry : fs::directory_iterator(d, ec)) {
             if (!entry.is_regular_file(ec) || entry.path().extension() != ".desktop") continue;
+            const std::string stem = entry.path().stem().string();
+            if (by_id.count(stem) || masked_ids.count(stem)) continue;
             DesktopApp app;
-            if (parse_desktop_file(entry.path(), app)) {
+            bool masked = false;
+            if (parse_desktop_file(entry.path(), app, true, &masked)) {
                 app.user_shortcut = std::ranges::find(user_dirs, d) != user_dirs.end() && is_owned_shortcut(entry.path());
                 by_id.try_emplace(app.id, std::move(app));
+            } else if (masked) {
+                masked_ids.insert(stem);
             }
         }
     }
@@ -506,6 +541,45 @@ LocalAppShortcut find_local_app_shortcut(const std::string &id) {
     return {};
 }
 
+bool trash_or_remove_path(const std::string &path_str, std::string &error) {
+    g_autoptr(GFile) file = g_file_new_for_path(path_str.c_str());
+    g_autoptr(GError) failure = nullptr;
+    if (g_file_trash(file, nullptr, &failure)) return true;
+    std::error_code ec;
+    if (fs::remove(path_str, ec) && !ec) return true;
+    error = failure ? failure->message : "无法移到回收站或删除快捷方式。";
+    return false;
+}
+
+bool has_system_desktop_entry(const std::string &id) {
+    std::error_code ec;
+    for (const auto &d : system_application_dirs()) {
+        if (fs::is_regular_file(d / (id + ".desktop"), ec)) return true;
+    }
+    return false;
+}
+
+bool write_hidden_desktop_override(const std::string &id, const std::string &app_name, std::string &error) {
+    if (id.empty() || id == "." || id == ".." || id.find('/') != std::string::npos || id.find('\0') != std::string::npos) {
+        error = "无效的应用 ID。";
+        return false;
+    }
+    const fs::path dir = user_application_dirs().front();
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const fs::path dest = dir / (id + ".desktop");
+    std::string content = "[Desktop Entry]\nType=Application\nName=" +
+                          (!app_name.empty() ? app_name : id) + "\nHidden=true\n";
+    if (!write_text_file(dest.string(), content)) {
+        error = "无法写入本地隐藏配置文件：" + dest.string();
+        return false;
+    }
+    std::string out;
+    int rc = 0;
+    run_argv_capture({"update-desktop-database", dir.string()}, out, rc);
+    return true;
+}
+
 bool trash_local_app_shortcut(const std::string &id, std::string &error) {
     error.clear();
     const auto shortcut = find_local_app_shortcut(id);
@@ -513,43 +587,78 @@ bool trash_local_app_shortcut(const std::string &id, std::string &error) {
         error = "找不到可移除的本地快捷方式。";
         return false;
     }
-    g_autoptr(GFile) file = g_file_new_for_path(shortcut.shortcut_path.c_str());
-    g_autoptr(GError) failure = nullptr;
-    if (g_file_trash(file, nullptr, &failure)) return true;
-    error = failure ? failure->message : "无法移到回收站。";
-    return false;
+    if (!trash_or_remove_path(shortcut.shortcut_path, error)) return false;
+    if (has_system_desktop_entry(id)) {
+        std::string hide_err;
+        write_hidden_desktop_override(id, id, hide_err);
+    } else {
+        std::string out;
+        int rc = 0;
+        run_argv_capture({"update-desktop-database", fs::path(shortcut.shortcut_path).parent_path().string()}, out, rc);
+    }
+    return true;
 }
 
 bool execute_launchpad_app_action(const std::string &id, bool remove_shortcut, std::string &feedback) {
     feedback.clear();
     if (remove_shortcut) {
-        if (!trash_local_app_shortcut(id, feedback)) return false;
-        feedback = "已将快捷方式移到回收站。";
+        if (!find_local_app_shortcut(id).shortcut_path.empty()) {
+            if (!trash_local_app_shortcut(id, feedback)) return false;
+            feedback = "已将快捷方式移到回收站。";
+            return true;
+        }
+        const auto apps = scan_all_apps();
+        const auto app = std::ranges::find(apps, id, &DesktopApp::id);
+        if (app == apps.end()) {
+            feedback = "找不到对应的应用快捷方式。";
+            return false;
+        }
+        if (app->wine_shortcut) {
+            if (!trash_or_remove_path(app->wine_shortcut->link.string(), feedback)) return false;
+            feedback = "已移除 Windows 应用快捷方式。";
+            return true;
+        }
+        if (!write_hidden_desktop_override(id, app->name, feedback)) return false;
+        feedback = "已从「我的应用」隐藏「" + app->name + "」（系统原程序仍保留）。";
         return true;
     }
     const auto apps = scan_all_apps();
     const auto app = std::ranges::find(apps, id, &DesktopApp::id);
-    const std::string path = app == apps.end() ? "" : reveal_app_path(*app);
+    std::string path = app == apps.end() ? "" : reveal_app_path(*app);
+    if (path.empty() && app != apps.end() && !app->desktop_file.empty()) {
+        path = app->desktop_file.string();
+    }
     if (path.empty()) {
         feedback = "找不到应用所在目录。";
         return false;
     }
+    ensure_display_env();
+    g_autofree char *in_path = g_find_program_in_path("spinel-files");
+    const char *files_bin = (in_path && *in_path) ? in_path : "/usr/local/bin/spinel-files";
     g_autoptr(GError) error = nullptr;
     g_autoptr(GSubprocess) process = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
-                                                     "spinel-files", path.c_str(), nullptr);
-    if (process) return true;
+                                                     files_bin, path.c_str(), nullptr);
+    if (process) {
+        std::error_code ec;
+        fs::path p(path);
+        fs::path dir = fs::is_directory(p, ec) ? p : p.parent_path();
+        feedback = "已打开所在目录: " + dir.string();
+        return true;
+    }
     feedback = error ? error->message : "无法打开文件管理器。";
     return false;
 }
 
 void handle_launchpad_app_action(AppState *state, const std::string &id, bool remove_shortcut) {
-    if (!state || !state->games_view || id.empty()) return;
+    if (!state || (!state->store_view && !state->games_view) || id.empty()) return;
     std::string feedback;
     const bool ok = execute_launchpad_app_action(id, remove_shortcut, feedback);
     if (ok && remove_shortcut) push_desktop_apps(state);
     if (feedback.empty()) return;
-    eval_js(state->games_view, "window.__spinelLaunchpadFeedback?.(" + std::string(ok ? "true" : "false") +
-                               ",\"" + json_escape(feedback) + "\");");
+    const std::string js = "window.__spinelLaunchpadFeedback?.(" + std::string(ok ? "true" : "false") +
+                           ",\"" + json_escape(feedback) + "\");";
+    if (state->store_view) eval_js(state->store_view, js);
+    if (state->games_view) eval_js(state->games_view, js);
 }
 
 namespace {

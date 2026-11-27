@@ -89,6 +89,44 @@ std::vector<AgentSessionInfo> scan_proc_agents_unlocked(long long now_sec) {
     if (!fs::is_directory("/proc", ec)) return discovered;
 
     const uid_t my_uid = ::getuid();
+    struct RawProcMatch {
+        pid_t pid = 0;
+        pid_t ppid = 0;
+        std::string agent;
+        std::string cwd;
+        bool in_sandbox = false;
+    };
+    std::vector<RawProcMatch> candidates;
+    std::map<pid_t, size_t> pid_to_idx;
+
+    auto read_proc_ppid = [](const fs::path &pid_dir) -> pid_t {
+        std::ifstream ifs(pid_dir / "stat");
+        if (!ifs.is_open()) return 0;
+        std::string line;
+        std::getline(ifs, line);
+        auto rparen = line.rfind(')');
+        if (rparen == std::string::npos || rparen + 2 >= line.size()) return 0;
+        std::istringstream iss(line.substr(rparen + 2));
+        char state_ch = '?';
+        pid_t ppid = 0;
+        if (iss >> state_ch >> ppid) return ppid;
+        return 0;
+    };
+
+    auto is_electron_gui_binary = [](const fs::path &pid_dir, const std::string &cmdline) -> bool {
+        if (cmdline.find("--ozone-platform") != std::string::npos ||
+            cmdline.find("--app-path=") != std::string::npos) {
+            return true;
+        }
+        std::error_code exe_ec;
+        fs::path exe = fs::read_symlink(pid_dir / "exe", exe_ec);
+        if (!exe_ec && !exe.empty()) {
+            fs::path app_asar = exe.parent_path() / "resources" / "app.asar";
+            if (fs::exists(app_asar, exe_ec)) return true;
+        }
+        return false;
+    };
+
     for (const auto &entry : fs::directory_iterator("/proc", fs::directory_options::skip_permission_denied, ec)) {
         std::string pname = entry.path().filename().string();
         if (pname.empty() || !std::all_of(pname.begin(), pname.end(), [](unsigned char c) { return std::isdigit(c); })) {
@@ -105,18 +143,39 @@ std::vector<AgentSessionInfo> scan_proc_agents_unlocked(long long now_sec) {
         std::string agent_name;
         if (!match_known_agent_cmdline(cmdline, agent_name)) continue;
 
+        // An open Electron GUI IDE window (without any CLI/reported agent task) is not an active AI session.
+        if (is_electron_gui_binary(entry.path(), cmdline)) continue;
+
         std::error_code cwd_ec;
         std::string cwd = fs::read_symlink(entry.path() / "cwd", cwd_ec).string();
-        if (cwd_ec) cwd.clear();
+        if (cwd_ec || cwd.rfind("/proc/", 0) == 0) cwd.clear();
+
+        pid_to_idx[pid] = candidates.size();
+        candidates.push_back({pid, read_proc_ppid(entry.path()), agent_name, std::move(cwd), proc_has_sandbox_env(entry.path())});
+    }
+
+    // Collapse child workers whose ancestor is also a matched CLI agent process.
+    for (const auto &c : candidates) {
+        bool has_matched_ancestor = false;
+        pid_t cur = c.ppid;
+        for (int depth = 0; depth < 6 && cur > 1; ++depth) {
+            auto it = pid_to_idx.find(cur);
+            if (it != pid_to_idx.end()) {
+                has_matched_ancestor = true;
+                break;
+            }
+            cur = read_proc_ppid(fs::path("/proc") / std::to_string(cur));
+        }
+        if (has_matched_ancestor) continue;
 
         AgentSessionInfo info;
-        info.id = "proc-" + std::to_string(pid);
-        info.agent = agent_name;
-        info.title = !cwd.empty() ? (agent_name + " · " + fs::path(cwd).filename().string()) : agent_name;
-        info.repo_path = cwd;
-        info.pid = pid;
+        info.id = "proc-" + std::to_string(c.pid);
+        info.agent = c.agent;
+        info.title = !c.cwd.empty() ? (c.agent + " · " + fs::path(c.cwd).filename().string()) : c.agent;
+        info.repo_path = c.cwd;
+        info.pid = c.pid;
         info.status = AgentSessionStatus::Running;
-        info.in_sandbox = proc_has_sandbox_env(entry.path());
+        info.in_sandbox = c.in_sandbox;
         info.source = "proc";
         info.updated_at = now_sec;
         discovered.push_back(std::move(info));
@@ -207,6 +266,19 @@ bool match_known_agent_cmdline(const std::string &cmdline, std::string &agent_ou
         return false;
     }
 
+    // Exclude Chromium/Electron multi-process helpers & background sidecar hosts.
+    if (low.find("--type=renderer") != std::string::npos ||
+        low.find("--type=zygote") != std::string::npos ||
+        low.find("--type=gpu-process") != std::string::npos ||
+        low.find("--type=utility") != std::string::npos ||
+        low.find("--type=crashpad-handler") != std::string::npos ||
+        low.find("--utility-sub-type=") != std::string::npos ||
+        low.find("--renderer-client-id=") != std::string::npos ||
+        low.find("--gpu-preferences=") != std::string::npos ||
+        low.find("sidecar_sdk") != std::string::npos) {
+        return false;
+    }
+
     std::istringstream iss(low);
     std::vector<std::string> tokens;
     std::string tok;
@@ -235,7 +307,11 @@ bool match_known_agent_cmdline(const std::string &cmdline, std::string &agent_ou
         {"gemini", "GeminiCLI"},
     };
 
-    // Inspect binary basename first, then runtime script/module arguments (for node/python wrapped CLIs).
+    const bool is_runtime_wrapper =
+        (arg0 == "node" || arg0 == "nodejs" || arg0 == "python" ||
+         arg0 == "python3" || arg0 == "uv" || arg0 == "npx" || arg0 == "bun");
+
+    // Inspect binary basename first; for script runtimes inspect only the first non-flag entrypoint token.
     for (size_t i = 0; i < tokens.size(); ++i) {
         if (i > 0 && !tokens[i].empty() && tokens[i][0] == '-') continue;
         std::string hay = (i == 0) ? arg0 : tokens[i];
@@ -245,8 +321,10 @@ bool match_known_agent_cmdline(const std::string &cmdline, std::string &agent_ou
                 return true;
             }
         }
-        if (i == 0 && arg0 != "node" && arg0 != "nodejs" && arg0 != "python" &&
-            arg0 != "python3" && arg0 != "uv" && arg0 != "npx" && arg0 != "bun") {
+        if (i == 0 && !is_runtime_wrapper) {
+            break;
+        }
+        if (i > 0) {
             break;
         }
     }

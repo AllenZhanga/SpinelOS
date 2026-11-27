@@ -17,8 +17,11 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -147,14 +150,43 @@ bool is_valid_flatpak_id(const std::string &id) {
     return true;
 }
 
-bool is_pacman_pkg_installed(const std::string &pkg) {
+std::unordered_set<std::string> load_installed_pacman_pkgs() {
+    std::unordered_set<std::string> pkgs;
+    std::error_code ec;
+    const fs::path db_dir("/var/lib/pacman/local");
+    if (fs::is_directory(db_dir, ec)) {
+        for (const auto &entry : fs::directory_iterator(db_dir, fs::directory_options::skip_permission_denied, ec)) {
+            if (!entry.is_directory(ec)) continue;
+            std::string dir_name = entry.path().filename().string();
+            // pacman local entries are "<pkgname>-<pkgver>-<pkgrel>"
+            auto d1 = dir_name.rfind('-');
+            if (d1 == std::string::npos || d1 == 0) continue;
+            auto d2 = dir_name.rfind('-', d1 - 1);
+            if (d2 == std::string::npos || d2 == 0) continue;
+            pkgs.insert(dir_name.substr(0, d2));
+        }
+        if (!pkgs.empty()) return pkgs;
+    }
+    std::string out;
+    int rc = 1;
+    if (run_argv_capture({"pacman", "-Qq"}, out, rc) && rc == 0) {
+        for (const auto &line : split_lines(out)) {
+            std::string t = trim_copy(line);
+            if (!t.empty()) pkgs.insert(std::move(t));
+        }
+    }
+    return pkgs;
+}
+
+bool is_pacman_pkg_installed(const std::string &pkg, const std::unordered_set<std::string> *pkg_set = nullptr) {
     if (!is_valid_pacman_pkg(pkg)) return false;
+    if (pkg_set) return pkg_set->count(pkg) > 0;
     std::string out;
     int rc = 1;
     return run_argv_capture({"pacman", "-Qq", pkg}, out, rc) && rc == 0;
 }
 
-bool is_native_app_installed(const std::string &app_id) {
+bool is_native_app_installed(const std::string &app_id, const std::unordered_set<std::string> *pkg_set = nullptr) {
     std::error_code ec;
     if (app_id == "chrome") {
         return has_executable("google-chrome-stable") ||
@@ -162,11 +194,11 @@ bool is_native_app_installed(const std::string &app_id) {
     }
     if (app_id == "libreoffice") {
         return has_executable("libreoffice") ||
-               is_pacman_pkg_installed("libreoffice-fresh");
+               is_pacman_pkg_installed("libreoffice-fresh", pkg_set);
     }
     if (app_id == "printing") {
         return has_executable("cupsd") ||
-               is_pacman_pkg_installed("cups");
+               is_pacman_pkg_installed("cups", pkg_set);
     }
     if (app_id == "vscode") {
         return has_executable("code") ||
@@ -174,7 +206,7 @@ bool is_native_app_installed(const std::string &app_id) {
     }
     if (app_id == "docker") {
         return has_executable("docker") ||
-               is_pacman_pkg_installed("docker");
+               is_pacman_pkg_installed("docker", pkg_set);
     }
     if (app_id == "nodejs") {
         return has_executable("node") && has_executable("npm");
@@ -184,17 +216,17 @@ bool is_native_app_installed(const std::string &app_id) {
     }
     if (app_id == "ollama") {
         return has_executable("ollama") ||
-               is_pacman_pkg_installed("ollama") ||
-               is_pacman_pkg_installed("ollama-cuda") ||
-               is_pacman_pkg_installed("ollama-rocm") ||
-               is_pacman_pkg_installed("ollama-vulkan");
+               is_pacman_pkg_installed("ollama", pkg_set) ||
+               is_pacman_pkg_installed("ollama-cuda", pkg_set) ||
+               is_pacman_pkg_installed("ollama-rocm", pkg_set) ||
+               is_pacman_pkg_installed("ollama-vulkan", pkg_set);
     }
     if (app_id == "vllm") {
         return fs::exists("/opt/spinelos-vllm/bin/vllm", ec);
     }
     if (app_id == "heroic") {
-        return is_pacman_pkg_installed("heroic") ||
-               is_pacman_pkg_installed("heroic-games-launcher-bin") ||
+        return is_pacman_pkg_installed("heroic", pkg_set) ||
+               is_pacman_pkg_installed("heroic-games-launcher-bin", pkg_set) ||
                has_executable("heroic");
     }
     if (app_id == "protonup") {
@@ -340,9 +372,7 @@ bool is_flatpak_app_installed(const std::string &app_id) {
 }
 
 bool has_flatpak_cli() {
-    std::string out;
-    int rc = 1;
-    return run_argv_capture({"which", "flatpak"}, out, rc) && rc == 0;
+    return has_executable("flatpak");
 }
 
 bool check_sudo_nopasswd() {
@@ -646,19 +676,30 @@ const StoreAppEntry *find_catalog_entry(const std::string &id) {
     return nullptr;
 }
 
-}  // namespace
+struct StoreMetaCache {
+    std::mutex mu;
+    bool initialized = false;
+    bool sudo_nopass = false;
+    GpuDriverUpdateInfo gi;
+    std::unordered_map<std::string, bool> svc_active;
+};
 
-void push_store_catalog(AppState *state) {
-    if (!state || (!state->store_view && !state->settings_view)) return;
-    bool flatpak_ok = has_flatpak_cli();
-    bool sudo_nopass = check_sudo_nopasswd();
-    GpuDriverUpdateInfo gi = collect_gpu_driver_update_info();
+StoreMetaCache &store_meta_cache() {
+    static StoreMetaCache cache;
+    return cache;
+}
 
+std::string build_store_catalog_js(AppState *state,
+                                   bool flatpak_ok,
+                                   bool sudo_nopass,
+                                   const GpuDriverUpdateInfo &gi,
+                                   const std::unordered_set<std::string> &installed_pkgs,
+                                   const std::unordered_map<std::string, bool> &svc_active_map) {
     std::ostringstream js;
     js << "window.__spinelStoreData && window.__spinelStoreData({"
        << "\"flatpak_ready\":" << (flatpak_ok ? "true" : "false") << ","
        << "\"sudo_nopass\":" << (sudo_nopass ? "true" : "false") << ","
-       << "\"busy\":" << (state->store_busy.load() ? "true" : "false") << ","
+       << "\"busy\":" << (state && state->store_busy.load() ? "true" : "false") << ","
        << "\"driver_summary\":\"" << json_escape(gi.driver_summary) << "\","
        << "\"kernel_summary\":\"" << json_escape(gi.kernel_running) << "\","
        << "\"reboot_required\":" << (gi.reboot_required ? "true" : "false") << ","
@@ -682,15 +723,17 @@ void push_store_catalog(AppState *state) {
         if (bkend == "flatpak") {
             installed = is_flatpak_app_installed(app.pkg);
         } else if (bkend == "native") {
-            installed = is_native_app_installed(app.id);
+            installed = is_native_app_installed(app.id, &installed_pkgs);
         } else if (bkend == "link") {
             installed = webapp_pinned;
         } else {
-            installed = is_pacman_pkg_installed(app.pkg);
+            installed = is_pacman_pkg_installed(app.pkg, &installed_pkgs);
         }
-        bool svc_active = (app.service_unit && app.service_unit[0] != '\0' && installed)
-                              ? is_store_service_active(app.service_unit)
-                              : false;
+        bool svc_active = false;
+        if (app.service_unit && app.service_unit[0] != '\0' && installed) {
+            auto it = svc_active_map.find(app.service_unit);
+            if (it != svc_active_map.end()) svc_active = it->second;
+        }
         js << "{"
            << "\"id\":\"" << json_escape(app.id) << "\","
            << "\"name\":\"" << json_escape(app.name) << "\","
@@ -707,7 +750,85 @@ void push_store_catalog(AppState *state) {
            << "}";
     }
     js << "]});";
-    eval_store_and_settings_views(state, js.str());
+    return js.str();
+}
+
+struct StoreCatalogPushMsg {
+    AppState *state;
+    std::string js;
+};
+
+gboolean on_store_catalog_idle(gpointer data) {
+    std::unique_ptr<StoreCatalogPushMsg> msg(static_cast<StoreCatalogPushMsg *>(data));
+    if (!msg->state || msg->state->shutting_down.load()) return G_SOURCE_REMOVE;
+    eval_store_and_settings_views(msg->state, msg->js);
+    return G_SOURCE_REMOVE;
+}
+
+}  // namespace
+
+void push_store_catalog(AppState *state) {
+    if (!state || (!state->store_view && !state->settings_view)) return;
+
+    // 1. Immediate fast snapshot (<10ms): single /var/lib/pacman/local scan + cached metadata
+    const bool flatpak_ok = has_flatpak_cli();
+    const auto installed_pkgs = load_installed_pacman_pkgs();
+    GpuDriverUpdateInfo cached_gi;
+    bool cached_sudo = false;
+    std::unordered_map<std::string, bool> cached_svcs;
+    {
+        std::lock_guard<std::mutex> lock(store_meta_cache().mu);
+        if (store_meta_cache().initialized) {
+            cached_gi = store_meta_cache().gi;
+            cached_sudo = store_meta_cache().sudo_nopass;
+            cached_svcs = store_meta_cache().svc_active;
+        } else {
+            cached_gi.driver_summary = "驱动检测中...";
+            cached_gi.updates_total = -1;
+        }
+    }
+    eval_store_and_settings_views(
+        state,
+        build_store_catalog_js(state, flatpak_ok, cached_sudo, cached_gi, installed_pkgs, cached_svcs));
+
+    // 2. Refresh heavy metadata (pacman -Qu, sudo -n, systemctl) asynchronously without blocking UI
+    if (state->shutting_down.load() || state->store_refresh_running.exchange(true)) {
+        return;
+    }
+    if (state->store_refresh_thread.joinable()) {
+        state->store_refresh_thread.join();
+    }
+    state->store_refresh_thread = std::thread([state]() {
+        const bool fp_ok = has_flatpak_cli();
+        const auto pkgs = load_installed_pacman_pkgs();
+        const bool sudo_np = check_sudo_nopasswd();
+        GpuDriverUpdateInfo gi = collect_gpu_driver_update_info();
+        std::unordered_map<std::string, bool> svc_map;
+        for (const auto &app : kCatalog) {
+            if (!app.service_unit || app.service_unit[0] == '\0') continue;
+            if (svc_map.count(app.service_unit)) continue;
+            bool installed = false;
+            std::string bkend(app.backend);
+            if (bkend == "flatpak") installed = is_flatpak_app_installed(app.pkg);
+            else if (bkend == "native") installed = is_native_app_installed(app.id, &pkgs);
+            else if (bkend != "link") installed = is_pacman_pkg_installed(app.pkg, &pkgs);
+            if (installed) {
+                svc_map[app.service_unit] = is_store_service_active(app.service_unit);
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(store_meta_cache().mu);
+            store_meta_cache().initialized = true;
+            store_meta_cache().sudo_nopass = sudo_np;
+            store_meta_cache().gi = gi;
+            store_meta_cache().svc_active = svc_map;
+        }
+        if (!state->shutting_down.load()) {
+            std::string js = build_store_catalog_js(state, fp_ok, sudo_np, gi, pkgs, svc_map);
+            g_idle_add(on_store_catalog_idle, new StoreCatalogPushMsg{state, std::move(js)});
+        }
+        state->store_refresh_running.store(false);
+    });
 }
 
 void start_store_action(AppState *state, const std::string &action, const std::string &payload) {

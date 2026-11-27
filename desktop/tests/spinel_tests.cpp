@@ -1372,6 +1372,9 @@ void test_ai_os_stage1_atomics() {
     EXPECT(match_known_agent_cmdline("python3 /opt/DeepSeekHarness/run.py", matched) && matched == "DeepSeekHarness");
     EXPECT(!match_known_agent_cmdline("spinel-agent-ctl report --agent codex", matched));
     EXPECT(!match_known_agent_cmdline("grep codex /tmp/foo", matched));
+    EXPECT(!match_known_agent_cmdline("/home/gamer/Downloads/Antigravity-x64/antigravity --type=renderer --app-path=/opt/app.asar", matched));
+    EXPECT(!match_known_agent_cmdline("/home/gamer/Downloads/Antigravity-x64/antigravity --type=zygote", matched));
+    EXPECT(!match_known_agent_cmdline("/home/gamer/Downloads/Antigravity-x64/antigravity --import=file:///home/gamer/.gemini/antigravity/lib/node_modules/sidecar_sdk/register_loader.js main.mjs", matched));
 
     // 3. Task Inbox state machine + bound session auto-transition
     AgentTaskItem created_task;
