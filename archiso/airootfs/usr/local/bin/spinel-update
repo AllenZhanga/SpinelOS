@@ -251,13 +251,29 @@ apply_stage_and_restart() {
 
   if [[ "${MODE}" == "full" ]]; then
     echo "==> Updating system packages, SpinelDark theme, Plymouth splash, labwc & system scripts (--full)..."
-    pacman -Syu --noconfirm --needed \
-      flatpak bubblewrap ffmpeg vte4 zstd curl openssl plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon \
-      zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector \
-      spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer \
-      wlr-randr wl-clipboard wl-clip-persist os-prober \
-      polkit-gnome xdg-desktop-portal-gtk noto-fonts-cjk noto-fonts-emoji \
+    local -a full_pkgs=(
+      flatpak bubblewrap ffmpeg vte4 zstd curl openssl plymouth mako libnotify swaylock swayidle grim slurp brightnessctl power-profiles-daemon
+      zram-generator btrfs-progs ntfs-3g exfatprogs snapper reflector
+      spice-vdagent file-roller 7zip gvfs mousepad ristretto papers cups cups-pdf system-config-printer
+      wlr-randr wl-clipboard wl-clip-persist os-prober
+      polkit-gnome xdg-desktop-portal-gtk noto-fonts-cjk noto-fonts-emoji
       fcitx5 fcitx5-rime fcitx5-gtk
+    )
+    local -a missing_pkgs=()
+    local pkg_item
+    for pkg_item in "${full_pkgs[@]}"; do
+      if ! pacman -Qq "${pkg_item}" >/dev/null 2>&1; then
+        missing_pkgs+=("${pkg_item}")
+      fi
+    done
+    if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
+      echo "==> Installing missing system packages: ${missing_pkgs[*]}"
+      if ! pacman -Sy --noconfirm --needed "${missing_pkgs[@]}"; then
+        echo "[WARN] 部分系统软件包安装未完成（当前 Arch 镜像可能不同步，可先在「设置 → 系统更新」点击「测速优选国内镜像」），继续更新 Spinel OS 组件..."
+      fi
+    else
+      echo "==> Required Spinel OS system packages are already installed."
+    fi
     fc-cache -f >/dev/null 2>&1 || true
     for legacy_ime in fcitx5-pinyin-zhwiki rime-pinyin-simp fcitx5-chinese-addons fcitx5-configtool fcitx5-qt; do
       if pacman -Qq "$legacy_ime" >/dev/null 2>&1; then
@@ -474,6 +490,12 @@ cleanup() {
   rm -rf "${WORK_DIR}"
 }
 trap cleanup EXIT
+
+if [[ "${SUBCMD}" != "check" && "${EUID}" -eq 0 ]]; then
+  exec > >(tee -a /tmp/spinel-update.log) 2>&1
+  chmod 644 /tmp/spinel-update.log 2>/dev/null || true
+  echo "===== $(date '+%F %T') spinel-update ${SUBCMD} (${MODE}) ====="
+fi
 
 if [[ "${SUBCMD}" == "offline" ]]; then
   if [[ -z "${OFFLINE_BUNDLE}" || ! -f "${OFFLINE_BUNDLE}" ]]; then
