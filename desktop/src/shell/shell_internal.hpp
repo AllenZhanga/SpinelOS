@@ -97,7 +97,6 @@ struct NativeShellState {
     GtkWidget *bar_ai_lbl = nullptr;
     GtkWidget *bar_ai_popover = nullptr;
     GtkWidget *bar_ai_list_box = nullptr;
-    GtkWidget *bar_ai_task_entry = nullptr;
     GFileMonitor *ai_dir_monitor = nullptr;
     guint ai_refresh_timer = 0;
     guint ai_toast_timer = 0;
