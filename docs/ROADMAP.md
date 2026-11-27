@@ -40,17 +40,19 @@
 
 ---
 
-## 第三步：AI（Coding & AI Agent OS）原生能力（详案见 [AI_OS_PLAN.md](AI_OS_PLAN.md)）
+## 第三步：AI（Agent-Native OS 底座）原生能力（详案见 [AI_OS_PLAN.md](AI_OS_PLAN.md)）
+
+> **策略定位**：不自研独立 Coding Agent，专注做全生态商业/自研 Agent（Codex、Antigravity、Claude、DeepSeekHarness 等）的最佳操作系统宿主，按 **Atoms First（Stage 1 → 2 → 3）** 顺序推进。
 
 1. **已有基础设施底座**
    - 应用中心已集成 `podman` / `docker`、`git`、`python`、`nodejs`、VS Code、`ollama`、`vllm`、`llama.cpp`，系统设置已接入 Btrfs Snapper 快照、平行沙箱（`spinel-sandbox` + PiP 画中画）与 Cloud Relay 跨端串流。
-2. **Agent 会话「灵动岛」与三源感知（Phase 1）**
-   - 在 `spinel-shell` 顶栏构建原生 **Agent Island（灵动岛）**，融合 `$XDG_RUNTIME_DIR/spinelos/agents/*.json`、`spinel-agent-ctl` Hook 上报与 `/proc` + `window_tracker` PID 绑定，统一监管 Codex、Antigravity、Claude、DeepSeekHarness 等活动会话，任务完成/待审批时灵动岛即时展开提醒并支持一键切窗/进沙箱。
-3. **原生 Task Inbox 任务派单箱（Phase 2）**
-   - 在灵动岛面板接入原生待办（`backlog -> in_progress -> review -> done`），支持随手速记并一键派给终端/沙箱 Agent 执行，完成后自动高亮提示验收。
-4. **系统级 `spinel-os-mcp` 与 4 级权限闸门（Phase 3–4）**
-   - 提供轻量独立 `spinel-os-mcp` 网关，按 Tier 0–3 权限对外暴露桌面上下文感知（窗口/剪贴板/截图/Doctor 日志）、Task Inbox 协同、Btrfs 快照保护、平行沙箱执行与灵动岛交互式审批，并在游戏模式下自动仲裁 `ollama` / `vllm` 显存。
-   - 完整技术方案、数据结构与分阶段验收标准见 [docs/AI_OS_PLAN.md](AI_OS_PLAN.md)。
+2. **Stage 1：基础原子能力 + CLI + 单元测试**
+   - 构建 `agent_perms`（Tier 0–3 分级权限与审计）、`agent_bus`（Unix Socket 控制总线与异步审批原语）、`agent_tracker`（三源会话注册表 + PID/窗口绑定）、`task_inbox`（原生待办派单状态机）、OS 无头原子封装（桌面上下文/截图/Doctor/快照/沙箱）与 `spinel-agent-ctl` CLI，全部纳入 `spinel-tests`。
+3. **Stage 2：协议出口层 (`spinel-os-mcp`)**
+   - 提供轻量独立 `spinel-os-mcp`（`stdio`）网关，把 Stage 1 原子能力按权限暴露给所有支持 MCP 的外部 Agent 接入与联调。
+4. **Stage 3：桌面业务展示与协同闭环**
+   - 在 `spinel-shell` 顶栏构建原生 **Agent 灵动岛**（会话聚合、展开 Todo 派单箱、一键跳窗/进沙箱 PiP、Tier 3 交互审批卡片），并在设置中心接入权限/审计开关、GameMode 显存仲裁与 Cloud Relay 跨端协同。
+   - 完整技术方案、数据结构与验收标准见 [docs/AI_OS_PLAN.md](AI_OS_PLAN.md)。
 
 ---
 

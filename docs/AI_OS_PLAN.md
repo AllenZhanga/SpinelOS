@@ -1,16 +1,18 @@
 # Spinel AI OS 架构规划与演进路线 (AI_OS_PLAN)
 
-> **核心定位**：不在 `spinel-shell` 中堆砌重型聊天框，而是把 SpinelOS 打造成**以「会话感知 · 沙箱隔离 · 原生待办派单 · 系统级 MCP」为核心的 Agent-Native 操作系统底座**，让 Codex、Antigravity、Claude Code、DeepSeekHarness 等任意 Coding / AI Agent 无缝协同。
+> **核心定位**：**不自研通用 Coding Agent**（商业与社区 Agent 迭代极快），而是把 SpinelOS 打造成**全生态 Agent 的最佳操作系统宿主**——提供商业软件自身无法提供的 OS 底层原语：全局会话感知、沙箱隔离与 PiP 接管、Btrfs 快照兜底、原生 Task Inbox 派单与分级系统 MCP，让 Codex、Antigravity、Claude Code、DeepSeekHarness 等任意工具无缝接入。
 
 ---
 
 ## 一、设计原则与架构边界
 
-1. **守住常驻壳层轻量底线**：
+1. **不做独立 Agent，专注做开放 OS 宿主平台**：
+   - 不与商业 Coding Agent 竞争推理/编码循环；通过「进程探针 + CLI Hook + 标准 MCP」三源开放接入，谁强接谁。
+2. **守住常驻壳层轻量底线**：
    - `spinel-shell`（`SPINEL_HAS_WEBKIT=0`）仅承载事件监听、状态聚合与原生 `GTK4 + Cairo` 展示（顶栏灵动岛、展开面板、审批卡片），严禁塞入 WebKitGTK 或常驻大模型推理进程。
-2. **不强绑单一 Agent，保持开放接入**：
-   - 同时支持**零侵入被动发现**、**Drop-in 状态文件 / CLI Hook 主动上报**、以及**标准 MCP 双向接入**。
-3. **重操作、管理台与 MCP 网关进程隔离**：
+3. **Atoms First（先底层原子、再协议桥、后桌面 UI）**：
+   - 先把无 UI 依赖的核心状态机、权限审计总线和无头 OS 原语打牢并纳入 `spinel-tests` 单元测试，再暴露给 `spinel-os-mcp`、顶栏灵动岛和 `spinel-webui` 消费，保证多端复用且架构稳固。
+4. **重操作、管理台与 MCP 网关进程隔离**：
    - `spinel-agent-ctl`（极轻上报/控制 CLI）与 `spinel-os-mcp`（按需 stdio MCP 网关）独立于 `spinel-shell`，权限页与审计日志按需在 `spinel-webui` 中打开。
 
 ---
@@ -82,11 +84,12 @@
 
 ---
 
-## 四、分阶段实施路线图
+## 四、分阶段实施路线图（Atoms First：Stage 1 → 2 → 3）
 
-| 阶段 | 交付目标 | 主要涉及模块 | 验收标准 |
+按「**先底层原子原语 → 再标准协议出口 → 最后桌面业务交互**」顺序推进，确保架构稳定、单测先行、各端复用同一套事实来源：
+
+| 阶段 | 交付目标 | 核心原子 / 涉及模块 | 验收标准 |
 | :--- | :--- | :--- | :--- |
-| **Phase 1：灵动岛感知 MVP** | 顶栏实时显示 Codex / Antigravity / DeepSeekHarness 等活动会话，完成/待确认时灵动岛展开提示并支持点击跳窗 | `agent_tracker`、`spinel-agent-ctl`、`top_bar.cpp`、`window_tracker.cpp`、`spinel_tests.cpp` | 状态文件或 CLI 上报后顶栏实时联动，点击直接跳转对应工作区与窗口/沙箱 |
-| **Phase 2：原生 Todo 派单箱** | 灵动岛弹出面板接入 Task Inbox，支持随手记、关联项目目录、一键派发到终端/沙箱并在完成后转待验收 | `task_inbox`、`top_bar.cpp`、`overlays.cpp`、`ipc_router.cpp` | 新建 Todo → 一键启动终端/沙箱 Agent → 会话结束后灵动岛高亮提醒验收 |
-| **Phase 3：`spinel-os-mcp` + 权限中心** | 交付 `spinel-os-mcp`（开放 Tier 0~2 工具），在设置「权限与安全」接入分级开关与审计查看 | `spinel_os_mcp.cpp`、`CMakeLists.txt`、`desktop/ui/`、四端同步脚本 | 主流 MCP 客户端配置后可直接认领 Todo、读取桌面上下文/截图、创建快照与调用沙箱 |
-| **Phase 4：灵动岛交互审批与算力联动** | 上线 Tier 3 灵动岛审批卡片，打通 `GameMode` 与 `ollama` / `vllm` 显存仲裁 | `ipc_router.cpp`、`overlays.cpp`、`app_store.cpp`、`audio_power.cpp` | 高风险动作在顶栏直接点批；启动全屏游戏时自动协调卸载/暂停本地重型推理服务 |
+| **Stage 1：基础原子层 + CLI + 单元测试**<br>*(无 UI 改动)* | 打牢 4 组纯 C++ 原子能力与统一接入总线，在 `spinel-tests` 中完成并发、超时回收、状态联动与权限拦截测试 | • `agent_perms`（Tier 0–3 规则 + 审计日志 `mcp_audit.log`）<br>• `agent_bus`（`$XDG_RUNTIME_DIR/spinelos/agent.sock` + 异步审批原语）<br>• `agent_tracker`（状态目录监听 + `/proc` 探针 + PID/窗口绑定）<br>• `task_inbox`（`tasks.json` 原子读写与 `backlog→review` 状态机）<br>• `os_context` / `guarded_actions` 无头原子封装<br>• `spinel-agent-ctl` 上报与派单 CLI | `spinel-tests` 全量单测覆盖状态跃迁、PID 回收、Task 联动与 Tier 0–3 鉴权；终端用 `spinel-agent-ctl` 可直接完成会话上报、Todo 读写与权限校验 |
+| **Stage 2：协议出口层 (`spinel-os-mcp`)** | 交付轻量独立的 C++20 MCP（`stdio`）网关，将 Stage 1 原子能力透出给所有支持 MCP 的商业/自研 Agent | • `spinel_os_mcp.cpp`、`CMakeLists.txt`<br>• 开放工具：`agent_report`、`todo_*`、`desktop_get_context`、`clipboard_recent`、`screenshot_capture`、`doctor_diagnose`、`logs_tail`、`snapshot_checkpoint`、`sandbox_launch`、`service_control`、`request_user_approval`<br>• 四端打包同步（`release-ota.sh` / `dev-deploy.sh` / `spinel-update` / `spinel-install`） | 在 Codex / Antigravity / Claude / DeepSeekHarness 配上一行 `spinel-os-mcp` 后，可真实调用 Todo 认领、窗口截图回传、Doctor 诊断、Btrfs 快照与平行沙箱 |
+| **Stage 3：业务展示与协同闭环**<br>*(原生桌面 UI + 跨端联动)* | 在稳定的原子与协议底座之上构建轻量桌面交互、灵动岛、审批、权限设置与跨端协同 | • `top_bar.cpp` + `overlays.cpp`：顶栏「灵动岛」Pill/展宽动效、活动会话与 Task Inbox 展开 Popover、一键切窗/进沙箱 PiP、Tier 3 审批卡片<br>• `desktop/ui/`：设置「权限与安全」Tier 0–3 分级开关与审计记录查看<br>• `audio_power.cpp` / `app_store.cpp` / `relay_client.cpp`：GameMode ↔ `ollama`/`vllm` 显存仲裁、Cloud Relay 远程审批通知 | Agent 完成或待确认时灵动岛即时展宽提示并支持点击跳窗；高危 MCP 动作可在顶栏直接点批；游戏时自动协调本地重推理服务；跨端客户端可接收进度 |
