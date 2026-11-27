@@ -316,8 +316,14 @@ if [[ -f "$SFS_PATH" ]]; then
     cp -a /etc/spinelos/. /mnt/etc/spinelos/
   fi
   for asset in /etc/xdg/mimeapps.list \
+    /usr/share/applications/org.spinelos.files.desktop \
+    /usr/share/applications/org.spinelos.Store.desktop \
+    /usr/share/applications/org.spinelos.Games.desktop \
     /usr/share/applications/org.spinelos.WindowsApps.desktop \
     /usr/share/applications/org.spinelos.WineOpen.desktop \
+    /usr/share/icons/hicolor/scalable/apps/spinel-files.svg \
+    /usr/share/icons/hicolor/scalable/apps/org.spinelos.Store.svg \
+    /usr/share/icons/hicolor/scalable/apps/org.spinelos.Games.svg \
     /usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg; do
     if [[ -f "$asset" ]]; then
       install -Dm644 "$asset" "/mnt$asset"

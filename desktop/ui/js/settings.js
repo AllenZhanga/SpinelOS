@@ -281,7 +281,7 @@
       appList.innerHTML = "";
       const apps = Array.isArray(data.apps) ? data.apps : [];
       if (apps.length === 0) {
-        appList.innerHTML = '<div class="disk-empty">目前没有需要单独限权的沙箱应用（从「应用商店」安装浏览器、Discord、OBS、Heroic 等软件后会在这里出现开关）。</div>';
+        appList.innerHTML = '<div class="disk-empty">目前没有需要单独限权的沙箱应用（从「应用中心」安装浏览器、Discord、OBS、Heroic 等软件后会在这里出现开关）。</div>';
       } else {
         const permDefs = [
           { key: "home", label: "访问个人文件夹" },

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Spinel 应用中心
+Name[en_US]=Spinel App Center
+Comment=发现与安装原生软件、办公工具、AI 大模型及管理已装桌面应用
+Exec=spinel-webui store:open
+Icon=org.spinelos.Store
+Terminal=false
+Categories=System;PackageManager;
+StartupNotify=true
+StartupWMClass=spinel-webui

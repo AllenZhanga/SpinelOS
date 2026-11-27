@@ -50,6 +50,7 @@ ProxyConfig resolve_effective_proxy();
 std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs();
 void launch_browser_command(std::vector<std::string> args, const std::string &tag,
                             const std::string &working_dir = {}, std::size_t program_index = 0);
+bool open_url_in_browser(const std::string &url, const std::string &tag = "OpenURL");
 void sync_process_proxy_env();
 void push_proxy_config(AppState *state);
 void update_proxy_config(AppState *state, const std::string &payload);

@@ -45,10 +45,14 @@ constexpr StoreAppEntry kCatalog[] = {
      "兼容 Word / Excel / PPT 的开源办公全家桶（自动安装中文语言包）", "libreoffice", "原生安装", "", false},
     {"papers", "Papers PDF 阅读器", "办公文档", "pacman", "papers",
      "GNOME 原生 GTK4 高速 PDF 与多格式文档阅读器", "papers", "Pacman 原生", "", false},
+    {"xournalpp", "Xournal++ PDF 批注", "办公文档", "pacman", "xournalpp",
+     "PDF 文档高亮签批、手写标注与课堂/会议笔记白板工具", "xournalpp", "Pacman 原生", "", false},
     {"printing", "打印服务 (CUPS)", "办公文档", "native", "cups",
      "CUPS 物理/网络与 PDF 虚拟打印底座 + 打印机管理面板（支持启停）", "system-config-printer", "系统服务", "cups", false},
     {"obsidian", "Obsidian 笔记", "办公文档", "pacman", "obsidian",
      "本地优先的 Markdown 双链知识库与结构化笔记工具", "obsidian", "Pacman 原生", "", false},
+    {"thunderbird", "Thunderbird 邮件与日程", "办公文档", "pacman", "thunderbird",
+     "Mozilla 开源桌面邮箱、日历与联系人多账户客户端", "thunderbird", "Pacman 原生", "", false},
 
     // 2. 影音图像
     {"mpv", "MPV 播放器", "影音图像", "pacman", "mpv",
@@ -269,6 +273,7 @@ bool write_webapp_desktop_file(const StoreAppEntry &entry) {
         << "Comment=" << entry.summary << "\n"
         << "Exec=sh -c 'if command -v google-chrome-stable >/dev/null 2>&1; then exec google-chrome-stable --app=\"" << entry.pkg << "\"; "
         << "elif command -v chromium >/dev/null 2>&1; then exec chromium --ozone-platform-hint=auto --app=\"" << entry.pkg << "\"; "
+        << "elif command -v firefox >/dev/null 2>&1; then exec firefox \"" << entry.pkg << "\"; "
         << "else exec xdg-open \"" << entry.pkg << "\"; fi'\n"
         << "Icon=applications-internet\n"
         << "Categories=Network;ArtificialIntelligence;Utility;\n"
@@ -1423,12 +1428,20 @@ void cancel_store_action(AppState *state) {
 }
 
 void launch_store_app(AppState *state, const std::string &app_id) {
-    (void)state;
     const StoreAppEntry *entry = find_catalog_entry(app_id);
     if (!entry) return;
     if (std::string(entry->backend) == "link") {
         if (is_valid_https_url(entry->pkg)) {
-            launch_browser_command({entry->pkg}, "StoreLink:" + app_id);
+            if (!open_url_in_browser(entry->pkg, "StoreLink:" + app_id)) {
+                std::string msg = "未检测到已安装浏览器，请先在应用中心安装 Chrome、Chromium 或 Firefox。";
+                emit_store_line(state, "[ERROR] " + msg);
+                notify_app_launch_failure(entry->name, msg);
+                if (state && state->store_view) {
+                    eval_js(state->store_view,
+                            "window.__spinelStoreFeedback && window.__spinelStoreFeedback(false,\"" +
+                                json_escape(msg) + "\");");
+                }
+            }
         }
         return;
     }

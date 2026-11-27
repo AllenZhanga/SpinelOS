@@ -32,6 +32,8 @@ std::vector<TrackedWindowInfo> list_tracked_windows();
 std::vector<TrackedWindowInfo> list_tracked_windows_mru();
 void push_windows_to_ui(AppState *state);
 void toggle_or_activate_window(uint64_t id);
+void toggle_maximize_tracked_window(uint64_t id);
+void minimize_tracked_window(uint64_t id);
 void activate_tracked_window(uint64_t id);
 void close_tracked_window(uint64_t id);
 bool quit_tracked_window_app(uint64_t id);

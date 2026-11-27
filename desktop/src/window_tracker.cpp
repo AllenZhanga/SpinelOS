@@ -509,6 +509,27 @@ void toggle_or_activate_window(uint64_t id) {
     wl_display_flush(g_ctx.display);
 }
 
+void toggle_maximize_tracked_window(uint64_t id) {
+    TrackedWindow *w = find_window_by_id(id);
+    if (!w || !w->handle || !g_ctx.display) return;
+    if (w->maximized) {
+        zwlr_foreign_toplevel_handle_v1_unset_maximized(w->handle);
+    } else {
+        if (w->minimized) {
+            zwlr_foreign_toplevel_handle_v1_unset_minimized(w->handle);
+        }
+        zwlr_foreign_toplevel_handle_v1_set_maximized(w->handle);
+    }
+    wl_display_flush(g_ctx.display);
+}
+
+void minimize_tracked_window(uint64_t id) {
+    TrackedWindow *w = find_window_by_id(id);
+    if (!w || !w->handle || !g_ctx.display) return;
+    zwlr_foreign_toplevel_handle_v1_set_minimized(w->handle);
+    wl_display_flush(g_ctx.display);
+}
+
 void activate_tracked_window(uint64_t id) {
     TrackedWindow *w = find_window_by_id(id);
     if (!w || !w->handle || !g_ctx.display) return;

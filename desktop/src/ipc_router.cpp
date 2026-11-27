@@ -952,6 +952,14 @@ bool dispatch_ipc_command(AppState *state,
             uint64_t wid = std::strtoull(arg_or_param(r, "window:toggle:", {"id", "wid"}).c_str(), nullptr, 10);
             if (wid > 0 && a.window_toggle) a.window_toggle(wid);
         }},
+        {"window:maximize:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
+            uint64_t wid = std::strtoull(arg_or_param(r, "window:maximize:", {"id", "wid"}).c_str(), nullptr, 10);
+            if (wid > 0 && a.window_maximize) a.window_maximize(wid);
+        }},
+        {"window:minimize:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
+            uint64_t wid = std::strtoull(arg_or_param(r, "window:minimize:", {"id", "wid"}).c_str(), nullptr, 10);
+            if (wid > 0 && a.window_minimize) a.window_minimize(wid);
+        }},
         {"window:close:", +[](AppState *, const IpcRequest &r, const IpcHostActions &a) {
             uint64_t wid = std::strtoull(arg_or_param(r, "window:close:", {"id", "wid"}).c_str(), nullptr, 10);
             if (wid > 0 && a.window_close) a.window_close(wid);

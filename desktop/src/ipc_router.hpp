@@ -42,6 +42,8 @@ struct IpcHostActions {
     void (*pick_wallpaper)(AppState *) = nullptr;
     void (*pick_offline_ota)(AppState *) = nullptr;
     void (*window_toggle)(uint64_t wid) = nullptr;
+    void (*window_maximize)(uint64_t wid) = nullptr;
+    void (*window_minimize)(uint64_t wid) = nullptr;
     void (*window_close)(uint64_t wid) = nullptr;
     void (*window_quit)(uint64_t wid) = nullptr;
     void (*workspace_switch)(int index_1based) = nullptr;

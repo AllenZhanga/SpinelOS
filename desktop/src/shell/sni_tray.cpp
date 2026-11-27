@@ -448,6 +448,10 @@ std::string find_tray_icon_file(const std::string &icon_name, const std::string 
         found = probe_dir(fs::path(theme_path) / "hicolor");
         if (!found.empty()) return found;
     }
+    for (const fs::path &sys_dir : {fs::path("/usr/share/icons/hicolor"), fs::path("/usr/share/pixmaps")}) {
+        std::string found = probe_dir(sys_dir);
+        if (!found.empty()) return found;
+    }
     return "";
 }
 
@@ -591,7 +595,23 @@ GtkWidget *build_tray_icon_widget(const SniTrayItemSnapshot &item, int icon_px) 
             if (theme && gtk_icon_theme_has_icon(theme, icon_name.c_str())) {
                 GtkWidget *img = gtk_image_new_from_icon_name(icon_name.c_str());
                 gtk_image_set_pixel_size(GTK_IMAGE(img), icon_px);
-                return img;
+                if (!use_att) return img;
+
+                GtkWidget *ov = gtk_overlay_new();
+                gtk_overlay_set_child(GTK_OVERLAY(ov), img);
+                GtkWidget *dot = gtk_drawing_area_new();
+                gtk_widget_set_size_request(dot, 7, 7);
+                gtk_widget_set_halign(dot, GTK_ALIGN_END);
+                gtk_widget_set_valign(dot, GTK_ALIGN_START);
+                gtk_widget_set_can_target(dot, FALSE);
+                gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dot),
+                    +[](GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer) {
+                        cairo_set_source_rgba(cr, 0.96, 0.25, 0.37, 0.98);
+                        cairo_arc(cr, w * 0.5, h * 0.5, std::min(w, h) * 0.42, 0, 2 * M_PI);
+                        cairo_fill(cr);
+                    }, nullptr, nullptr);
+                gtk_overlay_add_overlay(GTK_OVERLAY(ov), dot);
+                return ov;
             }
         }
     }
@@ -1021,7 +1041,10 @@ void init_sni_tray(SniTrayChangedFn on_changed, void *user_data) {
         g_sni.bus,
         kWatcherBusName,
         G_BUS_NAME_OWNER_FLAGS_NONE,
-        nullptr,
+        +[](GDBusConnection *, const gchar *, gpointer) {
+            if (!g_sni.initialized) return;
+            emit_changed_signal_dbus("StatusNotifierHostRegistered", "");
+        },
         +[](GDBusConnection *conn, const gchar *, gpointer) {
             if (!g_sni.initialized) return;
             // Another watcher already exists: register ourselves as host & subscribe.
@@ -1155,6 +1178,12 @@ std::vector<SniTrayItemSnapshot> list_sni_tray_items() {
 void rebuild_sni_tray_box(GtkWidget *box, int icon_px) {
     if (!box) return;
     while (GtkWidget *c = gtk_widget_get_first_child(box)) {
+        GtkWidget *old_pop = GTK_WIDGET(g_object_get_data(G_OBJECT(c), "active-tray-pop"));
+        if (old_pop && GTK_IS_POPOVER(old_pop)) {
+            gtk_popover_popdown(GTK_POPOVER(old_pop));
+            gtk_widget_unparent(old_pop);
+            g_object_set_data(G_OBJECT(c), "active-tray-pop", nullptr);
+        }
         gtk_box_remove(GTK_BOX(box), c);
     }
 

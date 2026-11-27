@@ -192,8 +192,8 @@ void rebuild_launcher_index(NativeShellState *ns) {
     } else {
         ns->launcher_entries = {
         {"Spinel 终端", "原生多标签 Wayland 终端 (Super+Enter)", "terminal ptyxis shell console bash", "launch:terminal", "", "terminal"},
-        {"应用商店", "一键安装 Steam / 浏览器 / 游戏与系统更新", "store app market pacman", "store:open", "", "store"},
-        {"游戏与启动中心", "浏览 Steam 游戏库、启动大屏模式与调节游戏性能", "games library launcher center", "games:open", "", "games"},
+        {"应用中心", "安装原生软件、办公工具、AI 大模型与管理全部应用", "store app center market launchpad pacman", "store:open", "", "store"},
+        {"游戏中心", "浏览 Steam 游戏库、单游戏调优与清理游戏缓存", "games library steam launcher center", "games:open", "", "games"},
         {"文件管理 (Spinel Files)", "轻量原生文件管理、外置盘、解压与压缩", "files manager folder spinel-files", "launch:files", "", "files"},
         {steam_installed ? "Steam 客户端" : "安装 Steam 客户端",
          steam_installed ? "启动 Valve Steam 游戏平台" : "前往应用商店一键安装 Steam",
@@ -229,7 +229,8 @@ void rebuild_launcher_index(NativeShellState *ns) {
     for (const auto &app : ns->desktop_apps) {
         std::string lid = to_lower_copy(app.id);
         if (lid == "thunar" || lid == "steam" || lid == "spinel-terminal" || lid == "org.spinelos.terminal" ||
-            lid == "spinel-files" || lid == "org.spinelos.files") continue;
+            lid == "spinel-files" || lid == "org.spinelos.files" ||
+            lid == "org.spinelos.store" || lid == "org.spinelos.games") continue;
         if (sb && lid.rfind("org.spinelos.", 0) == 0 && lid != "org.spinelos.windowsapps") continue;
         const bool wine = app.id.starts_with("wine:");
         const bool windows_manager = lid == "org.spinelos.windowsapps";
@@ -760,7 +761,7 @@ void build_native_control_center(GtkApplication *app, NativeShellState *ns) {
     gtk_box_set_homogeneous(GTK_BOX(foot_row), TRUE);
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "平行沙箱", "spinel-cc-chip-btn", "sandbox:toggle-pip"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "游戏中心", "spinel-cc-chip-btn", "games:open"));
-    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "应用商店", "spinel-cc-chip-btn", "store:open"));
+    gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "应用中心", "spinel-cc-chip-btn", "store:open"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "系统设置", "spinel-cc-chip-btn", "settings:open:display"));
     gtk_box_append(GTK_BOX(foot_row), make_cmd_button(state, "锁屏", "spinel-cc-chip-btn", "system:lock"));
 
@@ -1251,13 +1252,22 @@ std::string resolve_switcher_app_name(const NativeShellState *ns, const TrackedW
     if (hay.find("系统监视器") != std::string::npos || hay.find("spinel monitor") != std::string::npos) return "系统监视器";
     if (hay.find("spinel doctor") != std::string::npos) return "Spinel Doctor";
     if (hay.find("系统设置") != std::string::npos || hay.find("settings") != std::string::npos) return "系统设置";
-    if (hay.find("游戏与启动中心") != std::string::npos || hay.find("app-games") != std::string::npos) return "游戏中心";
-    if (hay.find("应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) return "应用商店";
+    if (hay.find("游戏中心") != std::string::npos || hay.find("游戏与启动中心") != std::string::npos ||
+        hay.find("游戏与应用中心") != std::string::npos || hay.find("app-games") != std::string::npos) return "游戏中心";
+    if (hay.find("应用中心") != std::string::npos || hay.find("应用商店") != std::string::npos ||
+        hay.find("app-store") != std::string::npos) return "应用中心";
     if (hay.find("安装") != std::string::npos || hay.find("installer") != std::string::npos) return "系统安装";
     if (hay.find("spinel-files") != std::string::npos || hay.find("org.spinelos.files") != std::string::npos ||
         hay.find("文件管理") != std::string::npos) return "Spinel Files";
     if (hay.find("spinel-terminal") != std::string::npos || hay.find("org.spinelos.terminal") != std::string::npos ||
         hay.find("终端") != std::string::npos) return "Spinel 终端";
+    if (hay.find("libreoffice") != std::string::npos || hay.find("soffice") != std::string::npos) return "LibreOffice";
+    if (hay.find("xournal") != std::string::npos) return "Xournal++";
+    if (hay.find("papers") != std::string::npos) return "Papers PDF";
+    if (hay.find("obsidian") != std::string::npos) return "Obsidian";
+    if (hay.find("thunderbird") != std::string::npos) return "Thunderbird";
+    if (hay.find("system-config-printer") != std::string::npos) return "打印机设置";
+    if (hay == "code" || hay.find("vscode") != std::string::npos || hay.find("visual studio code") != std::string::npos) return "VS Code";
     if (hay.find("chromium") != std::string::npos) return "Chromium";
     if (hay.find("chrome") != std::string::npos) return "Google Chrome";
     if (hay.find("firefox") != std::string::npos) return "Firefox";
@@ -1296,7 +1306,9 @@ void update_switcher_selection_ui(NativeShellState *ns) {
             txt += " — " + cur.title;
         }
         if (cur.minimized) txt += " (已最小化)";
-        txt += "  ·  Alt+Tab 切换 / Enter 确认 / Esc 取消";
+        else if (cur.activated) txt += " (当前)";
+        else if (cur.maximized) txt += " (已最大化)";
+        txt += "  ·  Alt+Tab 切换 / Enter 确认 / Del 关闭窗口 / Esc 取消";
         gtk_label_set_text(GTK_LABEL(ns->switcher_hint_lbl), txt.c_str());
     }
 }
@@ -1352,7 +1364,7 @@ void rebuild_switcher_cards(NativeShellState *ns) {
 
         std::string sub = (!it.title.empty() && it.title != it.app_name)
             ? it.title
-            : (it.minimized ? "已最小化" : "运行中");
+            : (it.minimized ? "已最小化" : (it.activated ? "当前窗口" : (it.maximized ? "已最大化" : "运行中")));
         GtkWidget *sub_lbl = gtk_label_new(sub.c_str());
         gtk_widget_add_css_class(sub_lbl, "spinel-switcher-title");
         gtk_widget_set_halign(sub_lbl, GTK_ALIGN_CENTER);
@@ -1467,6 +1479,22 @@ void build_native_switcher(GtkApplication *app, NativeShellState *ns) {
         if (total > 0 && (keyval == GDK_KEY_Left || keyval == GDK_KEY_Up || keyval == GDK_KEY_ISO_Left_Tab)) {
             n->switcher_index = (n->switcher_index + total - 1) % total;
             update_switcher_selection_ui(n);
+            return TRUE;
+        }
+        if (total > 0 && (keyval == GDK_KEY_Delete || keyval == GDK_KEY_BackSpace) &&
+            n->switcher_index >= 0 && n->switcher_index < total) {
+            uint64_t close_id = n->switcher_items[static_cast<size_t>(n->switcher_index)].win_id;
+            if (close_id > 0) close_tracked_window(close_id);
+            n->switcher_items.erase(n->switcher_items.begin() + n->switcher_index);
+            if (n->switcher_items.empty()) {
+                close_switcher(n, false);
+            } else {
+                if (n->switcher_index >= static_cast<int>(n->switcher_items.size())) {
+                    n->switcher_index = static_cast<int>(n->switcher_items.size()) - 1;
+                }
+                rebuild_switcher_cards(n);
+                update_switcher_selection_ui(n);
+            }
             return TRUE;
         }
         return FALSE;
@@ -1653,6 +1681,8 @@ void native_shell_step_switcher(AppState *state, bool prev) {
             item.icon_path.clear();
         }
         item.minimized = w.minimized;
+        item.activated = w.activated;
+        item.maximized = w.maximized;
         ns->switcher_items.push_back(std::move(item));
     }
 

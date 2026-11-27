@@ -87,16 +87,17 @@ if [ "$MODE" != "ui" ]; then
   if [ -f /tmp/spinel-dev/ota-pubkey.pem ]; then
     sudo install -Dm644 /tmp/spinel-dev/ota-pubkey.pem /etc/spinelos/ota-pubkey.pem
   fi
-  if [ -f /tmp/spinel-dev/spinel-files.svg ]; then
-    sudo install -Dm644 /tmp/spinel-dev/spinel-files.svg /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
-  fi
-  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WindowsApps.svg /usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg
+  for icon_svg in spinel-files.svg org.spinelos.Store.svg org.spinelos.Games.svg org.spinelos.WindowsApps.svg; do
+    if [ -f "/tmp/spinel-dev/${icon_svg}" ]; then
+      sudo install -Dm644 "/tmp/spinel-dev/${icon_svg}" "/usr/share/icons/hicolor/scalable/apps/${icon_svg}"
+    fi
+  done
   sudo gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
-  if [ -f /tmp/spinel-dev/org.spinelos.files.desktop ]; then
-    sudo install -Dm644 /tmp/spinel-dev/org.spinelos.files.desktop /usr/share/applications/org.spinelos.files.desktop
-  fi
-  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WindowsApps.desktop /usr/share/applications/org.spinelos.WindowsApps.desktop
-  sudo install -Dm644 /tmp/spinel-dev/org.spinelos.WineOpen.desktop /usr/share/applications/org.spinelos.WineOpen.desktop
+  for dfile in org.spinelos.files.desktop org.spinelos.Store.desktop org.spinelos.Games.desktop org.spinelos.WindowsApps.desktop org.spinelos.WineOpen.desktop; do
+    if [ -f "/tmp/spinel-dev/${dfile}" ]; then
+      sudo install -Dm644 "/tmp/spinel-dev/${dfile}" "/usr/share/applications/${dfile}"
+    fi
+  done
   if [ -f /tmp/spinel-dev/org.spinelos.FileManager1.service ]; then
     sudo install -Dm644 /tmp/spinel-dev/org.spinelos.FileManager1.service /usr/share/dbus-1/services/org.spinelos.FileManager1.service
   fi
@@ -328,9 +329,13 @@ if [[ "${MODE}" != "ui" ]]; then
   rsync -avz -e "${SSH_CMD}" "${ROOT_DIR}/build/linux-amd64/spinel-sandbox" "${DEV_HOST}:/tmp/spinel-dev/spinel-sandbox"
   rsync -avz -e "${SSH_CMD}" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Store.desktop" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Games.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Store.svg" \
+    "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Games.svg" \
     "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" \
     "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-update" \

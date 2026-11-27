@@ -195,7 +195,7 @@ void ensure_app_window(AppState *state,
 
 void open_games_window(AppState *state) {
     ensure_app_window(state, &state->games_win, &state->games_view,
-                      "Spinel OS 游戏与启动中心", "?mode=games", 1040, 680);
+                      "Spinel 游戏中心", "?mode=games", 1040, 680);
     push_theme_state(state);
     push_perf_config(state);
     push_steam_library(state);
@@ -228,7 +228,7 @@ void open_store_window(AppState *state, const std::string &focus_id = "") {
     bool existed = (state->store_win != nullptr);
     std::string query = focus_id.empty() ? "?mode=store" : ("?mode=store&focus=" + focus_id);
     ensure_app_window(state, &state->store_win, &state->store_view,
-                      "Spinel OS 应用商店", query, 1020, 680);
+                      "Spinel 应用中心", query, 1020, 680);
     if (existed) {
         if (!focus_id.empty()) {
             eval_js(state->store_view, "window.__spinelFocusStoreApp && window.__spinelFocusStoreApp('" + focus_id + "');");
@@ -650,6 +650,8 @@ void handle_shell_command(AppState *state, const std::string &cmd) {
     };
     actions.push_windows = push_windows_to_ui;
     actions.window_toggle = toggle_or_activate_window;
+    actions.window_maximize = toggle_maximize_tracked_window;
+    actions.window_minimize = minimize_tracked_window;
     actions.window_close = close_tracked_window;
     actions.window_quit = +[](uint64_t wid) { quit_tracked_window_app(wid); };
     actions.workspace_switch = +[](int idx1) { activate_tracked_workspace(idx1 - 1); };

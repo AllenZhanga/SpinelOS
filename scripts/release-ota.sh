@@ -88,9 +88,13 @@ cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" "${STAGE_ABS}/bin
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-update" "${STAGE_ABS}/bin/spinel-update"
 
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.files.desktop" "${STAGE_ABS}/assets/"
+cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Store.desktop" "${STAGE_ABS}/assets/"
+cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.Games.desktop" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WindowsApps.desktop" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/applications/org.spinelos.WineOpen.desktop" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/spinel-files.svg" "${STAGE_ABS}/assets/"
+cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Store.svg" "${STAGE_ABS}/assets/"
+cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.Games.svg" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/share/dbus-1/services/org.spinelos.FileManager1.service" "${STAGE_ABS}/assets/"
 cp -f "${ROOT_DIR}/archiso/airootfs/etc/xdg/mimeapps.list" "${STAGE_ABS}/assets/"

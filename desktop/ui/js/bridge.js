@@ -131,14 +131,14 @@
     const bgDefs = {
       games: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#38bdf8"/>
-          <stop offset="52%" stop-color="#6366f1"/>
-          <stop offset="100%" stop-color="#4338ca"/>
+          <stop offset="0%" stop-color="#f43f5e"/>
+          <stop offset="52%" stop-color="#a855f7"/>
+          <stop offset="100%" stop-color="#4f46e5"/>
         </linearGradient>`,
       store: `
-        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="#38bdf8"/>
-          <stop offset="50%" stop-color="#0ea5e9"/>
+          <stop offset="52%" stop-color="#0ea5e9"/>
           <stop offset="100%" stop-color="#1d4ed8"/>
         </linearGradient>`,
       steam: `
@@ -272,6 +272,16 @@
           <stop offset="55%" stop-color="#6366f1"/>
           <stop offset="100%" stop-color="#312e81"/>
         </linearGradient>`,
+      xournalpp: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#0284c7"/>
+        </linearGradient>`,
+      thunderbird: `
+        <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#60a5fa"/>
+          <stop offset="100%" stop-color="#1d4ed8"/>
+        </linearGradient>`,
       app: `
         <linearGradient id="${uid}_bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="#60a5fa"/>
@@ -288,10 +298,11 @@
         <circle cx="38.5" cy="34" r="2" fill="#818cf8"/>
         <circle cx="42.5" cy="38" r="2" fill="#ec4899"/>`,
       store: `
-        <path d="M32 16L20 44" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
-        <path d="M32 16L44 44" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
-        <path d="M17 37.5h30" stroke="#ffffff" stroke-width="4.6" stroke-linecap="round"/>
-        <circle cx="45" cy="44" r="2.2" fill="#bae6fd"/>`,
+        <path d="M32 10L51 24.5L32 54L13 24.5Z" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.32)" stroke-width="1.2" stroke-linejoin="round"/>
+        <rect x="17" y="17" width="13" height="13" rx="3.8" fill="rgba(255,255,255,0.96)"/>
+        <rect x="34" y="17" width="13" height="13" rx="3.8" fill="rgba(255,255,255,0.88)"/>
+        <rect x="17" y="34" width="13" height="13" rx="3.8" fill="rgba(255,255,255,0.88)"/>
+        <path d="M40.5 33.5L47 40.5L40.5 47.5L34 40.5Z" fill="#bae6fd" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>`,
       steam: `
         <circle cx="39.5" cy="24.5" r="9.5" fill="none" stroke="rgba(255,255,255,0.96)" stroke-width="3.6"/>
         <circle cx="39.5" cy="24.5" r="4.2" fill="#ffffff"/>
@@ -383,6 +394,12 @@
       gimp: `
         <path d="M17 44c5-2 10-8 16-14l10-11 4 4-11 10c-6 6-12 11-19 11z" fill="#ffffff"/>
         <circle cx="44" cy="19" r="3.2" fill="#fde047"/>`,
+      xournalpp: `
+        <rect x="16" y="14" width="32" height="36" rx="5" fill="#ffffff" fill-opacity="0.95"/>
+        <path d="M23 25l18 14M41 25L23 39" stroke="#0284c7" stroke-width="3.6" stroke-linecap="round"/>`,
+      thunderbird: `
+        <rect x="14" y="20" width="36" height="24" rx="5" fill="rgba(255,255,255,0.94)"/>
+        <path d="M15 22l17 12 17-12" fill="none" stroke="#1d4ed8" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`,
       app: `
         <rect x="16" y="16" width="32" height="32" rx="9" fill="rgba(255,255,255,0.22)" stroke="rgba(255,255,255,0.92)" stroke-width="2.6"/>
         <circle cx="32" cy="32" r="6" fill="#ffffff"/>`
@@ -429,6 +446,8 @@
     if (s.includes("kdenlive")) return "kdenlive";
     if (s.includes("qbittorrent")) return "qbittorrent";
     if (s.includes("gimp")) return "gimp";
+    if (s.includes("xournal")) return "xournalpp";
+    if (s.includes("thunderbird")) return "thunderbird";
     if (s.includes("libreoffice") || s.includes("soffice")) return "libreoffice";
     if (s.includes("papers")) return "papers";
     if (s.includes("cups") || s.includes("printer")) return "printer";
@@ -447,8 +466,8 @@
     if (s.includes("spinel-files") || s.includes("thunar") || s.includes("files") || s.includes("文件管理")) return "files";
     if (s.includes("spinel-terminal") || s.includes("ptyxis") || s.includes("foot") || s.includes("terminal") || s.includes("终端")) return "terminal";
     if (s.includes("fcitx") || s.includes("输入法")) return "ime";
-    if (s.includes("应用商店") || s.includes("app-store")) return "store";
-    if (s.includes("游戏与启动中心") || s.includes("app-games")) return "games";
+    if (s.includes("应用中心") || s.includes("应用商店") || s.includes("app-store") || s.includes("org.spinelos.store")) return "store";
+    if (s.includes("游戏中心") || s.includes("游戏与启动中心") || s.includes("游戏与应用中心") || s.includes("app-games") || s.includes("org.spinelos.games")) return "games";
     if (s.includes("系统设置") || s.includes("settings")) return "settings";
     if (s.includes("安装") || s.includes("installer")) return "installer";
     return "app";
@@ -499,8 +518,8 @@
     grid.innerHTML = "";
 
     const baseShortcuts = [
-      { label: "游戏中心", cmd: "games:open", kind: "games", appKeys: [] },
-      { label: "应用商店", cmd: "store:open", kind: "store", appKeys: [] },
+      { label: "游戏中心", cmd: "games:open", kind: "games", appKeys: ["org.spinelos.games"] },
+      { label: "应用中心", cmd: "store:open", kind: "store", appKeys: ["org.spinelos.store"] },
       { label: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"] },
       { label: "主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [] },
       { label: "文件管理", cmd: "launch:files", kind: "files", appKeys: ["org.spinelos.files", "thunar", "org.xfce.thunar"] },
@@ -750,8 +769,8 @@
     if (!pinnedEl || !runningEl) return;
 
     const pinned = [
-      { title: "游戏与应用中心", cmd: "games:open", kind: "games", appKeys: [], match: ["游戏与启动中心"] },
-      { title: "应用商店", cmd: "store:open", kind: "store", appKeys: [], match: ["spinel os 应用商店", "spinelos 应用商店"] },
+      { title: "游戏中心", cmd: "games:open", kind: "games", appKeys: ["org.spinelos.games"], match: ["spinel 游戏中心", "游戏中心", "游戏与启动中心", "游戏与应用中心"] },
+      { title: "应用中心", cmd: "store:open", kind: "store", appKeys: ["org.spinelos.store"], match: ["spinel 应用中心", "应用中心", "spinel os 应用商店", "spinelos 应用商店", "应用商店"] },
       { title: "Steam", cmd: "launch:steam", kind: "steam", appKeys: ["steam"], match: ["steam"] },
       { title: "Gamescope 主机大屏", cmd: "launch:steam-gamepadui", kind: "gamepad", appKeys: [], match: ["gamescope"] },
       { title: "Spinel Files 文件管理", cmd: "launch:files", kind: "files", appKeys: ["org.spinelos.files", "thunar", "org.xfce.thunar"], match: ["spinel-files", "org.spinelos.files", "thunar"] },
@@ -817,7 +836,7 @@
     sendCommand(`dock:resize:${width}`);
   }
 
-  const launchpadMenu = mode === "games" ? document.getElementById("launchpad-context-menu") : null;
+  const launchpadMenu = mode === "store" ? document.getElementById("launchpad-context-menu") : null;
   const launchpadOpenLocation = document.getElementById("launchpad-open-location");
   const launchpadRemoveShortcut = document.getElementById("launchpad-remove-shortcut");
   let launchpadMenuApp = null;
@@ -869,7 +888,7 @@
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") closeLaunchpadMenu(true);
     });
-    document.querySelector("#app-games .app-scroll")?.addEventListener("scroll", () => closeLaunchpadMenu());
+    document.querySelector("#app-store .app-scroll")?.addEventListener("scroll", () => closeLaunchpadMenu());
     window.addEventListener("blur", () => closeLaunchpadMenu());
     window.__spinelLaunchpadFeedback = (ok, message) => showFeedback("launchpad-feedback", message, !ok);
   }
@@ -882,7 +901,17 @@
     const focusId = focusIndex >= 0 ? focused.dataset.appId : null;
     closeLaunchpadMenu();
     grid.innerHTML = "";
-    state.desktopApps.forEach((app) => {
+    const query = (document.getElementById("launchpad-search-input")?.value || "").trim().toLowerCase();
+    const list = query
+      ? state.desktopApps.filter((a) => `${a.name} ${a.id} ${a.category || ""}`.toLowerCase().includes(query))
+      : state.desktopApps;
+    const countEl = document.getElementById("launchpad-count-badge");
+    if (countEl) countEl.textContent = `${list.length} 个应用`;
+    if (list.length === 0) {
+      grid.innerHTML = '<div class="lib-empty">没有匹配的应用。</div>';
+      return;
+    }
+    list.forEach((app) => {
       const btn = document.createElement("button");
       btn.className = "launchpad-item";
       btn.dataset.appId = app.id;

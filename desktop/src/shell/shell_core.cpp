@@ -47,8 +47,11 @@ std::string match_app_kind(const std::string &s) {
     if (l.find("spinel-terminal") != std::string::npos || l.find("org.spinelos.terminal") != std::string::npos ||
         l.find("ptyxis") != std::string::npos || l.find("foot") != std::string::npos ||
         l.find("terminal") != std::string::npos || l.find("终端") != std::string::npos) return "terminal";
-    if (l.find("应用商店") != std::string::npos || l.find("app-store") != std::string::npos) return "store";
-    if (l.find("游戏与启动中心") != std::string::npos || l.find("app-games") != std::string::npos) return "games";
+    if (l.find("应用中心") != std::string::npos || l.find("应用商店") != std::string::npos ||
+        l.find("app-store") != std::string::npos || l.find("org.spinelos.store") != std::string::npos) return "store";
+    if (l.find("游戏中心") != std::string::npos || l.find("游戏与启动中心") != std::string::npos ||
+        l.find("游戏与应用中心") != std::string::npos || l.find("app-games") != std::string::npos ||
+        l.find("org.spinelos.games") != std::string::npos) return "games";
     if (l.find("系统设置") != std::string::npos || l.find("settings") != std::string::npos) return "settings";
     if (l.find("安装") != std::string::npos || l.find("installer") != std::string::npos) return "installer";
     return "app";
@@ -207,10 +210,10 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
         set_rgb_hex(bg, 0.0, 0x38BDF8);
         set_rgb_hex(bg, 0.55, 0x0EA5E9);
         set_rgb_hex(bg, 1.0, 0x1D4ED8);
-    } else if (kind == "gamepad") {
+    } else if (kind == "gamepad" || kind == "games") {
         set_rgb_hex(bg, 0.0, 0xF43F5E);
         set_rgb_hex(bg, 0.55, 0xA855F7);
-        set_rgb_hex(bg, 1.0, 0x6366F1);
+        set_rgb_hex(bg, 1.0, 0x4F46E5);
     } else if (kind == "files") {
         set_rgb_hex(bg, 0.0, 0x7DD3FC);
         set_rgb_hex(bg, 0.55, 0x38BDF8);
@@ -272,16 +275,35 @@ void draw_system_squircle(cairo_t *cr, double x, double y, double sz, const std:
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
 
     if (kind == "store") {
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
-        cairo_set_line_width(cr, 5.0);
-        cairo_move_to(cr, 32, 16);
-        cairo_line_to(cr, 20, 44);
-        cairo_move_to(cr, 32, 16);
-        cairo_line_to(cr, 44, 44);
+        cairo_move_to(cr, 32, 10);
+        cairo_line_to(cr, 51, 24.5);
+        cairo_line_to(cr, 32, 54);
+        cairo_line_to(cr, 13, 24.5);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.14);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.32);
+        cairo_set_line_width(cr, 1.2);
         cairo_stroke(cr);
-        cairo_set_line_width(cr, 4.5);
-        cairo_move_to(cr, 17, 37.5);
-        cairo_line_to(cr, 47, 37.5);
+
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.96);
+        cairo_rounded_rect(cr, 17, 17, 13, 13, 3.8);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.88);
+        cairo_rounded_rect(cr, 34, 17, 13, 13, 3.8);
+        cairo_fill(cr);
+        cairo_rounded_rect(cr, 17, 34, 13, 13, 3.8);
+        cairo_fill(cr);
+
+        cairo_move_to(cr, 40.5, 33.5);
+        cairo_line_to(cr, 47, 40.5);
+        cairo_line_to(cr, 40.5, 47.5);
+        cairo_line_to(cr, 34, 40.5);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, 0.73, 0.90, 0.99, 0.95);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
+        cairo_set_line_width(cr, 1.4);
         cairo_stroke(cr);
     } else if (kind == "gamepad") {
         cairo_rounded_rect(cr, 13, 17, 38, 30, 9);

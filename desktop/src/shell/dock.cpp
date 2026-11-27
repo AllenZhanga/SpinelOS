@@ -252,8 +252,8 @@ std::vector<DockPinSpec> default_dock_pins(bool is_live, bool sandbox_mode) {
         };
     }
     std::vector<DockPinSpec> defs = {
-        {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}},
-        {"应用商店", "store:open", "store", {}, {"spinel os 应用商店", "spinelos 应用商店"}},
+        {"游戏中心", "games:open", "games", {"org.spinelos.games"}, {"spinel 游戏中心", "游戏中心", "游戏与启动中心", "游戏与应用中心"}},
+        {"应用中心", "store:open", "store", {"org.spinelos.store"}, {"spinel 应用中心", "应用中心", "spinel os 应用商店", "spinelos 应用商店", "应用商店"}},
         {"Steam", "launch:steam", "steam", {"steam"}, {"steam"}},
         {"Gamescope 主机大屏", "launch:steam-gamepadui", "gamepad", {}, {"gamescope"}},
         {"文件管理", "launch:files", "files", {}, {"spinel-files", "org.spinelos.files", "thunar"}},
@@ -308,6 +308,17 @@ void load_dock_pins(NativeShellState *ns) {
         spec.kind = cols.size() > 2 ? sanitize_pin_field(cols[2]) : "app";
         if (cols.size() > 3) spec.icon_keys = split_pin_csv(cols[3]);
         if (cols.size() > 4) spec.win_match = split_pin_csv(cols[4]);
+        if (spec.cmd == "games:open") {
+            spec.title = "游戏中心";
+            spec.kind = "games";
+            spec.icon_keys = {"org.spinelos.games"};
+            spec.win_match = {"spinel 游戏中心", "游戏中心", "游戏与启动中心", "游戏与应用中心"};
+        } else if (spec.cmd == "store:open") {
+            spec.title = "应用中心";
+            spec.kind = "store";
+            spec.icon_keys = {"org.spinelos.store"};
+            spec.win_match = {"spinel 应用中心", "应用中心", "spinel os 应用商店", "spinelos 应用商店", "应用商店"};
+        }
         if (spec.cmd == "launch:files") {
             spec.kind = "files";
             spec.icon_keys.erase(std::remove_if(spec.icon_keys.begin(), spec.icon_keys.end(), [](const std::string &k) {
@@ -326,11 +337,11 @@ void load_dock_pins(NativeShellState *ns) {
 
 DockPinSpec resolve_pin_spec_from_item(const NativeShellState *ns, const DockItem &item) {
     std::string hay = to_lower_copy(item.app_id + " " + item.label);
-    if (hay.find("游戏与启动中心") != std::string::npos) {
-        return {"游戏与应用中心", "games:open", "games", {}, {"游戏与启动中心"}};
+    if (hay.find("游戏中心") != std::string::npos || hay.find("游戏与启动中心") != std::string::npos || hay.find("游戏与应用中心") != std::string::npos || hay.find("app-games") != std::string::npos) {
+        return {"游戏中心", "games:open", "games", {"org.spinelos.games"}, {"spinel 游戏中心", "游戏中心", "游戏与启动中心", "游戏与应用中心"}};
     }
-    if (hay.find("spinel os 应用商店") != std::string::npos || hay.find("spinelos 应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
-        return {"应用商店", "store:open", "store", {}, {"spinel os 应用商店", "spinelos 应用商店"}};
+    if (hay.find("应用中心") != std::string::npos || hay.find("应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
+        return {"应用中心", "store:open", "store", {"org.spinelos.store"}, {"spinel 应用中心", "应用中心", "spinel os 应用商店", "spinelos 应用商店", "应用商店"}};
     }
     if (hay.find("spinel os 系统设置") != std::string::npos || hay.find("spinelos 系统设置") != std::string::npos) {
         return {"系统设置", "settings:open:display", "settings", {}, {"spinel os 系统设置", "spinelos 系统设置"}};

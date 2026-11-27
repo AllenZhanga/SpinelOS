@@ -768,14 +768,26 @@ void test_ipc_router() {
     static std::string last_tab;
     static std::string last_store_focus;
     static bool cancel_called;
+    static uint64_t last_max_wid;
+    static uint64_t last_min_wid;
+    static int last_ws_switch;
+    static int last_ws_step;
     last_tab.clear();
     last_store_focus.clear();
     cancel_called = false;
+    last_max_wid = 0;
+    last_min_wid = 0;
+    last_ws_switch = 0;
+    last_ws_step = 0;
 
     IpcHostActions mock_actions;
     mock_actions.open_settings = +[](AppState *, const std::string &tab) { last_tab = tab; };
     mock_actions.open_store = +[](AppState *, const std::string &focus) { last_store_focus = focus; };
     mock_actions.store_cancel = +[](AppState *) { cancel_called = true; };
+    mock_actions.window_maximize = +[](uint64_t wid) { last_max_wid = wid; };
+    mock_actions.window_minimize = +[](uint64_t wid) { last_min_wid = wid; };
+    mock_actions.workspace_switch = +[](int idx1) { last_ws_switch = idx1; };
+    mock_actions.workspace_step = +[](int delta) { last_ws_step = delta; };
 
     AppState dummy;
     std::string reply;
@@ -839,6 +851,17 @@ void test_ipc_router() {
     reply.clear();
     EXPECT(dispatch_ipc_command(&dummy, "store:cancel", mock_actions, &reply));
     EXPECT(cancel_called);
+
+    EXPECT(dispatch_ipc_command(&dummy, "window:maximize:42", mock_actions, &reply));
+    EXPECT(last_max_wid == 42);
+    EXPECT(dispatch_ipc_command(&dummy, "window:minimize:43", mock_actions, &reply));
+    EXPECT(last_min_wid == 43);
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:switch:3", mock_actions, &reply));
+    EXPECT(last_ws_switch == 3);
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:next", mock_actions, &reply));
+    EXPECT(last_ws_step == 1);
+    EXPECT(dispatch_ipc_command(&dummy, "workspace:prev", mock_actions, &reply));
+    EXPECT(last_ws_step == -1);
 
     // Device manager path validation & IPC dispatch
     EXPECT(is_valid_block_dev_path("/dev/sda1"));

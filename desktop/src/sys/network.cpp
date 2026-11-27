@@ -394,6 +394,44 @@ void launch_browser_command(std::vector<std::string> args, const std::string &ta
     spawn_argv_logged(args, tag, envs, working_dir);
 }
 
+bool open_url_in_browser(const std::string &url, const std::string &tag) {
+    std::string clean = trim_copy(url);
+    if (clean.rfind("https://", 0) != 0 && clean.rfind("http://", 0) != 0) {
+        return false;
+    }
+    for (const char *ch : {" ", "\t", "\r", "\n", "\"", "'"}) {
+        if (clean.find(ch) != std::string::npos) return false;
+    }
+
+    static const char *kBrowsers[] = {
+        "google-chrome-stable",
+        "chromium",
+        "firefox",
+        "brave",
+        "microsoft-edge-stable",
+        "vivaldi-stable"
+    };
+    for (const char *bin : kBrowsers) {
+        if (has_executable(bin)) {
+            launch_browser_command({bin, clean}, tag);
+            return true;
+        }
+    }
+
+    if (has_executable("xdg-open") && has_executable("xdg-mime")) {
+        std::string handler_out;
+        int rc = 1;
+        if (run_argv_capture({"xdg-mime", "query", "default", "x-scheme-handler/https"}, handler_out, rc) &&
+            rc == 0 && !trim_copy(handler_out).empty()) {
+            auto envs = build_effective_proxy_envs();
+            envs.emplace_back("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
+            spawn_argv_logged({"xdg-open", clean}, tag, envs);
+            return true;
+        }
+    }
+    return false;
+}
+
 void sync_process_proxy_env() {
     ProxyConfig cfg = resolve_effective_proxy();
     const char *vars[] = {

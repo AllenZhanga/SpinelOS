@@ -270,7 +270,7 @@
         steamBtn.setAttribute("data-cmd", "launch:steam");
       }
     } else {
-      set("wlc-steam-status", "尚未安装专有 Steam 客户端（可点击右侧去应用商店一键安装）");
+      set("wlc-steam-status", "尚未安装专有 Steam 客户端（可点击右侧去应用中心一键安装）");
       if (steamBtn) {
         steamBtn.textContent = "一键安装 Steam";
         steamBtn.setAttribute("data-cmd", "store:open:steam");
@@ -333,9 +333,17 @@
   });
 
   document.addEventListener("click", (ev) => {
+    const storeViewTarget = ev.target.closest("[data-store-view]");
+    if (storeViewTarget) {
+      ev.stopPropagation();
+      hooks.switchStoreSubview?.(storeViewTarget.getAttribute("data-store-view") || "market");
+      return;
+    }
+
     const storeCatTarget = ev.target.closest("[data-store-cat]");
     if (storeCatTarget) {
       ev.stopPropagation();
+      hooks.switchStoreSubview?.("market");
       hooks.setStoreCategory?.(storeCatTarget.getAttribute("data-store-cat") || "all");
       document.querySelectorAll("[data-store-cat]").forEach((btn) => {
         btn.classList.toggle("active", btn === storeCatTarget);

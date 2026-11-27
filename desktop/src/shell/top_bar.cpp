@@ -102,12 +102,14 @@ void sync_top_bar_app_menus(NativeShellState *ns,
         } else if (hay.find("spinel doctor") != std::string::npos) {
             profile = "doctor";
             out_display_name = "Spinel Doctor";
-        } else if (hay.find("游戏与启动中心") != std::string::npos || hay.find("app-games") != std::string::npos) {
+        } else if (hay.find("游戏中心") != std::string::npos || hay.find("游戏与启动中心") != std::string::npos ||
+                   hay.find("游戏与应用中心") != std::string::npos || hay.find("app-games") != std::string::npos) {
             profile = "games";
             out_display_name = "游戏中心";
-        } else if (hay.find("应用商店") != std::string::npos || hay.find("app-store") != std::string::npos) {
+        } else if (hay.find("应用中心") != std::string::npos || hay.find("应用商店") != std::string::npos ||
+                   hay.find("app-store") != std::string::npos) {
             profile = "store";
-            out_display_name = "应用商店";
+            out_display_name = "应用中心";
         } else if (hay.find("安装") != std::string::npos || hay.find("installer") != std::string::npos) {
             profile = "installer";
             out_display_name = "系统安装";
@@ -167,6 +169,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
 
     std::string close_cmd = "window:close:" + std::to_string(wid);
     std::string toggle_cmd = "window:toggle:" + std::to_string(wid);
+    std::string max_cmd = "window:maximize:" + std::to_string(wid);
+    std::string min_cmd = "window:minimize:" + std::to_string(wid);
 
     if (profile == "finder") {
         add_topbar_menu(ns, "桌面", {
@@ -182,8 +186,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"刷新桌面", "telemetry:refresh"}
         });
         add_topbar_menu(ns, "前往", {
-            {"游戏与启动中心", "games:open"},
-            {"应用商店", "store:open"},
+            {"应用中心", "store:open"},
+            {"游戏中心", "games:open"},
             {"浏览器", "launch:browser"},
             {"Steam", "launch:steam"}
         });
@@ -198,20 +202,24 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"蓝牙手柄配对...", "settings:open:bt"}
         });
         add_topbar_menu(ns, "窗口", {
-            {"应用商店", "store:open"},
+            {"应用中心", "store:open"},
             {nullptr, ""},
+            {"最大化 / 还原", max_cmd},
+            {"最小化", min_cmd},
             {"关闭游戏中心", close_cmd}
         });
     } else if (profile == "store") {
-        add_topbar_menu(ns, "商店", {
+        add_topbar_menu(ns, "应用中心", {
             {"刷新应用目录", "store:refresh"},
-            {"游戏与启动中心", "games:open"}
+            {"游戏中心", "games:open"}
         });
         add_topbar_menu(ns, "网络", {
             {"网络与代理设置...", "settings:open:wifi"}
         });
         add_topbar_menu(ns, "窗口", {
-            {"关闭应用商店", close_cmd}
+            {"最大化 / 还原", max_cmd},
+            {"最小化", min_cmd},
+            {"关闭应用中心", close_cmd}
         });
     } else if (profile == "settings") {
         add_topbar_menu(ns, "设置", {
@@ -284,8 +292,8 @@ void sync_top_bar_app_menus(NativeShellState *ns,
             {"关闭当前窗口", close_cmd}
         });
         add_topbar_menu(ns, "前往", {
-            {"游戏与启动中心", "games:open"},
-            {"应用商店", "store:open"}
+            {"应用中心", "store:open"},
+            {"游戏中心", "games:open"}
         });
     } else if (profile == "steam") {
         add_topbar_menu(ns, "Steam", {
@@ -300,12 +308,13 @@ void sync_top_bar_app_menus(NativeShellState *ns,
         });
     } else {
         add_topbar_menu(ns, "应用", {
+            {"最大化 / 还原", max_cmd},
             {"最小化 / 切换", toggle_cmd},
             {"关闭当前窗口", close_cmd}
         });
         add_topbar_menu(ns, "前往", {
-            {"游戏与启动中心", "games:open"},
-            {"应用商店", "store:open"},
+            {"应用中心", "store:open"},
+            {"游戏中心", "games:open"},
             {"系统设置...", "settings:open:display"}
         });
     }
@@ -330,7 +339,7 @@ void sync_top_bar_workspaces(NativeShellState *ns) {
         if (ws.active) gtk_widget_add_css_class(btn, "active");
         if (ws.urgent) gtk_widget_add_css_class(btn, "urgent");
         std::string tip = (ws.name.empty() ? ("工作区 " + std::to_string(ws.index + 1)) : ws.name) +
-                          "（点击切换 · 滚轮上下切换）";
+                          "（点击切换 · 滚轮上下切换 · Super+1~4 直达）";
         gtk_widget_set_tooltip_text(btn, tip.c_str());
         gtk_box_append(GTK_BOX(ns->bar_ws_box), btn);
     }
@@ -389,8 +398,8 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
         {"关于 Spinel OS", "settings:open:appearance"},
         {nullptr, ""},
         {"系统设置...", "settings:open:display"},
-        {"应用商店", "store:open"},
-        {"游戏与启动中心", "games:open"},
+        {"应用中心", "store:open"},
+        {"游戏中心", "games:open"},
         {"系统监视器", "monitor:open:procs"},
         {"Spinel Doctor 体检", "doctor:open"},
         {nullptr, ""},

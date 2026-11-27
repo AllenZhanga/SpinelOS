@@ -198,6 +198,8 @@ struct NativeShellState {
         std::string icon_path;
         std::string kind;
         bool minimized = false;
+        bool activated = false;
+        bool maximized = false;
     };
     GtkWindow *switcher_backdrop_win = nullptr;
     GtkWindow *switcher_win = nullptr;

@@ -11,12 +11,12 @@
   <!-- 1. macOS-style Top Menu Bar (?mode=bar) -->
   <header id="top-bar" class="hidden">
     <div class="bar-left">
-      <button class="bar-brand-btn" data-cmd="games:open" title="Spinel OS 游戏与应用中心" aria-label="Spinel OS 菜单">
+      <button class="bar-brand-btn" data-cmd="store:open" title="Spinel 应用中心" aria-label="Spinel OS 菜单">
         <img src="spinel-logo.png" alt="Spinel OS" style="width:18px;height:18px;object-fit:contain;" />
       </button>
       <span id="bar-active-app" class="active-app-name">访达</span>
-      <button class="menu-link" data-cmd="games:open">游戏库</button>
-      <button class="menu-link" data-cmd="store:open">应用商店</button>
+      <button class="menu-link" data-cmd="games:open">游戏中心</button>
+      <button class="menu-link" data-cmd="store:open">应用中心</button>
       <button class="menu-link" data-cmd="launch:steam">Steam</button>
       <button class="menu-link" data-cmd="launch:steam-gamepadui">主机大屏</button>
       <button class="menu-link" data-cmd="settings:open:appearance">外观</button>
@@ -80,7 +80,7 @@
       <button data-cmd="desktop:open-folder">在文件管理器中打开桌面</button>
       <button data-cmd="launch:terminal">打开终端</button>
       <hr />
-      <button data-cmd="store:open">打开应用商店</button>
+      <button data-cmd="store:open">打开应用中心</button>
       <button data-cmd="games:open">打开游戏中心</button>
       <hr />
       <button data-cmd="settings:open:appearance">更换壁纸与外观...</button>
@@ -212,15 +212,35 @@
     </div>
   </section>
 
-  <!-- 4. Launchpad & Steam Games Window (?mode=games) -->
+  <!-- 4. Steam Games Center (?mode=games) -->
   <section id="app-games" class="app-window hidden">
     <header class="win-toolbar">
-      <div>
-        <h2>游戏与应用中心</h2>
+      <div class="brand-title-row">
+        <svg class="brand-app-logo" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="hdrGamesBg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#F43F5E"/>
+              <stop offset="52%" stop-color="#A855F7"/>
+              <stop offset="100%" stop-color="#4F46E5"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#hdrGamesBg)"/>
+          <path d="M21 22.5H43C47.5 22.5 51 25.8 52 30.5L53.5 38.8C54.2 42.8 49.5 45.4 46 42.3L42 38.4H22L18 42.3C14.5 45.4 9.8 42.8 10.5 38.8L12 30.5C13 25.8 16.5 22.5 21 22.5Z" fill="#FFFFFF" fill-opacity="0.96"/>
+          <path d="M21.5 27.5V34.5M18 31H25" stroke="#4F46E5" stroke-width="2.8" stroke-linecap="round"/>
+          <circle cx="42.5" cy="28.2" r="2.1" fill="#38BDF8"/>
+          <circle cx="46.4" cy="31.8" r="2.1" fill="#EC4899"/>
+          <circle cx="38.6" cy="31.8" r="2.1" fill="#6366F1"/>
+          <circle cx="42.5" cy="35.4" r="2.1" fill="#FACC15"/>
+        </svg>
+        <div>
+          <h2>Spinel 游戏中心</h2>
+          <p class="brand-sub">本地 Steam 游戏库、单游戏性能调优与缓存清理</p>
+        </div>
       </div>
       <div class="footer-actions">
+        <button class="btn small" data-cmd="settings:open:perf">全局性能预设</button>
         <button class="btn small" data-cmd="launch:steam-gamepadui">进入主机大屏</button>
-        <button class="btn small primary" data-cmd="store:open">应用商店</button>
+        <button class="btn small primary" data-cmd="store:open">打开应用中心</button>
       </div>
     </header>
     <div class="app-scroll">
@@ -259,17 +279,6 @@
           <div class="status-row"><span>系统 Pacman 包缓存 (只读统计)</span><strong id="cache-pacman-sz">--</strong></div>
         </div>
         <div id="storage-feedback" class="feedback-banner hidden"></div>
-      </section>
-
-      <section class="library-section glass">
-        <div class="section-head">
-          <div class="lib-title-wrap">
-            <h3 id="launchpad-heading" tabindex="-1">全部桌面应用程序</h3>
-          </div>
-          <button class="btn small primary" data-cmd="store:open">前往应用商店下载</button>
-        </div>
-        <div id="launchpad-feedback" class="feedback-banner hidden" role="status"></div>
-        <div id="launchpad-app-grid" class="launchpad-grid"></div>
       </section>
     </div>
 
@@ -326,11 +335,6 @@
       </div>
     </div>
   </section>
-
-  <div id="launchpad-context-menu" class="ctx-menu glass hidden" role="menu" aria-label="应用操作">
-    <button type="button" role="menuitem" id="launchpad-open-location">打开所在目录</button>
-    <button type="button" role="menuitem" id="launchpad-remove-shortcut">移除快捷方式</button>
-  </div>
 
   <!-- 5. System Settings Window (?mode=settings) -->
   <section id="app-settings" class="app-window settings-shell hidden">
@@ -857,7 +861,7 @@
             <div class="footer-actions"><span class="kbd-cap">Vol +/- / Mute</span><span class="kbd-cap">Brightness +/-</span></div>
           </div>
           <div class="perf-row">
-            <div class="perf-row-info"><strong>切换窗口 / 关闭窗口</strong><span class="muted-hint">桌面全局窗口切换与关闭快捷键</span></div>
+            <div class="perf-row-info"><strong>切换窗口 / 快速关闭选中窗口</strong><span class="muted-hint">Alt+Tab 切换器内可用方向键/Tab 选窗，按 Delete 键可直接关闭选中窗口</span></div>
             <div class="footer-actions"><span class="kbd-cap">Alt + Tab</span><span class="kbd-cap">Alt + F4</span></div>
           </div>
           <div class="perf-row">
@@ -865,8 +869,8 @@
             <div class="footer-actions"><span class="kbd-cap">Super + ← / →</span><span class="kbd-cap">Super + ↑ / ↓</span></div>
           </div>
           <div class="perf-row">
-            <div class="perf-row-info"><strong>切换多桌面工作区（共 4 个）</strong><span class="muted-hint">游戏、终端与浏览器可分置不同工作区</span></div>
-            <div class="footer-actions"><span class="kbd-cap">Ctrl + Alt + ← / →</span></div>
+            <div class="perf-row-info"><strong>多工作区切换与跨区移动窗口（共 4 个）</strong><span class="muted-hint">将办公、游戏与终端分置不同工作区；支持顶栏工作区按钮滚轮切换</span></div>
+            <div class="footer-actions"><span class="kbd-cap">Super + 1~4</span><span class="kbd-cap">Super + Shift + 1~4</span><span class="kbd-cap">Ctrl + Alt + ← / →</span></div>
           </div>
           <div class="perf-row">
             <div class="perf-row-info"><strong>终端新建标签页 / 复制粘贴</strong><span class="muted-hint">Spinel 终端内按键（Ctrl+W 关闭标签，Ctrl+F 查找）</span></div>
@@ -1077,7 +1081,7 @@
         <div class="section-head" style="margin-bottom: 10px;">
           <div>
             <h3>已安装外部应用权限管理</h3>
-            <p class="muted-hint">从「应用商店」下载的第三方软件默认在沙箱中隔离运行。如果发现某软件读不到存档目录或手柄，可在这里一键开启对应权限。</p>
+            <p class="muted-hint">从「应用中心」下载的第三方软件默认在沙箱中隔离运行。如果发现某软件读不到存档目录或手柄，可在这里一键开启对应权限。</p>
           </div>
         </div>
         <div id="perms-app-list" class="disk-list">
@@ -1521,72 +1525,122 @@
     </div>
   </section>
 
-  <!-- 7. SpinelOS App Store (?mode=store) -->
+  <!-- 7. Spinel App Center (?mode=store) -->
   <section id="app-store" class="app-window hidden">
     <header class="win-toolbar">
-      <div>
-        <h2>应用商店</h2>
+      <div class="brand-title-row">
+        <svg class="brand-app-logo" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="hdrStoreBg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#38BDF8"/>
+              <stop offset="52%" stop-color="#0EA5E9"/>
+              <stop offset="100%" stop-color="#1D4ED8"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="60" height="60" rx="14.5" fill="url(#hdrStoreBg)"/>
+          <path d="M32 10L51 24.5L32 54L13 24.5Z" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="1.2" stroke-linejoin="round"/>
+          <rect x="17" y="17" width="13" height="13" rx="3.8" fill="#FFFFFF" fill-opacity="0.96"/>
+          <rect x="34" y="17" width="13" height="13" rx="3.8" fill="#FFFFFF" fill-opacity="0.88"/>
+          <rect x="17" y="34" width="13" height="13" rx="3.8" fill="#FFFFFF" fill-opacity="0.88"/>
+          <path d="M40.5 33.5L47 40.5L40.5 47.5L34 40.5Z" fill="#BAE6FD" stroke="#FFFFFF" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        <div>
+          <h2>Spinel 应用中心</h2>
+          <p class="brand-sub">原生软件发现、服务管理与全部桌面应用启动台</p>
+        </div>
       </div>
-      <div class="tab-bar" id="store-cat-tabs">
-        <button class="tab-btn active" data-store-cat="all">全部</button>
-        <button class="tab-btn" data-store-cat="办公文档">办公文档</button>
-        <button class="tab-btn" data-store-cat="影音图像">影音图像</button>
-        <button class="tab-btn" data-store-cat="开发工具">开发工具</button>
-        <button class="tab-btn" data-store-cat="AI 与大模型">AI 与大模型</button>
-        <button class="tab-btn" data-store-cat="游戏与性能">游戏与性能</button>
-        <button class="tab-btn" data-store-cat="浏览器与实用">浏览器与实用</button>
+      <div class="footer-actions" style="gap: 10px; flex-wrap: wrap;">
+        <div class="tab-bar" id="store-view-tabs">
+          <button type="button" class="tab-btn active" data-store-view="market">应用市场</button>
+          <button type="button" class="tab-btn" data-store-view="installed">我的应用</button>
+        </div>
+        <button type="button" class="btn small" data-cmd="games:open">游戏中心</button>
+        <button type="button" class="btn small" data-cmd="settings:open:updates">系统更新 →</button>
       </div>
     </header>
 
     <div class="app-scroll">
-      <div class="store-top-bar glass">
-        <div class="store-top-left">
-          <input type="text" id="store-search-input" class="search-input" placeholder="搜索应用商店（如 Chrome、Firefox、Heroic、Discord）..." />
-          <button class="btn small" data-cmd="store:refresh">刷新状态</button>
+      <div id="store-view-market" class="store-subview">
+        <div class="store-top-bar glass" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div class="tab-bar" id="store-cat-tabs">
+            <button class="tab-btn active" data-store-cat="all">全部</button>
+            <button class="tab-btn" data-store-cat="办公文档">办公文档</button>
+            <button class="tab-btn" data-store-cat="影音图像">影音图像</button>
+            <button class="tab-btn" data-store-cat="开发工具">开发工具</button>
+            <button class="tab-btn" data-store-cat="AI 与大模型">AI 与大模型</button>
+            <button class="tab-btn" data-store-cat="游戏与性能">游戏与性能</button>
+            <button class="tab-btn" data-store-cat="浏览器与实用">浏览器与实用</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="status-chip" id="store-driver-chip">驱动检测中...</span>
+            <span class="status-chip" id="store-update-chip">索引检查中</span>
+          </div>
         </div>
-        <div class="store-custom-install">
-          <select id="store-custom-backend">
-            <option value="pacman">Pacman 包</option>
-            <option value="flatpak">Flatpak ID</option>
-          </select>
-          <input type="text" id="store-custom-pkg" placeholder="输入自定义包名或 ID..." />
-          <button class="btn small primary" id="btn-store-custom" data-cmd="store:custom-install">下载安装</button>
+
+        <div class="store-top-bar glass">
+          <div class="store-top-left">
+            <input type="text" id="store-search-input" class="search-input" placeholder="搜索应用中心（如 LibreOffice、Chrome、Ollama、Heroic）..." />
+            <button class="btn small" data-cmd="store:refresh">刷新状态</button>
+          </div>
+          <div class="store-custom-install">
+            <select id="store-custom-backend">
+              <option value="pacman">Pacman 包</option>
+              <option value="flatpak">Flatpak ID</option>
+            </select>
+            <input type="text" id="store-custom-pkg" placeholder="输入自定义包名或 ID..." />
+            <button class="btn small primary" id="btn-store-custom" data-cmd="store:custom-install">下载安装</button>
+          </div>
+        </div>
+
+        <div id="store-feedback" class="feedback-banner hidden" role="status"></div>
+
+        <div id="store-app-grid" class="store-grid">
+          <div class="lib-empty">正在读取本地已安装状态与应用中心目录...</div>
+        </div>
+
+        <div id="store-log-wrap" class="glass store-log-card hidden">
+          <div class="sub-panel-head">
+            <strong id="store-log-title">下载与安装输出</strong>
+            <div class="footer-actions">
+              <button type="button" class="btn small danger hidden" id="btn-store-cancel" data-cmd="store:cancel">停止下载</button>
+              <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
+            </div>
+          </div>
+          <div id="store-progress-wrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
+            <div class="progress-header">
+              <span id="store-progress-text" class="muted-hint">准备中...</span>
+              <strong id="store-progress-pct">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="store-progress-bar" class="progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <pre id="store-log-box" class="log-box"></pre>
         </div>
       </div>
 
-      <div class="store-top-bar glass" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span class="status-chip" id="store-driver-chip">驱动检测中...</span>
-          <span class="status-chip" id="store-update-chip">索引检查中</span>
-        </div>
-        <div class="footer-actions">
-          <button type="button" class="btn small" data-cmd="settings:open:updates">系统更新与镜像维护 →</button>
-        </div>
+      <div id="store-view-installed" class="store-subview hidden">
+        <section class="library-section glass">
+          <div class="section-head">
+            <div class="lib-title-wrap">
+              <h3 id="launchpad-heading" tabindex="-1">全部桌面应用程序</h3>
+              <span id="launchpad-count-badge" class="status-chip">0 个应用</span>
+            </div>
+            <div class="footer-actions">
+              <input type="text" id="launchpad-search-input" class="search-input" placeholder="筛选已安装应用..." />
+              <button type="button" class="btn small" data-cmd="store:refresh">刷新列表</button>
+              <button type="button" class="btn small primary" data-store-view="market">浏览应用市场</button>
+            </div>
+          </div>
+          <div id="launchpad-feedback" class="feedback-banner hidden" role="status"></div>
+          <div id="launchpad-app-grid" class="launchpad-grid"></div>
+        </section>
       </div>
+    </div>
 
-      <div id="store-app-grid" class="store-grid">
-        <div class="lib-empty">正在读取本地已安装状态与应用商店目录...</div>
-      </div>
-
-      <div id="store-log-wrap" class="glass store-log-card hidden">
-        <div class="sub-panel-head">
-          <strong id="store-log-title">下载与安装输出</strong>
-          <div class="footer-actions">
-            <button type="button" class="btn small danger hidden" id="btn-store-cancel" data-cmd="store:cancel">停止下载</button>
-            <button class="btn small ghost" data-cmd="store:log-hide">收起日志</button>
-          </div>
-        </div>
-        <div id="store-progress-wrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
-          <div class="progress-header">
-            <span id="store-progress-text" class="muted-hint">准备中...</span>
-            <strong id="store-progress-pct">0%</strong>
-          </div>
-          <div class="progress-track">
-            <div id="store-progress-bar" class="progress-fill" style="width: 0%"></div>
-          </div>
-        </div>
-        <pre id="store-log-box" class="log-box"></pre>
-      </div>
+    <div id="launchpad-context-menu" class="ctx-menu glass hidden" role="menu" aria-label="应用操作">
+      <button type="button" role="menuitem" id="launchpad-open-location">打开所在目录</button>
+      <button type="button" role="menuitem" id="launchpad-remove-shortcut">移除快捷方式</button>
     </div>
   </section>
 
@@ -1646,7 +1700,7 @@
       <div id="welcome-step-3" class="welcome-pane hidden">
         <div class="inst-section">
           <h3>第 3 步 / 共 4 步 · Steam、显卡与游戏模式</h3>
-          <p class="muted-hint" style="margin-top:4px;">出于开源许可合规，专有 Steam 客户端不随系统镜像捆绑，可在下方一键通过应用商店在线安装。</p>
+          <p class="muted-hint" style="margin-top:4px;">出于开源许可合规，专有 Steam 客户端不随系统镜像捆绑，可在下方一键通过应用中心在线安装。</p>
           <div class="perf-row-list" style="margin-top:14px;">
             <div class="perf-row">
               <div class="perf-row-info"><strong>图形设备检测</strong><span class="muted-hint" id="wlc-gpu-status">检测中...</span></div>

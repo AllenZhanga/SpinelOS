@@ -209,14 +209,13 @@ apply_stage_and_restart() {
         install -Dm755 "${stage_dir}/bin/${bin}" "/usr/local/bin/${bin}"
       fi
     done
-    if [[ -f "${stage_dir}/assets/spinel-files.svg" ]]; then
-      install -Dm644 "${stage_dir}/assets/spinel-files.svg" /usr/share/icons/hicolor/scalable/apps/spinel-files.svg
-    fi
-    if [[ -f "${stage_dir}/assets/org.spinelos.WindowsApps.svg" ]]; then
-      install -Dm644 "${stage_dir}/assets/org.spinelos.WindowsApps.svg" /usr/share/icons/hicolor/scalable/apps/org.spinelos.WindowsApps.svg
-    fi
+    for icon_svg in spinel-files.svg org.spinelos.Store.svg org.spinelos.Games.svg org.spinelos.WindowsApps.svg; do
+      if [[ -f "${stage_dir}/assets/${icon_svg}" ]]; then
+        install -Dm644 "${stage_dir}/assets/${icon_svg}" "/usr/share/icons/hicolor/scalable/apps/${icon_svg}"
+      fi
+    done
     gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
-    for dfile in org.spinelos.files.desktop org.spinelos.WindowsApps.desktop org.spinelos.WineOpen.desktop; do
+    for dfile in org.spinelos.files.desktop org.spinelos.Store.desktop org.spinelos.Games.desktop org.spinelos.WindowsApps.desktop org.spinelos.WineOpen.desktop; do
       if [[ -f "${stage_dir}/assets/${dfile}" ]]; then
         install -Dm644 "${stage_dir}/assets/${dfile}" "/usr/share/applications/${dfile}"
       fi

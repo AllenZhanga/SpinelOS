@@ -376,8 +376,8 @@ void rebuild_desktop_shortcuts(NativeShellState *ns) {
                     find_app_icon_path(ns->desktop_apps, {"google-chrome", "chromium", "firefox"}));
         }
     } else {
-        push_sc("游戏中心", "games:open", "games", "");
-        push_sc("应用商店", "store:open", "store", "");
+        push_sc("游戏中心", "games:open", "games", find_app_icon_path(ns->desktop_apps, {"org.spinelos.games"}));
+        push_sc("应用中心", "store:open", "store", find_app_icon_path(ns->desktop_apps, {"org.spinelos.store"}));
         push_sc("Steam", "launch:steam", "steam", find_app_icon_path(ns->desktop_apps, {"steam"}));
         push_sc("主机大屏", "launch:steam-gamepadui", "gamepad", "");
         push_sc("文件管理", "launch:files", "files", "");

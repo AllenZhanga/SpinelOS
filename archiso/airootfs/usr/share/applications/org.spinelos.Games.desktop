@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Spinel 游戏中心
+Name[en_US]=Spinel Game Center
+Comment=浏览本地 Steam 游戏库、启动主机大屏与清理游戏缓存
+Exec=spinel-webui games:open
+Icon=org.spinelos.Games
+Terminal=false
+Categories=Game;
+StartupNotify=true
+StartupWMClass=spinel-webui

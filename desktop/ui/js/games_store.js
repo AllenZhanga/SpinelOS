@@ -268,8 +268,24 @@
     renderDesktopShortcuts();
   };
 
-  /* ---------------- 5. SpinelOS App Store & Settings Updates ---------------- */
+  /* ---------------- 5. SpinelOS App Center & Settings Updates ---------------- */
   let storeCategory = "all";
+  let storeSubview = UI.params?.get("tab") === "installed" ? "installed" : "market";
+
+  function switchStoreSubview(nextView) {
+    storeSubview = nextView === "installed" ? "installed" : "market";
+    document.getElementById("store-view-market")?.classList.toggle("hidden", storeSubview !== "market");
+    document.getElementById("store-view-installed")?.classList.toggle("hidden", storeSubview !== "installed");
+    document.querySelectorAll("#store-view-tabs [data-store-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-store-view") === storeSubview);
+    });
+    if (storeSubview === "installed") {
+      UI.renderLaunchpadApps?.();
+    }
+  }
+  window.__spinelOpenStoreView = switchStoreSubview;
+  window.__spinelStoreFeedback = (ok, msg) => showFeedback("store-feedback", msg || "", !ok);
+  if (UI.mode === "store") switchStoreSubview(storeSubview);
 
   function getActiveLogDom() {
     const useUpd = UI.mode === "settings";
@@ -706,6 +722,7 @@
 
   document.getElementById("game-search-input")?.addEventListener("input", renderSteamGames);
   document.getElementById("store-search-input")?.addEventListener("input", renderStoreApps);
+  document.getElementById("launchpad-search-input")?.addEventListener("input", () => UI.renderLaunchpadApps?.());
   document.getElementById("store-pass-input")?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
@@ -719,6 +736,7 @@
   UI.hooks.renderSteamGames = renderSteamGames;
   UI.hooks.renderStoreApps = renderStoreApps;
   UI.hooks.setStoreCategory = (cat) => { storeCategory = cat || "all"; };
+  UI.hooks.switchStoreSubview = switchStoreSubview;
   UI.hooks.requestStoreOp = requestStoreOp;
   UI.hooks.executeStoreOp = executeStoreOp;
 })();
