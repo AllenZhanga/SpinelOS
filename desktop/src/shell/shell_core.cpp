@@ -1087,6 +1087,27 @@ GtkWidget *make_glyph_icon_btn(AppState *state, BarGlyph kind, const char *toolt
     return btn;
 }
 
+void sync_bar_ime_ui(NativeShellState *ns) {
+    if (!ns || !ns->bar_ime_lbl) return;
+    ImeStatusSnapshot st = query_ime_status();
+    const char *txt = st.active_zh ? (st.traditional ? "繁" : "中") : "EN";
+    const char *cur_txt = gtk_label_get_text(GTK_LABEL(ns->bar_ime_lbl));
+    if (g_strcmp0(cur_txt, txt) == 0 &&
+        (!ns->bar_ime_btn || gtk_widget_has_css_class(ns->bar_ime_btn, "zh") == st.active_zh)) {
+        return;
+    }
+    gtk_label_set_text(GTK_LABEL(ns->bar_ime_lbl), txt);
+    if (ns->bar_ime_btn) {
+        if (st.active_zh) gtk_widget_add_css_class(ns->bar_ime_btn, "zh");
+        else gtk_widget_remove_css_class(ns->bar_ime_btn, "zh");
+        gtk_widget_set_tooltip_text(
+            ns->bar_ime_btn,
+            st.active_zh ? (st.traditional ? "中文输入 · 繁体（点击菜单 · 右键或 Shift / Ctrl+Space 切英文）"
+                                           : "中文输入 · 简体（点击菜单 · 右键或 Shift / Ctrl+Space 切英文）")
+                         : "英文输入（点击菜单 · 右键或 Shift / Ctrl+Space 切中文）");
+    }
+}
+
 }  // namespace shell_internal
 
 /* ==================== Public Native Shell Lifecycle & Sync ==================== */
@@ -1216,6 +1237,14 @@ void init_native_shell(GtkApplication *app, AppState *state) {
     native_shell_sync_telemetry(state);
     if (!sb_mode) {
         native_shell_sync_perf(state);
+        if (ns->ime_sync_timer == 0) {
+            ns->ime_sync_timer = g_timeout_add(900, +[](gpointer d) -> gboolean {
+                auto *n = static_cast<NativeShellState *>(d);
+                if (!n || !n->bar_ime_lbl) return G_SOURCE_REMOVE;
+                shell_internal::sync_bar_ime_ui(n);
+                return G_SOURCE_CONTINUE;
+            }, ns);
+        }
     }
 }
 
@@ -1227,6 +1256,10 @@ void shutdown_native_shell(AppState *state) {
     spinel::ai::stop_agent_bus_server();
     shutdown_sni_tray();
     shell_internal::close_startup_splash(ns);
+    if (ns->ime_sync_timer) {
+        g_source_remove(ns->ime_sync_timer);
+        ns->ime_sync_timer = 0;
+    }
     if (ns->osd_timer) g_source_remove(ns->osd_timer);
     if (ns->clock_timer_id) g_source_remove(ns->clock_timer_id);
     if (ns->dock_anim_timer) g_source_remove(ns->dock_anim_timer);
@@ -1298,10 +1331,7 @@ void native_shell_sync_telemetry(AppState *state) {
         }
         gtk_label_set_text(GTK_LABEL(ns->bar_mem_lbl), m.c_str());
     }
-    if (ns->bar_ime_lbl && has_executable("fcitx5-remote")) {
-        std::string ime = trim_copy(run_cmd_capture("fcitx5-remote 2>/dev/null"));
-        gtk_label_set_text(GTK_LABEL(ns->bar_ime_lbl), ime == "2" ? "中" : "EN");
-    }
+    shell_internal::sync_bar_ime_ui(ns);
     if (state->sandbox_shell_mode) {
         return;
     }

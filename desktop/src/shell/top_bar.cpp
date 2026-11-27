@@ -459,11 +459,119 @@ void build_native_top_bar(GtkApplication *app, NativeShellState *ns) {
     gtk_button_set_child(GTK_BUTTON(mem_btn), ns->bar_mem_lbl);
     gtk_widget_set_tooltip_text(mem_btn, "当前内存占用（点击打开系统监视器）");
 
-    GtkWidget *ime_btn = make_cmd_button(state, nullptr, "spinel-bar-pill-btn", "ime:toggle");
+    auto rebuild_ime_popover = +[](NativeShellState *n) {
+        if (!n || !n->ime_menu_box) return;
+        while (GtkWidget *c = gtk_widget_get_first_child(n->ime_menu_box)) {
+            gtk_box_remove(GTK_BOX(n->ime_menu_box), c);
+        }
+
+        ImeStatusSnapshot st = query_ime_status();
+
+        auto append_mode_row = [&](const char *title, const char *sub, bool active, const char *cmd) {
+            GtkWidget *btn = make_cmd_button(n->app_state, nullptr, "spinel-ctx-item", cmd);
+            if (active) gtk_widget_add_css_class(btn, "active");
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            GtkWidget *chk = gtk_label_new(active ? "✓" : "");
+            gtk_widget_set_size_request(chk, 14, -1);
+            gtk_widget_set_halign(chk, GTK_ALIGN_CENTER);
+            gtk_widget_add_css_class(chk, "spinel-ime-check");
+
+            GtkWidget *txt = gtk_label_new(title);
+            gtk_widget_set_hexpand(txt, TRUE);
+            gtk_widget_set_halign(txt, GTK_ALIGN_START);
+
+            GtkWidget *tag = gtk_label_new(sub);
+            gtk_widget_add_css_class(tag, "spinel-clip-meta");
+
+            gtk_box_append(GTK_BOX(row), chk);
+            gtk_box_append(GTK_BOX(row), txt);
+            gtk_box_append(GTK_BOX(row), tag);
+            gtk_button_set_child(GTK_BUTTON(btn), row);
+            g_signal_connect(btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+                auto *st_ns = static_cast<NativeShellState *>(d);
+                if (st_ns && st_ns->ime_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->ime_popover));
+            }), n);
+            gtk_box_append(GTK_BOX(n->ime_menu_box), btn);
+        };
+
+        append_mode_row("英文输入", "EN", !st.active_zh, "ime:mode:en");
+        append_mode_row("中文输入", st.traditional ? "繁" : "中", st.active_zh, "ime:mode:zh");
+
+        gtk_box_append(GTK_BOX(n->ime_menu_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+
+        GtkWidget *trad_btn = make_cmd_button(n->app_state, nullptr, "spinel-ctx-item", "ime:toggle-trad");
+        GtkWidget *trad_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *trad_lbl = gtk_label_new("简繁体切换");
+        gtk_widget_set_hexpand(trad_lbl, TRUE);
+        gtk_widget_set_halign(trad_lbl, GTK_ALIGN_START);
+        GtkWidget *trad_val = gtk_label_new(st.traditional ? "繁体中文" : "简体中文");
+        gtk_widget_add_css_class(trad_val, "spinel-ime-kbd");
+        gtk_box_append(GTK_BOX(trad_row), trad_lbl);
+        gtk_box_append(GTK_BOX(trad_row), trad_val);
+        gtk_button_set_child(GTK_BUTTON(trad_btn), trad_row);
+        g_signal_connect(trad_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *st_ns = static_cast<NativeShellState *>(d);
+            if (st_ns && st_ns->ime_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->ime_popover));
+        }), n);
+        gtk_box_append(GTK_BOX(n->ime_menu_box), trad_btn);
+
+        GtkWidget *hint_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_add_css_class(hint_row, "spinel-ime-hint-row");
+        GtkWidget *hint_lbl = gtk_label_new("切换快捷键");
+        gtk_widget_set_hexpand(hint_lbl, TRUE);
+        gtk_widget_set_halign(hint_lbl, GTK_ALIGN_START);
+        gtk_widget_add_css_class(hint_lbl, "spinel-clip-meta");
+        GtkWidget *hint_key = gtk_label_new("Shift · Ctrl+Space");
+        gtk_widget_add_css_class(hint_key, "spinel-ime-kbd");
+        gtk_box_append(GTK_BOX(hint_row), hint_lbl);
+        gtk_box_append(GTK_BOX(hint_row), hint_key);
+        gtk_box_append(GTK_BOX(n->ime_menu_box), hint_row);
+
+        gtk_box_append(GTK_BOX(n->ime_menu_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+
+        GtkWidget *cfg_btn = make_cmd_button(n->app_state, "输入法设置…", "spinel-ctx-item", "settings:open:appearance");
+        g_signal_connect(cfg_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *st_ns = static_cast<NativeShellState *>(d);
+            if (st_ns && st_ns->ime_popover) gtk_popover_popdown(GTK_POPOVER(st_ns->ime_popover));
+        }), n);
+        gtk_box_append(GTK_BOX(n->ime_menu_box), cfg_btn);
+    };
+
+    GtkWidget *ime_btn = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(ime_btn), FALSE);
+    gtk_widget_add_css_class(ime_btn, "spinel-bar-menubtn");
+    gtk_widget_add_css_class(ime_btn, "spinel-bar-ime-btn");
+    ns->bar_ime_btn = ime_btn;
     ns->bar_ime_lbl = gtk_label_new("EN");
     gtk_widget_add_css_class(ns->bar_ime_lbl, "spinel-bar-ime");
-    gtk_button_set_child(GTK_BUTTON(ime_btn), ns->bar_ime_lbl);
-    gtk_widget_set_tooltip_text(ime_btn, "输入法状态（点击切换中/英输入法）");
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(ime_btn), ns->bar_ime_lbl);
+    gtk_widget_set_tooltip_text(ime_btn, "输入法（点击打开菜单 · Shift / Ctrl+Space 切换中英文）");
+
+    GtkGesture *ime_rclick = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(ime_rclick), GDK_BUTTON_SECONDARY);
+    g_signal_connect(ime_rclick, "pressed", G_CALLBACK(+[](GtkGestureClick *g, int, double, double, gpointer d) {
+        gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+        auto *st_ns = static_cast<NativeShellState *>(d);
+        if (st_ns) trigger_cmd(st_ns->app_state, "ime:toggle");
+    }), ns);
+    gtk_widget_add_controller(ime_btn, GTK_EVENT_CONTROLLER(ime_rclick));
+
+    GtkWidget *ipop = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(ipop), FALSE);
+    gtk_widget_add_css_class(ipop, "spinel-ctx-popover");
+    GtkWidget *ibox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_size_request(ibox, 224, -1);
+    gtk_popover_set_child(GTK_POPOVER(ipop), ibox);
+    ns->ime_popover = ipop;
+    ns->ime_menu_box = ibox;
+    g_object_set_data(G_OBJECT(ipop), "rebuild_fn", reinterpret_cast<gpointer>(rebuild_ime_popover));
+    g_signal_connect(ipop, "notify::visible", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        if (gtk_widget_get_visible(GTK_WIDGET(obj))) {
+            auto fn = reinterpret_cast<void (*)(NativeShellState *)>(g_object_get_data(obj, "rebuild_fn"));
+            if (fn) fn(static_cast<NativeShellState *>(d));
+        }
+    }), ns);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(ime_btn), ipop);
 
     auto rebuild_clip_popover = +[](NativeShellState *n) {
         if (!n || !n->clip_list_box) return;

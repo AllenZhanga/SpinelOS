@@ -689,6 +689,23 @@ void launch_desktop_entry(const DesktopApp &app) {
         launch_browser_command(std::move(args), tag, app.working_dir, program_index);
         return;
     }
+    std::error_code ec;
+    const bool is_electron_app =
+        bin.find("antigravity") != std::string::npos || bin == "code" || bin.find("vscode") != std::string::npos ||
+        bin.find("cursor") != std::string::npos || bin.find("obsidian") != std::string::npos ||
+        bin.find("discord") != std::string::npos || bin.find("slack") != std::string::npos ||
+        bin.find("electron") != std::string::npos ||
+        fs::exists(fs::path(args[program_index]).parent_path() / "resources" / "app.asar", ec);
+    if (is_electron_app) {
+        auto has_flag = [&](const std::string &prefix) {
+            return std::any_of(args.begin(), args.end(), [&](const std::string &a) {
+                return a == prefix || a.rfind(prefix, 0) == 0;
+            });
+        };
+        if (!has_flag("--ozone-platform")) args.push_back("--ozone-platform=wayland");
+        if (!has_flag("--enable-wayland-ime")) args.push_back("--enable-wayland-ime");
+        if (!has_flag("--wayland-text-input-version=")) args.push_back("--wayland-text-input-version=3");
+    }
     const std::string category = lower(app.category + " " + app.id + " " + bin);
     const bool is_game_or_bench =
         (category.find("game") != std::string::npos || category.find("benchmark") != std::string::npos ||

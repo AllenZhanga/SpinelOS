@@ -70,6 +70,40 @@ bool hide_fcitx5_gnome_diagnosis() {
     return !ec && g_key_file_save_to_file(config, path.c_str(), nullptr);
 }
 
+struct ImePrefs {
+    bool traditional = false;
+};
+
+fs::path ime_prefs_path() {
+    return sys_internal::config_dir() / "ime.conf";
+}
+
+ImePrefs load_ime_prefs() {
+    ImePrefs p;
+    std::ifstream ifs(ime_prefs_path());
+    if (!ifs.is_open()) return p;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = trim_copy(line);
+        if (line.empty() || line[0] == '#') continue;
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = trim_copy(line.substr(0, eq));
+        std::string v = trim_copy(line.substr(eq + 1));
+        if (k == "traditional") {
+            p.traditional = (v == "1" || v == "true" || v == "yes");
+        }
+    }
+    return p;
+}
+
+bool save_ime_prefs(const ImePrefs &p) {
+    std::error_code ec;
+    fs::create_directories(ime_prefs_path().parent_path(), ec);
+    return write_text_file(ime_prefs_path().string(),
+                           std::string("traditional=") + (p.traditional ? "true\n" : "false\n"));
+}
+
 void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     fs::path conf_dir = fs::path(home_dir()) / ".config/fcitx5/conf";
     std::error_code ec;
@@ -80,6 +114,9 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
         std::ostringstream out;
         out << "Vertical Candidate List=False\n"
             << "PerScreenDPI=True\n"
+            << "EnableFractionalScale=True\n"
+            << "WheelForPaging=True\n"
+            << "PreferTextIcon=False\n"
             << "Font=\"Noto Sans CJK SC 12\"\n"
             << "Theme=" << theme_name << "\n";
         write_text_file(cui.string(), out.str());
@@ -91,6 +128,8 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     std::string line;
     bool replaced_theme = false;
     bool replaced_font = false;
+    bool has_frac = false;
+    bool has_wheel = false;
     while (std::getline(ifs, line)) {
         if (line.rfind("Theme=", 0) == 0) {
             out << "Theme=" << theme_name << "\n";
@@ -99,6 +138,8 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
             out << "Font=\"Noto Sans CJK SC 12\"\n";
             replaced_font = true;
         } else {
+            if (line.rfind("EnableFractionalScale=", 0) == 0) has_frac = true;
+            if (line.rfind("WheelForPaging=", 0) == 0) has_wheel = true;
             out << line << "\n";
         }
     }
@@ -107,7 +148,68 @@ void write_fcitx5_classicui(bool is_light, bool force_overwrite) {
     if (!replaced_font && out.str().find("Font=") == std::string::npos) {
         out << "Font=\"Noto Sans CJK SC 12\"\n";
     }
+    if (!has_frac) out << "EnableFractionalScale=True\n";
+    if (!has_wheel) out << "WheelForPaging=True\n";
     write_text_file(cui.string(), out.str());
+}
+
+void write_fcitx5_global_config() {
+    fs::path cfg_path = fs::path(home_dir()) / ".config/fcitx5/config";
+    std::error_code ec;
+    fs::create_directories(cfg_path.parent_path(), ec);
+    // Keep Simple: single global EN<->ZH switch layer (Ctrl+Space & tap Shift), shared state, zero OSD noise.
+    std::ostringstream out;
+    out << "[Hotkey]\n"
+        << "EnumerateWithTriggerKeys=True\n"
+        << "ConsumeRedundantActivateKeys=False\n"
+        << "EnumerateSkipFirst=False\n"
+        << "ModifierOnlyKeyTimeout=250\n\n"
+        << "[Hotkey/TriggerKeys]\n"
+        << "0=Control+space\n\n"
+        << "[Hotkey/AltTriggerKeys]\n"
+        << "0=Shift_L\n"
+        << "1=Shift_R\n\n"
+        << "[Hotkey/ActivateKeys]\n\n"
+        << "[Hotkey/DeactivateKeys]\n\n"
+        << "[Hotkey/EnumerateForwardKeys]\n\n"
+        << "[Hotkey/EnumerateBackwardKeys]\n\n"
+        << "[Hotkey/EnumerateGroupForwardKeys]\n\n"
+        << "[Hotkey/EnumerateGroupBackwardKeys]\n\n"
+        << "[Hotkey/PrevPage]\n"
+        << "0=Up\n"
+        << "1=comma\n"
+        << "2=minus\n\n"
+        << "[Hotkey/NextPage]\n"
+        << "0=Down\n"
+        << "1=period\n"
+        << "2=equal\n\n"
+        << "[Behavior]\n"
+        << "ActiveByDefault=False\n"
+        << "resetStateWhenFocusIn=No\n"
+        << "ShareInputState=All\n"
+        << "PreeditEnabledByDefault=True\n"
+        << "ShowInputMethodInformation=False\n"
+        << "showInputMethodInformationWhenFocusIn=False\n"
+        << "CompactInputMethodInformation=True\n"
+        << "ShowFirstInputMethodInformation=False\n"
+        << "DefaultPageSize=7\n"
+        << "PreloadInputMethod=True\n"
+        << "AllowInputMethodForPassword=False\n"
+        << "ShowPreeditForPassword=False\n";
+    write_text_file(cfg_path.string(), out.str());
+}
+
+void write_fcitx5_rime_addon_conf() {
+    fs::path conf_dir = fs::path(home_dir()) / ".config/fcitx5/conf";
+    std::error_code ec;
+    fs::create_directories(conf_dir, ec);
+    // Commit raw ASCII preedit immediately when switching to English via Shift / Ctrl+Space.
+    std::ostringstream out;
+    out << "PreeditMode=Composing text\n"
+        << "InputState=All\n"
+        << "PreeditCursorPositionAtBeginning=True\n"
+        << "SwitchInputMethodBehavior=Commit raw input\n";
+    write_text_file((conf_dir / "rime.conf").string(), out.str());
 }
 
 void stop_fcitx5_sync() {
@@ -151,29 +253,66 @@ void ensure_chromium_ime_flags() {
     std::error_code ec;
     fs::path cfg_dir = fs::path(home_dir()) / ".config";
     fs::create_directories(cfg_dir, ec);
-    fs::path flags = cfg_dir / "chromium-flags.conf";
-    if (!fs::exists(flags, ec)) {
-        std::ofstream ofs(flags, std::ios::trunc);
-        if (ofs.is_open()) {
-            ofs << "--ozone-platform=wayland\n"
-                << "--enable-wayland-ime\n"
-                << "--wayland-text-input-version=3\n";
+    const char *flag_files[] = {
+        "chromium-flags.conf",
+        "chrome-flags.conf",
+        "code-flags.conf",
+        "electron-flags.conf",
+    };
+    for (const char *name : flag_files) {
+        fs::path flags = cfg_dir / name;
+        if (!fs::exists(flags, ec)) {
+            std::ofstream ofs(flags, std::ios::trunc);
+            if (ofs.is_open()) {
+                ofs << "--ozone-platform=wayland\n"
+                    << "--enable-wayland-ime\n"
+                    << "--wayland-text-input-version=3\n";
+            }
         }
     }
 }
 
-void write_rime_default_custom(bool prefer_rime_ice) {
+void write_rime_default_custom(bool prefer_rime_ice, bool traditional = false) {
     fs::path rime_dir = fs::path(home_dir()) / ".local/share/fcitx5/rime";
     std::error_code ec;
     fs::create_directories(rime_dir, ec);
     fs::path custom = rime_dir / "default.custom.yaml";
     const std::string schema = prefer_rime_ice ? "rime_ice" : "luna_pinyin_simp";
+    // Keep Simple: one Chinese schema, no F4 schema-menu popup, and let Fcitx5 own Shift/Ctrl+Space switching.
     std::string content =
+        "# Managed by SpinelOS: simple English/Chinese switching without two-layer Shift conflicts\n"
         "patch:\n"
         "  schema_list:\n"
         "    - schema: " + schema + "\n"
-        "  \"menu/page_size\": 7\n";
+        "  \"menu/page_size\": 7\n"
+        "  \"switcher/hotkeys\": []\n"
+        "  \"ascii_composer/good_old_caps_lock\": true\n"
+        "  \"ascii_composer/switch_key/Shift_L\": noop\n"
+        "  \"ascii_composer/switch_key/Shift_R\": noop\n"
+        "  \"ascii_composer/switch_key/Caps_Lock\": noop\n"
+        "  \"ascii_composer/switch_key/Control_L\": noop\n"
+        "  \"ascii_composer/switch_key/Control_R\": noop\n";
     write_text_file(custom.string(), content);
+
+    // Ensure Rime always stays in Chinese mode (ascii_mode=0) and honors Simplified/Traditional script choice.
+    write_text_file((rime_dir / "rime_ice.custom.yaml").string(),
+                    "patch:\n"
+                    "  \"switches/@0/reset\": 0\n"
+                    "  \"switches/@2/reset\": " +
+                        std::string(traditional ? "1\n" : "0\n"));
+    write_text_file((rime_dir / "luna_pinyin_simp.custom.yaml").string(),
+                    "patch:\n"
+                    "  \"switches/@0/reset\": 0\n"
+                    "  \"switches/@2/reset\": " +
+                        std::string(traditional ? "0\n" : "1\n"));
+}
+
+void ensure_rime_chinese_mode_dbus() {
+    g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if (!bus) return;
+    g_dbus_connection_call(bus, "org.fcitx.Fcitx5", "/rime", "org.fcitx.Fcitx.Rime1",
+                           "SetAsciiMode", g_variant_new("(b)", FALSE), nullptr,
+                           G_DBUS_CALL_FLAGS_NO_AUTO_START, 500, nullptr, nullptr, nullptr);
 }
 
 bool has_pinyin_addon_installed() {
@@ -290,23 +429,28 @@ void ensure_fcitx5_defaults(bool is_light) {
     }
 
     ensure_chromium_ime_flags();
+    write_fcitx5_global_config();
+    write_fcitx5_rime_addon_conf();
 
+    ImePrefs prefs = load_ime_prefs();
     std::string active_im = detect_active_ime_engine();
     bool has_pinyin = has_pinyin_addon_installed();
     bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
-    write_rime_default_custom(has_ice);
+    write_rime_default_custom(has_ice, prefs.traditional);
 
+    // Keep Simple: normalize profile strictly to English (keyboard-us) + Chinese (rime/pinyin).
     if (active_im == "none" || (active_im == "pinyin" && !has_pinyin)) {
-        std::string pg_out;
-        int pg_rc = 1;
-        bool was_running = run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) && pg_rc == 0;
-        if (was_running) stop_fcitx5_sync();
         write_fcitx5_profile(default_ime_engine());
-        if (was_running && has_executable("fcitx5")) {
-            spawn_argv_detached({"sh", "-c", "setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true"});
-        }
     }
     write_fcitx5_classicui(is_light, !fs::exists(fdir / "conf/classicui.conf", ec));
+
+    if (has_executable("fcitx5-remote")) {
+        std::string pg_out;
+        int pg_rc = 1;
+        if (run_argv_capture({"pgrep", "-x", "fcitx5"}, pg_out, pg_rc) && pg_rc == 0) {
+            spawn_argv_detached({"fcitx5-remote", "-r"});
+        }
+    }
 }
 
 void sync_fcitx5_theme(bool is_light) {
@@ -351,42 +495,142 @@ fi
     write_text_file(stamp.string(), "ok\n");
 }
 
-void push_ime_state(AppState *state) {
-    if (!state || !state->settings_view) return;
-    bool installed = has_executable("fcitx5");
-    bool rime_ok = has_rime_addon_installed();
-    bool has_pinyin = has_pinyin_addon_installed();
-    bool has_configtool = has_executable("fcitx5-configtool");
+ImeStatusSnapshot query_ime_status() {
+    ImeStatusSnapshot snap;
+    snap.installed = has_executable("fcitx5");
+    snap.traditional = load_ime_prefs().traditional;
     std::error_code ec;
-    bool rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
-    std::string pid_out;
-    int pid_rc = 1;
-    bool running = installed && run_argv_capture({"pgrep", "-x", "fcitx5"}, pid_out, pid_rc) && pid_rc == 0;
-    int rss_mb = 0;
-    if (running) {
-        int pid = std::atoi(trim_copy(pid_out).c_str());
-        if (pid > 0) {
-            std::ifstream sifs("/proc/" + std::to_string(pid) + "/status");
-            std::string line;
-            while (std::getline(sifs, line)) {
-                if (line.rfind("VmRSS:", 0) == 0) {
-                    rss_mb = std::atoi(line.c_str() + 6) / 1024;
-                    break;
+    snap.rime_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+
+    g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if (bus) {
+        g_autoptr(GVariant) state_res = g_dbus_connection_call_sync(
+            bus, "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "State",
+            nullptr, G_VARIANT_TYPE("(i)"), G_DBUS_CALL_FLAGS_NO_AUTO_START, 200, nullptr, nullptr);
+        if (state_res) {
+            snap.running = true;
+            gint32 st = 0;
+            g_variant_get(state_res, "(i)", &st);
+            snap.active_zh = (st == 2);
+            if (snap.active_zh) {
+                g_autoptr(GVariant) ascii_res = g_dbus_connection_call_sync(
+                    bus, "org.fcitx.Fcitx5", "/rime", "org.fcitx.Fcitx.Rime1", "IsAsciiMode",
+                    nullptr, G_VARIANT_TYPE("(b)"), G_DBUS_CALL_FLAGS_NO_AUTO_START, 150, nullptr, nullptr);
+                if (ascii_res) {
+                    gboolean is_ascii = FALSE;
+                    g_variant_get(ascii_res, "(b)", &is_ascii);
+                    if (is_ascii) snap.active_zh = false;
                 }
+            }
+            return snap;
+        }
+    }
+
+    if (snap.installed && has_executable("fcitx5-remote")) {
+        std::string out;
+        int rc = 1;
+        if (run_argv_capture({"fcitx5-remote"}, out, rc) && rc == 0) {
+            std::string trimmed = trim_copy(out);
+            if (trimmed == "1" || trimmed == "2") {
+                snap.running = true;
+                snap.active_zh = (trimmed == "2");
             }
         }
     }
+    return snap;
+}
+
+void set_ime_active_mode(AppState *state, bool chinese) {
+    bool called_dbus = false;
+    g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if (bus) {
+        g_autoptr(GVariant) res = g_dbus_connection_call_sync(
+            bus, "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1",
+            chinese ? "Activate" : "Deactivate", nullptr, nullptr,
+            G_DBUS_CALL_FLAGS_NO_AUTO_START, 300, nullptr, nullptr);
+        if (res) {
+            called_dbus = true;
+            if (chinese) {
+                ensure_rime_chinese_mode_dbus();
+            }
+        }
+    }
+    if (!called_dbus && has_executable("fcitx5-remote")) {
+        std::string out;
+        int rc = 1;
+        run_argv_capture({"fcitx5-remote", chinese ? "-o" : "-c"}, out, rc);
+        if (chinese) ensure_rime_chinese_mode_dbus();
+    }
+    native_shell_sync_telemetry(state);
+    if (state && state->settings_view) {
+        push_ime_state(state);
+    }
+}
+
+void toggle_ime_active_mode(AppState *state) {
+    ImeStatusSnapshot snap = query_ime_status();
+    set_ime_active_mode(state, !snap.active_zh);
+}
+
+void set_ime_traditional(AppState *state, bool traditional) {
+    ImePrefs p;
+    p.traditional = traditional;
+    save_ime_prefs(p);
+
+    ImeStatusSnapshot cur = query_ime_status();
+    bool was_zh = cur.active_zh;
+
+    std::error_code ec;
+    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    write_rime_default_custom(has_ice, traditional);
+
+    if (has_executable("fcitx5")) {
+        stop_fcitx5_sync();
+        spawn_argv_detached({"sh", "-c", "setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true"});
+    }
+    append_app_log(std::string("[IME] 切换汉字输出模式为: ") + (traditional ? "繁体中文" : "简体中文"));
+
+    if (state) {
+        native_shell_sync_telemetry(state);
+        if (state->settings_view) {
+            push_ime_state(state);
+            eval_js(state->settings_view,
+                    std::string("window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"") +
+                        (traditional ? "已切换为繁体中文，按 Shift 或 Ctrl+Space 即可输入。"
+                                     : "已切换为简体中文，按 Shift 或 Ctrl+Space 即可输入。") +
+                        "\");");
+        }
+        if (was_zh) {
+            g_timeout_add(450, +[](gpointer d) -> gboolean {
+                auto *st = static_cast<AppState *>(d);
+                if (st && !st->shutting_down.load()) {
+                    set_ime_active_mode(st, true);
+                }
+                return G_SOURCE_REMOVE;
+            }, state);
+        }
+    }
+}
+
+void push_ime_state(AppState *state) {
+    if (!state || !state->settings_view) return;
+    ImeStatusSnapshot snap = query_ime_status();
+    bool installed = snap.installed;
+    bool rime_ok = has_rime_addon_installed();
+    bool has_pinyin = has_pinyin_addon_installed();
+    bool has_configtool = has_executable("fcitx5-configtool");
     std::string engine = detect_active_ime_engine();
 
     std::ostringstream js;
     js << "window.__spinelImeState && window.__spinelImeState({"
        << "\"installed\":" << (installed ? "true" : "false") << ","
-       << "\"running\":" << (running ? "true" : "false") << ","
+       << "\"running\":" << (snap.running ? "true" : "false") << ","
+       << "\"active_zh\":" << (snap.active_zh ? "true" : "false") << ","
+       << "\"traditional\":" << (snap.traditional ? "true" : "false") << ","
        << "\"rime_installed\":" << (rime_ok ? "true" : "false") << ","
        << "\"has_pinyin\":" << (has_pinyin ? "true" : "false") << ","
        << "\"has_configtool\":" << (has_configtool ? "true" : "false") << ","
-       << "\"rime_ice\":" << (rime_ice ? "true" : "false") << ","
-       << "\"rss_mb\":" << rss_mb << ","
+       << "\"rime_ice\":" << (snap.rime_ice ? "true" : "false") << ","
        << "\"engine\":\"" << engine << "\""
        << "});";
     eval_js(state->settings_view, js.str());
@@ -401,6 +645,12 @@ void restart_fcitx5_daemon(AppState *state) {
         return;
     }
     stop_fcitx5_sync();
+    write_fcitx5_global_config();
+    write_fcitx5_rime_addon_conf();
+    ImePrefs prefs = load_ime_prefs();
+    std::error_code ec;
+    bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    write_rime_default_custom(has_ice, prefs.traditional);
     if (detect_active_ime_engine() == "none") {
         write_fcitx5_profile(default_ime_engine());
     }
@@ -409,20 +659,25 @@ void restart_fcitx5_daemon(AppState *state) {
     if (state) {
         std::thread([state]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"Fcitx5 输入法服务已重启，按 Ctrl+Space 或 Shift 即可切换中英文。\");", false);
+            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"输入法服务已重启，按 Shift 或 Ctrl+Space 即可流畅切换中英文。\");", false);
         }).detach();
     }
 }
 
 void set_ime_engine(AppState *state, const std::string &engine) {
+    if (engine == "en" || engine == "zh") {
+        set_ime_active_mode(state, engine == "zh");
+        return;
+    }
     std::error_code ec;
     bool has_ice = fs::exists(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.schema.yaml", ec);
+    bool trad = load_ime_prefs().traditional;
     if (engine == "rime") {
         if (!has_ice) {
             install_rime_ice_dict(state);
             return;
         }
-        write_rime_default_custom(true);
+        write_rime_default_custom(true, trad);
         stop_fcitx5_sync();
         write_fcitx5_profile("rime");
         append_app_log("[IME] 切换中文输入法方案为: rime (rime_ice)");
@@ -431,11 +686,11 @@ void set_ime_engine(AppState *state, const std::string &engine) {
         return;
     }
 
-    // "pinyin" / built-in offline Chinese Pinyin: prefer fcitx5-chinese-addons if installed,
+    // Built-in offline Chinese Pinyin: prefer fcitx5-chinese-addons if installed,
     // otherwise switch Rime cleanly to built-in Simplified Luna Pinyin (luna_pinyin_simp).
     std::string target = has_pinyin_addon_installed() ? "pinyin" : "rime";
     if (target == "rime") {
-        write_rime_default_custom(false);
+        write_rime_default_custom(false, trad);
     }
     stop_fcitx5_sync();
     write_fcitx5_profile(target);
@@ -448,7 +703,7 @@ void set_ime_engine(AppState *state, const std::string &engine) {
 
 void install_rime_ice_dict(AppState *state) {
     if (!state) return;
-    sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"正在下载雾凇拼音 (rime-ice) 词库并切换为 Rime，请稍候...\");", false);
+    sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"正在下载雾凇拼音 (rime-ice) 词库，请稍候...\");", false);
     std::thread([state]() {
         fs::path rime_dir = fs::path(home_dir()) / ".local/share/fcitx5/rime";
         std::error_code ec;
@@ -463,15 +718,16 @@ void install_rime_ice_dict(AppState *state) {
         int rc = 1;
         run_argv_capture({"bash", "-c", cmd}, out, rc);
         if (rc == 0) {
+            bool trad = load_ime_prefs().traditional;
             stop_fcitx5_sync();
-            write_rime_default_custom(true);
+            write_rime_default_custom(true, trad);
             write_fcitx5_profile("rime");
             spawn_argv_detached({"sh", "-c", "setsid -f fcitx5 >/tmp/spinel-fcitx5.log 2>&1 </dev/null || true"});
-            append_app_log("[IME] 雾凇拼音 (rime-ice) 下载安装成功并已激活 Rime");
-            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"雾凇拼音 (rime-ice) 安装完成！已自动切换为 Rime 并重启输入法，按 Ctrl+Space 即可输入。\");", false);
+            append_app_log("[IME] 雾凇拼音 (rime-ice) 词库更新完成并已激活");
+            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(true, \"雾凇拼音 (rime-ice) 词库已就绪！按 Shift 或 Ctrl+Space 即可输入。\");", false);
         } else {
             append_app_log("[IME] 雾凇拼音下载失败 (code=" + std::to_string(rc) + "): " + out);
-            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"雾凇拼音下载失败（网络访问 GitHub 超时），可先在「Wi-Fi / 网络」里开启代理后再试，或直接使用内置中文拼音。\");", false);
+            sys_internal::post_js_to_main(state, "window.__spinelImeFeedback && window.__spinelImeFeedback(false, \"雾凇拼音下载失败（网络访问 GitHub 超时），可先开启代理后再试，或继续使用内置拼音。\");", false);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
         g_idle_add([](gpointer d) -> gboolean {

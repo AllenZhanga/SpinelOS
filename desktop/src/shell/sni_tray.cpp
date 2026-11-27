@@ -1165,6 +1165,13 @@ std::vector<SniTrayItemSnapshot> list_sni_tray_items() {
     out.reserve(g_sni.items.size());
     for (const auto &kv : g_sni.items) {
         if (kv.second->info.status == "Passive") continue;
+        // Spinel top bar renders a single clean IME status bar & menu; hide duplicate Fcitx tray clutter.
+        std::string hay = kv.second->info.id + " " + kv.second->info.title + " " +
+                          kv.second->info.icon_name + " " + kv.second->info.service_key;
+        for (char &ch : hay) {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        if (hay.find("fcitx") != std::string::npos) continue;
         out.push_back(kv.second->info);
     }
     std::stable_sort(out.begin(), out.end(), [](const SniTrayItemSnapshot &a, const SniTrayItemSnapshot &b) {

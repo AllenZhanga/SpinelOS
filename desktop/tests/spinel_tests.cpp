@@ -750,17 +750,46 @@ void test_system_control_configs() {
     mark_welcome_completed();
     EXPECT(is_welcome_completed() == true);
 
-    // Fcitx5 Rime Simplified Chinese offline defaults (zero qt6-webengine dependency)
+    // Fcitx5 Keep-Simple EN/ZH defaults (single global Ctrl+Space / Shift switching + Electron IME flags)
     ensure_fcitx5_defaults(true);
     std::ifstream prof_ifs(fs::path(home_dir()) / ".config/fcitx5/profile");
     std::ostringstream prof_buf;
     prof_buf << prof_ifs.rdbuf();
     EXPECT(prof_buf.str().find("DefaultIM=rime") != std::string::npos);
 
+    std::ifstream gcfg_ifs(fs::path(home_dir()) / ".config/fcitx5/config");
+    std::ostringstream gcfg_buf;
+    gcfg_buf << gcfg_ifs.rdbuf();
+    EXPECT(gcfg_buf.str().find("0=Control+space") != std::string::npos);
+    EXPECT(gcfg_buf.str().find("0=Shift_L") != std::string::npos);
+    EXPECT(gcfg_buf.str().find("1=Shift_R") != std::string::npos);
+    EXPECT(gcfg_buf.str().find("ShowInputMethodInformation=False") != std::string::npos);
+    EXPECT(gcfg_buf.str().find("ShareInputState=All") != std::string::npos);
+
+    std::ifstream raddon_ifs(fs::path(home_dir()) / ".config/fcitx5/conf/rime.conf");
+    std::ostringstream raddon_buf;
+    raddon_buf << raddon_ifs.rdbuf();
+    EXPECT(raddon_buf.str().find("SwitchInputMethodBehavior=Commit raw input") != std::string::npos);
+
+    EXPECT(fs::exists(fs::path(home_dir()) / ".config/electron-flags.conf"));
+    EXPECT(fs::exists(fs::path(home_dir()) / ".config/code-flags.conf"));
+
     std::ifstream rime_ifs(fs::path(home_dir()) / ".local/share/fcitx5/rime/default.custom.yaml");
     std::ostringstream rime_buf;
     rime_buf << rime_ifs.rdbuf();
     EXPECT(rime_buf.str().find("schema: luna_pinyin_simp") != std::string::npos);
+    EXPECT(rime_buf.str().find("\"ascii_composer/switch_key/Shift_L\": noop") != std::string::npos);
+    EXPECT(rime_buf.str().find("\"switcher/hotkeys\": []") != std::string::npos);
+
+    // Traditional toggle persists and updates Rime schema custom switch
+    set_ime_traditional(nullptr, true);
+    EXPECT(query_ime_status().traditional == true);
+    std::ifstream rice_cust_ifs(fs::path(home_dir()) / ".local/share/fcitx5/rime/rime_ice.custom.yaml");
+    std::ostringstream rice_cust_buf;
+    rice_cust_buf << rice_cust_ifs.rdbuf();
+    EXPECT(rice_cust_buf.str().find("\"switches/@2/reset\": 1") != std::string::npos);
+    set_ime_traditional(nullptr, false);
+    EXPECT(query_ime_status().traditional == false);
 
     // Spinel Doctor checks + log/credential redaction
     std::string raw_secret =
@@ -993,6 +1022,11 @@ void test_ipc_router() {
     EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-speaker:stop", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "settings:audio-test-mic:stop", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "ime:toggle", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:mode:en", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:mode:zh", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:trad:trad", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:trad:simp", mock_actions, &reply));
+    EXPECT(dispatch_ipc_command(&dummy, "ime:toggle-trad", mock_actions, &reply));
     EXPECT(dispatch_ipc_command(&dummy, "desktop:new-folder", mock_actions, &reply));
     EXPECT(fs::exists(fs::path(home_dir()) / "Desktop" / "新建文件夹"));
     EXPECT(dispatch_ipc_command(&dummy, "settings:net-ip-apply\ndevice=eth0\nmethod=auto", mock_actions, &reply));

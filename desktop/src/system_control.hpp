@@ -109,10 +109,22 @@ void export_diagnostic_report(AppState *state);
 std::string collect_doctor_summary_json();
 std::string collect_redacted_logs_tail(const std::string &source, size_t max_lines = 80);
 
+struct ImeStatusSnapshot {
+    bool installed = false;
+    bool running = false;
+    bool active_zh = false;
+    bool traditional = false;
+    bool rime_ice = false;
+};
+
 void ensure_fcitx5_defaults(bool is_light);
 void sync_fcitx5_theme(bool is_light);
 void ensure_terminal_defaults(bool is_light);
 void sync_terminal_theme(bool is_light);
+ImeStatusSnapshot query_ime_status();
+void set_ime_active_mode(AppState *state, bool chinese);
+void toggle_ime_active_mode(AppState *state);
+void set_ime_traditional(AppState *state, bool traditional);
 void push_ime_state(AppState *state);
 void set_ime_engine(AppState *state, const std::string &engine);
 void install_rime_ice_dict(AppState *state);

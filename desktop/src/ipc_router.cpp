@@ -429,12 +429,7 @@ bool dispatch_ipc_command(AppState *state,
             native_shell_sync_desktop(s);
         }},
         {"ime:toggle", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
-            if (has_executable("fcitx5-remote")) {
-                std::string out;
-                int rc = 1;
-                run_argv_capture({"fcitx5-remote", "-t"}, out, rc);
-            }
-            native_shell_sync_telemetry(s);
+            toggle_ime_active_mode(s);
         }},
         {"launch:browser", +[](AppState *s, const IpcRequest &, const IpcHostActions &a) {
             native_shell_set_cc_visible(s, false);
@@ -716,6 +711,22 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"ime:status", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             push_ime_state(s);
+        }},
+        {"ime:mode:en", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            set_ime_active_mode(s, false);
+        }},
+        {"ime:mode:zh", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            set_ime_active_mode(s, true);
+        }},
+        {"ime:trad:simp", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            set_ime_traditional(s, false);
+        }},
+        {"ime:trad:trad", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            set_ime_traditional(s, true);
+        }},
+        {"ime:toggle-trad", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
+            ImeStatusSnapshot st = query_ime_status();
+            set_ime_traditional(s, !st.traditional);
         }},
         {"ime:mode:pinyin", +[](AppState *s, const IpcRequest &, const IpcHostActions &) {
             set_ime_engine(s, "pinyin");

@@ -103,7 +103,11 @@ struct NativeShellState {
     std::string ai_state_cls = "idle";
     std::string ai_toast_text;
     GtkWidget *bar_mem_lbl = nullptr;
+    GtkWidget *bar_ime_btn = nullptr;
     GtkWidget *bar_ime_lbl = nullptr;
+    GtkWidget *ime_popover = nullptr;
+    GtkWidget *ime_menu_box = nullptr;
+    guint ime_sync_timer = 0;
     GtkWidget *bar_vol_btn = nullptr;
     GtkWidget *bar_vol_da = nullptr;
     bool bar_vol_muted = false;
