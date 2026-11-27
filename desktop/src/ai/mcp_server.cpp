@@ -150,7 +150,7 @@ constexpr McpToolDef kMcpTools[] = {
         R"("workspace":{"type":"integer","minimum":1,"description":"1-based workspace index."},)"
         R"("win_id":{"type":"integer","minimum":1,"description":"Tracked window handle ID."},)"
         R"("summary":{"type":"string","description":"Reason shown on user approval prompt."},)"
-        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000}"
+        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000})"
         R"(}})"
     },
     {
@@ -160,7 +160,7 @@ constexpr McpToolDef kMcpTools[] = {
         R"("service":{"type":"string","enum":["ollama","vllm","docker","cups"]},)"
         R"("action":{"type":"string","enum":["status","start","stop"]},)"
         R"("summary":{"type":"string","description":"Reason shown when approval is required."},)"
-        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000}"
+        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000})"
         R"(},"required":["service","action"]})"
     },
     {
@@ -176,7 +176,7 @@ constexpr McpToolDef kMcpTools[] = {
         R"("detail":{"type":"string","description":"Detailed context, diff, or command preview."},)"
         R"("capability":{"type":"string","description":"Logical capability tag."},)"
         R"("async":{"type":"boolean","description":"If true, queue non-blocking approval and return approval_id immediately."},)"
-        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000}"
+        R"("timeout_ms":{"type":"integer","minimum":500,"maximum":300000})"
         R"(},"required":["summary"]})"
     },
 };
