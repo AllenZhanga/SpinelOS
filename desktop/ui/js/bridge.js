@@ -55,7 +55,8 @@
     pendingStoreOp: null,
     pendingStoreFocus: params.get("focus") || "",
     ovEditState: null,
-    welcomeStep: 1
+    welcomeStep: 1,
+    activeLogSource: "apps"
   };
 
   let ipcSeq = 0;
@@ -994,17 +995,59 @@
     renderDock();
   };
 
+  function setSwitchState(el, on) {
+    if (!el) return;
+    const enabled = Boolean(on);
+    el.classList.toggle("is-on", enabled);
+    el.setAttribute("aria-checked", String(enabled));
+  }
+
+  function createSwitchButton(on, ariaLabel, onClick) {
+    const sw = document.createElement("button");
+    sw.type = "button";
+    sw.className = "sp-switch";
+    sw.setAttribute("role", "switch");
+    if (ariaLabel) sw.setAttribute("aria-label", ariaLabel);
+    setSwitchState(sw, on);
+    const thumb = document.createElement("span");
+    thumb.className = "sp-switch-thumb";
+    sw.appendChild(thumb);
+    if (typeof onClick === "function") sw.addEventListener("click", onClick);
+    return sw;
+  }
+
+  function syncSelectValue(selectEl, value) {
+    if (!selectEl) return;
+    if (value !== undefined && value !== null && value !== "") {
+      selectEl.value = String(value);
+    }
+    enhanceSelect(selectEl);
+  }
+
+  function bindModalDismiss(modalId, cancelBtnId, onClose) {
+    const modal = document.getElementById(modalId);
+    document.getElementById(cancelBtnId)?.addEventListener("click", onClose);
+    modal?.addEventListener("click", (ev) => {
+      if (ev.target && ev.target.id === modalId) onClose();
+    });
+  }
+
   window.SpinelUI = {
     params,
     mode,
     initialTab,
     activeRootEl,
     state,
+    helpers: window.SpinelHelpers || {},
     hooks: {},
     sendCommand,
     invokeIpc,
     formatBytes,
     showFeedback,
+    setSwitchState,
+    createSwitchButton,
+    syncSelectValue,
+    bindModalDismiss,
     forceSoftwareRepaint,
     enhanceSelect,
     syncAllCustomSelects,

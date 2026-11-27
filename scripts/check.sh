@@ -20,13 +20,16 @@ for arg in "$@"; do
   esac
 done
 
-echo "==> [1/5] Checking UI JS syntax..."
+echo "==> [1/5] Checking UI JS syntax & unit tests..."
 if command -v node >/dev/null 2>&1; then
   for f in "${ROOT_DIR}"/desktop/ui/js/*.js; do
     node --check "${f}"
   done
+  if compgen -G "${ROOT_DIR}/desktop/ui/tests/*.test.mjs" >/dev/null; then
+    node --test "${ROOT_DIR}"/desktop/ui/tests/*.test.mjs
+  fi
 else
-  echo "ERROR: node is required for JS syntax validation" >&2
+  echo "ERROR: node is required for JS syntax and unit validation" >&2
   exit 1
 fi
 
