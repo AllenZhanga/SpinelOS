@@ -358,6 +358,7 @@ GtkWidget *build_agent_island_widget(NativeShellState *ns) {
     gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(btn), FALSE);
     gtk_widget_add_css_class(btn, "spinel-ai-pill");
     gtk_widget_set_valign(btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(btn, FALSE);
     gtk_widget_set_tooltip_text(btn, "Spinel AI 灵动岛：查看活动 Agent 会话与 Tier 3 权限审批");
 
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -403,6 +404,9 @@ GtkWidget *build_agent_island_widget(NativeShellState *ns) {
         native_shell_set_cc_visible(n->app_state, false);
         agent_island_refresh(n);
     }), ns);
+    g_signal_connect(pop, "closed", G_CALLBACK(+[](GtkWidget *, gpointer d) {
+        agent_island_refresh(static_cast<NativeShellState *>(d));
+    }), ns);
 
     ns->bar_ai_btn = btn;
     ns->bar_ai_dot_da = dot;
@@ -425,6 +429,8 @@ void agent_island_refresh(NativeShellState *ns) {
     std::string cls;
     std::string text = format_island_pill_summary(sessions, approvals, ns->ai_toast_text, cls);
     ns->ai_state_cls = cls;
+    bool pop_open = (ns->bar_ai_popover && gtk_widget_get_visible(ns->bar_ai_popover));
+    bool visible = pop_open || (cls != "idle");
     gtk_label_set_text(GTK_LABEL(ns->bar_ai_lbl), text.c_str());
 
     for (const char *c : {"is-running", "is-alert", "is-toast"}) {
@@ -434,9 +440,10 @@ void agent_island_refresh(NativeShellState *ns) {
     else if (cls == "alert") gtk_widget_add_css_class(ns->bar_ai_btn, "is-alert");
     else if (cls == "toast") gtk_widget_add_css_class(ns->bar_ai_btn, "is-toast");
 
+    gtk_widget_set_visible(ns->bar_ai_btn, visible);
     if (ns->bar_ai_dot_da) gtk_widget_queue_draw(ns->bar_ai_dot_da);
 
-    if (ns->bar_ai_popover && gtk_widget_get_visible(ns->bar_ai_popover)) {
+    if (pop_open) {
         rebuild_ai_popover_contents(ns, sessions, approvals);
     }
 }

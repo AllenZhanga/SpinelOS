@@ -85,6 +85,12 @@ std::string format_agent_island_pill_summary(const std::vector<AgentSessionInfo>
                                              const std::string &toast_text,
                                              std::string &out_state_cls);
 
+/// Return true only when AI activity (running/waiting/errored/pending approval/toast) or open popover requires showing the island pill.
+bool should_show_agent_island_pill(const std::vector<AgentSessionInfo> &sessions,
+                                   const std::vector<ApprovalRequestInfo> &approvals,
+                                   const std::string &toast_text,
+                                   bool popover_open = false);
+
 /// Yield local user-scoped heavy inference (`spinel-vllm.service`) when GameMode activates.
 void sync_vram_with_gamemode(bool gamemode_active);
 

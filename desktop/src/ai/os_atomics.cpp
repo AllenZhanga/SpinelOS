@@ -387,6 +387,16 @@ std::string format_agent_island_pill_summary(const std::vector<AgentSessionInfo>
     return "AI";
 }
 
+bool should_show_agent_island_pill(const std::vector<AgentSessionInfo> &sessions,
+                                   const std::vector<ApprovalRequestInfo> &approvals,
+                                   const std::string &toast_text,
+                                   bool popover_open) {
+    if (popover_open) return true;
+    std::string cls;
+    format_agent_island_pill_summary(sessions, approvals, toast_text, cls);
+    return cls != "idle";
+}
+
 void sync_vram_with_gamemode(bool gamemode_active) {
     AgentPermConfig perms = load_agent_perms();
     std::string status_out;

@@ -629,6 +629,16 @@ void test_ai_os_stage3_integration() {
     EXPECT(format_agent_island_pill_summary({s1}, {ap1}, "", cls).find("1 待确认") != std::string::npos && cls == "alert");
     EXPECT(format_agent_island_pill_summary({s1}, {ap1}, "✓ Codex · 完成", cls) == "✓ Codex · 完成" && cls == "toast");
 
+    AgentSessionInfo s_done = s1;
+    s_done.id = "s_done";
+    s_done.status = AgentSessionStatus::Done;
+    EXPECT(!should_show_agent_island_pill({}, {}, "", false));
+    EXPECT(!should_show_agent_island_pill({s_done}, {}, "", false));
+    EXPECT(should_show_agent_island_pill({s_done}, {}, "", true));
+    EXPECT(should_show_agent_island_pill({s1}, {}, "", false));
+    EXPECT(should_show_agent_island_pill({}, {ap1}, "", false));
+    EXPECT(should_show_agent_island_pill({}, {}, "✓ Codex · 完成", false));
+
     // 2. GameMode <-> vLLM VRAM yield arbitration & persistence
     std::string vram_act;
     EXPECT(evaluate_vram_yield_for_gamemode(true, true, true, vram_act) && vram_act == "stop_vllm");
