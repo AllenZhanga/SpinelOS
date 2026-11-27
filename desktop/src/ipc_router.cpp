@@ -230,14 +230,13 @@ void push_ai_os_state(AppState *s) {
     if (!s || !s->settings_view) return;
     std::string payload;
     // Try live agent_bus in spinel-shell first so active sessions + approvals match Dynamic Island.
-    std::string bus_sess, bus_apr, bus_tasks, bus_perms, bus_audit;
+    std::string bus_sess, bus_apr, bus_tasks, bus_perms;
     const std::string sock = spinel::ai::agent_bus_socket_path();
     bool live_ok =
         spinel::ai::call_agent_bus_socket(sock, R"({"id":1,"client":"settings","method":"agent.list","params":{"include_proc":false}})", bus_sess, 800) &&
         spinel::ai::call_agent_bus_socket(sock, R"({"id":2,"client":"settings","method":"approval.list","params":{}})", bus_apr, 800) &&
         spinel::ai::call_agent_bus_socket(sock, R"({"id":3,"client":"settings","method":"todo.list","params":{}})", bus_tasks, 800) &&
-        spinel::ai::call_agent_bus_socket(sock, R"({"id":4,"client":"settings","method":"perms.get","params":{}})", bus_perms, 800) &&
-        spinel::ai::call_agent_bus_socket(sock, R"({"id":5,"client":"settings","method":"audit.tail","params":{"limit":25}})", bus_audit, 800);
+        spinel::ai::call_agent_bus_socket(sock, R"({"id":4,"client":"settings","method":"perms.get","params":{}})", bus_perms, 800);
 
     if (live_ok) {
         auto extract_res = [](const std::string &env, const char *def) {
@@ -251,7 +250,7 @@ void push_ai_os_state(AppState *s) {
                   ",\"sessions\":" + extract_res(bus_sess, "[]") +
                   ",\"approvals\":" + extract_res(bus_apr, "[]") +
                   ",\"tasks\":" + extract_res(bus_tasks, "[]") +
-                  ",\"audit\":" + extract_res(bus_audit, "[]") + "}";
+                  ",\"mcp_clients\":" + spinel::ai::serialize_mcp_clients_status_json() + "}";
     } else {
         payload = spinel::ai::build_ai_os_live_snapshot_json();
     }
@@ -1070,21 +1069,26 @@ bool dispatch_ipc_command(AppState *state,
         }},
         {"ai:copy-snippet:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             std::string target = arg_or_param(r, "ai:copy-snippet:", {"target"});
-            std::string snip;
-            if (target == "codex") {
-                snip = "[mcp_servers.spinel_os]\ncommand = \"/usr/local/bin/spinel-os-mcp\"\nenv = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
-            } else {
-                std::string c = (target == "antigravity") ? "Antigravity"
-                                : (target == "claude") ? "Claude"
-                                : (target == "gemini" ? "GeminiCLI"
-                                : (target == "deepseek" ? "DeepSeekHarness" : "Agent"));
-                snip = "{\n  \"mcpServers\": {\n    \"spinel-os\": {\n      \"type\": \"stdio\",\n      \"command\": \"/usr/local/bin/spinel-os-mcp\",\n      \"env\": { \"SPINEL_AGENT_CLIENT\": \"" + c + "\" }\n    }\n  }\n}\n";
-            }
+            std::string snip = spinel::ai::build_mcp_client_snippet(target);
             copy_text_to_clipboard(snip);
             if (s && s->settings_view) {
                 eval_js(s->settings_view,
                         "window.__spinelAiFeedback && window.__spinelAiFeedback(true,\"已复制 spinel-os-mcp 配置片段到剪贴板\");");
             }
+        }},
+        {"ai:install-mcp:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
+            std::string target = arg_or_param(r, "ai:install-mcp:", {"target"});
+            std::string out_path, err;
+            bool ok = spinel::ai::install_mcp_client_config(target, out_path, err);
+            if (s && s->settings_view) {
+                std::string msg = ok
+                    ? ("已安全合并写入 " + out_path + "（若客户端已打开，请重载 MCP 或重启会话使其生效）")
+                    : err;
+                eval_js(s->settings_view,
+                        "window.__spinelAiFeedback && window.__spinelAiFeedback(" +
+                            std::string(ok ? "true" : "false") + ",\"" + json_escape(msg) + "\");");
+            }
+            push_ai_os_state(s);
         }},
         {"procs:kill:", +[](AppState *s, const IpcRequest &r, const IpcHostActions &) {
             kill_process_by_pid(s, std::atoi(arg_or_param(r, "procs:kill:", {"pid"}).c_str()), false);

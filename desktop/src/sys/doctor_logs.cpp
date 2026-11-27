@@ -1,5 +1,6 @@
 #include "system_control.hpp"
 #include "sys_internal.hpp"
+#include "ai/agent_perms.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
 #include "native_shell.hpp"
@@ -81,12 +82,29 @@ std::string collect_logs_bundle_text(const std::string &source) {
 
     if (source == "mcp") {
         fs::path audit_log = fs::path(spinel_state_dir()) / "mcp_audit.log";
-        std::string txt = read_tail_lines(audit_log, 250);
-        if (txt.empty()) {
-            txt = "暂无 MCP 能力调用审计记录。\n当外部 Coding Agent (Antigravity / Codex / Claude 等) 调用 spinel-os-mcp 时，放行、挂起与拦截记录将记录在:\n" +
-                  audit_log.string();
+        auto entries = spinel::ai::tail_agent_audit(200);
+        if (entries.empty()) {
+            return "=== MCP 能力调用审计日志 (" + audit_log.string() + ") ===\n"
+                   "暂无 MCP 能力调用审计记录。\n"
+                   "当外部 Coding Agent (Antigravity / Codex / Claude 等) 调用 spinel-os-mcp 或触发审批时，记录会出现在这里。";
         }
-        return "=== MCP 能力调用审计日志 (" + audit_log.string() + ") ===\n" + txt;
+        std::ostringstream oss;
+        oss << "=== MCP 能力调用审计日志 (" << audit_log.string() << ") ===\n";
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+            std::time_t tt = static_cast<std::time_t>(it->ts);
+            std::tm tmv{};
+            localtime_r(&tt, &tmv);
+            char tbuf[32]{};
+            std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+            const char *dec_zh = (it->decision == "allow")
+                                     ? "放行"
+                                     : (it->decision == "require_approval" ? "审批" : "拦截");
+            oss << "[" << tbuf << "] [" << dec_zh << "] "
+                << it->client_id << " -> " << it->capability;
+            if (!it->detail.empty()) oss << "  (" << it->detail << ")";
+            oss << "\n";
+        }
+        return oss.str();
     }
 
     if (source == "system") {

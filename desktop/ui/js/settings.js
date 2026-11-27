@@ -290,6 +290,8 @@
     tier3_policy: "ask"
   };
 
+  let lastAiMcpClients = {};
+
   function renderAiMcpSnippet() {
     const pre = document.getElementById("ai-mcp-snippet");
     const sel = document.getElementById("sel-ai-mcp-client");
@@ -297,7 +299,7 @@
     const t = sel.value || "antigravity";
     if (t === "codex") {
       pre.textContent =
-        '# ~/.codex/config.toml\n[mcp_servers.spinel_os]\ncommand = "/usr/local/bin/spinel-os-mcp"\nenv = { SPINEL_AGENT_CLIENT = "Codex" }';
+        '[mcp_servers.spinel_os]\ncommand = "/usr/local/bin/spinel-os-mcp"\nenv = { SPINEL_AGENT_CLIENT = "Codex" }';
     } else {
       const cname = t === "antigravity"
         ? "Antigravity"
@@ -305,18 +307,43 @@
       pre.textContent = JSON.stringify({
         mcpServers: {
           "spinel-os": {
-            type: "stdio",
             command: "/usr/local/bin/spinel-os-mcp",
+            args: [],
             env: { SPINEL_AGENT_CLIENT: cname }
           }
         }
       }, null, 2);
+    }
+
+    const defaultPaths = {
+      antigravity: "~/.gemini/config/mcp_config.json",
+      codex: "~/.codex/config.toml",
+      claude: "~/.claude.json",
+      deepseek: "~/.config/deepseek/mcp_config.json",
+      gemini: "~/.gemini/settings.json"
+    };
+    const st = lastAiMcpClients[t];
+    const pathEl = document.getElementById("ai-mcp-path-hint");
+    if (pathEl) {
+      pathEl.textContent = `配置文件: ${(st && st.path) || defaultPaths[t] || ""}`;
+    }
+    const chipEl = document.getElementById("ai-mcp-install-chip");
+    if (chipEl) {
+      const ok = Boolean(st && st.installed);
+      chipEl.textContent = ok ? "已接入" : "未写入";
+      chipEl.classList.toggle("ok", ok);
+      chipEl.classList.toggle("warn", !ok);
+    }
+    const instBtn = document.getElementById("btn-ai-install-mcp");
+    if (instBtn) {
+      instBtn.textContent = (st && st.installed) ? "更新配置" : "自动写入配置";
     }
   }
 
   window.__spinelAiState = (data) => {
     if (!data) return;
     if (data.perms) lastAiPerms = { ...lastAiPerms, ...data.perms };
+    if (data.mcp_clients) lastAiMcpClients = data.mcp_clients;
 
     const countChip = document.getElementById("ai-agent-count-chip");
     if (countChip) {
@@ -356,8 +383,12 @@
   });
 
   document.getElementById("sel-ai-mcp-client")?.addEventListener("change", renderAiMcpSnippet);
+  document.getElementById("btn-ai-install-mcp")?.addEventListener("click", () => {
+    const t = document.getElementById("sel-ai-mcp-client")?.value || "antigravity";
+    sendCommand(`ai:install-mcp:${t}`);
+  });
   document.getElementById("btn-ai-copy-mcp")?.addEventListener("click", () => {
-    const t = document.getElementById("sel-ai-mcp-client")?.value || "codex";
+    const t = document.getElementById("sel-ai-mcp-client")?.value || "antigravity";
     sendCommand(`ai:copy-snippet:${t}`);
   });
   renderAiMcpSnippet();

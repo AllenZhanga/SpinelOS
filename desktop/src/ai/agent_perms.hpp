@@ -90,4 +90,31 @@ const char *perm_decision_str(PermDecision d);
 const char *tier3_policy_str(Tier3Policy p);
 Tier3Policy parse_tier3_policy(const std::string &s);
 
+struct McpClientInstallStatus {
+    std::string id;
+    std::string client_name;
+    std::string config_path;
+    bool installed = false;
+};
+
+/// Return true if `(client_id, capability, decision)` should be persisted to mcp_audit.log.
+bool should_audit_agent_event(const std::string &client_id,
+                              const std::string &capability,
+                              PermDecision decision);
+
+/// Resolve user config file path for a Coding Agent MCP target (antigravity|codex|claude|deepseek|gemini).
+std::string mcp_client_config_path(const std::string &target);
+
+/// Generate canonical MCP configuration snippet for `target`.
+std::string build_mcp_client_snippet(const std::string &target);
+
+/// Check whether `spinel-os-mcp` is already configured for `target`.
+bool is_mcp_client_installed(const std::string &target);
+
+/// Safely install or merge `spinel-os-mcp` into `target`'s user configuration file.
+bool install_mcp_client_config(const std::string &target, std::string &out_path, std::string &error_out);
+
+/// Serialize install status map for all known Coding Agent targets as a JSON object.
+std::string serialize_mcp_clients_status_json();
+
 }  // namespace spinel::ai

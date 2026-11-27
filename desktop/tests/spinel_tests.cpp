@@ -1553,6 +1553,50 @@ void test_ai_os_stage1_atomics() {
 
     auto audits = tail_agent_audit(20);
     EXPECT(!audits.empty());
+    // Audit denoising: internal polling & ping must NOT be written, while external actions & approvals MUST be kept.
+    bool saw_ping = false;
+    bool saw_settings_poll = false;
+    bool saw_external_ctx = false;
+    bool saw_approval = false;
+    append_agent_audit("settings", "todo.list", PermDecision::Allow, "0");
+    append_agent_audit("settings", "perms.get", PermDecision::Allow, "");
+    append_agent_audit("settings", "agent.list", PermDecision::Allow, "1");
+    audits = tail_agent_audit(30);
+    for (const auto &a : audits) {
+        if (a.capability == "ping") saw_ping = true;
+        if (a.client_id == "settings" && (a.capability == "todo.list" || a.capability == "perms.get" || a.capability == "agent.list")) {
+            saw_settings_poll = true;
+        }
+        if (a.capability == "context.desktop") saw_external_ctx = true;
+        if (a.capability == "approval.resolve") saw_approval = true;
+    }
+    EXPECT(!saw_ping && !saw_settings_poll && saw_external_ctx && saw_approval);
+
+    // MCP auto-install safely merges existing JSON & TOML configs without clobbering sibling entries
+    {
+        fs::path agy_cfg = fs::path(home_dir()) / ".gemini/config/mcp_config.json";
+        EXPECT(write_text_file(agy_cfg.string(),
+            "{\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"other-srv\": {\"command\": \"/bin/true\"}\n  }\n}\n"));
+        std::string out_p, err;
+        EXPECT(install_mcp_client_config("antigravity", out_p, err));
+        EXPECT(out_p == agy_cfg.string() && is_mcp_client_installed("antigravity"));
+        std::ifstream ifs(agy_cfg);
+        std::string merged((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        EXPECT(merged.find("\"theme\": \"dark\"") != std::string::npos);
+        EXPECT(merged.find("\"other-srv\"") != std::string::npos);
+        EXPECT(merged.find("\"spinel-os\"") != std::string::npos);
+        EXPECT(merged.find("\"SPINEL_AGENT_CLIENT\":\"Antigravity\"") != std::string::npos);
+
+        fs::path codex_cfg = fs::path(home_dir()) / ".codex/config.toml";
+        EXPECT(write_text_file(codex_cfg.string(), "model = \"gpt-5\"\n\n[mcp_servers.other]\ncommand = \"echo\"\n"));
+        EXPECT(install_mcp_client_config("codex", out_p, err));
+        EXPECT(out_p == codex_cfg.string() && is_mcp_client_installed("codex"));
+        std::ifstream tfs(codex_cfg);
+        std::string toml_merged((std::istreambuf_iterator<char>(tfs)), std::istreambuf_iterator<char>());
+        EXPECT(toml_merged.find("model = \"gpt-5\"") != std::string::npos);
+        EXPECT(toml_merged.find("[mcp_servers.other]") != std::string::npos);
+        EXPECT(toml_merged.find("[mcp_servers.spinel_os]") != std::string::npos);
+    }
 
     stop_agent_bus_server();
     EXPECT(!is_agent_bus_running());

@@ -328,7 +328,8 @@ std::string build_ai_os_live_snapshot_json() {
         << "\"sessions\":" << serialize_agent_sessions_json(sessions) << ","
         << "\"approvals\":" << serialize_approvals_json(approvals) << ","
         << "\"tasks\":" << serialize_tasks_json(tasks) << ","
-        << "\"audit\":" << serialize_audit_entries_json(audits)
+        << "\"audit\":" << serialize_audit_entries_json(audits) << ","
+        << "\"mcp_clients\":" << serialize_mcp_clients_status_json()
         << "}";
     return oss.str();
 }

@@ -2,10 +2,13 @@
 #include "ai/json_util.hpp"
 #include "common.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <sstream>
 
@@ -232,10 +235,30 @@ std::string serialize_agent_perms_json(const AgentPermConfig &cfg) {
     return oss.str();
 }
 
+bool should_audit_agent_event(const std::string &client_id,
+                              const std::string &capability,
+                              PermDecision decision) {
+    if (decision != PermDecision::Allow) return true;
+    if (capability.rfind("approval.", 0) == 0) return true;
+    if (capability == "ping" || capability == "perms.get" ||
+        capability == "audit.tail" || capability == "approval.list") {
+        return false;
+    }
+    if (client_id == "settings" || client_id == "shell" || client_id == "doctor") {
+        return false;
+    }
+    if ((client_id == "spinel-agent-ctl" || client_id == "local") &&
+        (capability == "agent.list" || capability == "todo.list")) {
+        return false;
+    }
+    return true;
+}
+
 void append_agent_audit(const std::string &client_id,
                         const std::string &capability,
                         PermDecision decision,
                         const std::string &detail) {
+    if (!should_audit_agent_event(client_id, capability, decision)) return;
     std::lock_guard<std::mutex> lock(g_perms_mu);
     fs::path p = agent_audit_log_path();
     std::error_code ec;
@@ -304,6 +327,328 @@ std::string serialize_audit_entries_json(const std::vector<AuditEntry> &entries)
             << "}";
     }
     oss << "]";
+    return oss.str();
+}
+
+namespace {
+
+struct McpTargetSpec {
+    const char *id;
+    const char *client_name;
+    const char *rel_path;
+    bool is_toml;
+};
+
+constexpr McpTargetSpec kMcpTargets[] = {
+    {"antigravity", "Antigravity", ".gemini/config/mcp_config.json", false},
+    {"codex", "Codex", ".codex/config.toml", true},
+    {"claude", "Claude", ".claude.json", false},
+    {"deepseek", "DeepSeekHarness", ".config/deepseek/mcp_config.json", false},
+    {"gemini", "GeminiCLI", ".gemini/settings.json", false},
+};
+
+const McpTargetSpec *find_mcp_target(const std::string &target) {
+    std::string low;
+    for (char c : trim_copy(target)) low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const auto &spec : kMcpTargets) {
+        if (low == spec.id) return &spec;
+    }
+    return nullptr;
+}
+
+std::string build_mcp_json_entry(const std::string &client_name) {
+    return "{\"command\":\"/usr/local/bin/spinel-os-mcp\",\"args\":[],\"env\":{\"SPINEL_AGENT_CLIENT\":\"" +
+           json_escape(client_name) + "\"}}";
+}
+
+size_t skip_ws(const std::string &s, size_t i, size_t end) {
+    while (i < end && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    return i;
+}
+
+size_t scan_json_value_end(const std::string &s, size_t start, size_t limit) {
+    if (start >= limit) return std::string::npos;
+    char ch = s[start];
+    if (ch == '"') {
+        size_t i = start + 1;
+        while (i < limit) {
+            if (s[i] == '\\') {
+                i += 2;
+                continue;
+            }
+            if (s[i] == '"') return i + 1;
+            ++i;
+        }
+        return std::string::npos;
+    }
+    if (ch == '{' || ch == '[') {
+        int depth = 0;
+        bool in_str = false;
+        for (size_t i = start; i < limit; ++i) {
+            char c = s[i];
+            if (in_str) {
+                if (c == '\\') {
+                    ++i;
+                    continue;
+                }
+                if (c == '"') in_str = false;
+                continue;
+            }
+            if (c == '"') in_str = true;
+            else if (c == '{' || c == '[') ++depth;
+            else if (c == '}' || c == ']') {
+                --depth;
+                if (depth == 0) return i + 1;
+            }
+        }
+        return std::string::npos;
+    }
+    size_t i = start;
+    while (i < limit) {
+        char c = s[i];
+        if (c == ',' || c == '}' || c == ']' || std::isspace(static_cast<unsigned char>(c))) break;
+        ++i;
+    }
+    return (i > start) ? i : std::string::npos;
+}
+
+struct JsonFieldSpan {
+    std::string key;
+    size_t val_start = 0;
+    size_t val_end = 0;
+};
+
+bool collect_json_object_fields(const std::string &s,
+                                size_t obj_start,
+                                size_t obj_end,
+                                std::vector<JsonFieldSpan> &out) {
+    out.clear();
+    if (obj_start >= obj_end || obj_end > s.size() || s[obj_start] != '{' || s[obj_end - 1] != '}') {
+        return false;
+    }
+    size_t i = skip_ws(s, obj_start + 1, obj_end - 1);
+    if (i == obj_end - 1) return true;  // empty object {}
+    while (i < obj_end - 1) {
+        if (s[i] != '"') return false;
+        std::string key;
+        if (!json_parse_string(s, i, key)) return false;
+        i = skip_ws(s, i, obj_end - 1);
+        if (i >= obj_end - 1 || s[i] != ':') return false;
+        i = skip_ws(s, i + 1, obj_end - 1);
+        size_t v_end = scan_json_value_end(s, i, obj_end - 1);
+        if (v_end == std::string::npos) return false;
+        out.push_back({key, i, v_end});
+        i = skip_ws(s, v_end, obj_end - 1);
+        if (i == obj_end - 1) return true;
+        if (s[i] != ',') return false;
+        i = skip_ws(s, i + 1, obj_end - 1);
+        if (i == obj_end - 1) return true;  // tolerate trailing comma if any
+    }
+    return true;
+}
+
+bool merge_json_mcp_server(const std::string &existing,
+                           const std::string &server_key,
+                           const std::string &entry_json,
+                           std::string &out_json,
+                           std::string &err_out) {
+    std::string t = trim_copy(existing);
+    if (t.empty()) {
+        out_json = "{\n  \"mcpServers\": {\n    \"" + server_key + "\": " + entry_json + "\n  }\n}\n";
+        return true;
+    }
+    size_t obj_start = existing.find('{');
+    size_t obj_end = existing.rfind('}');
+    if (obj_start == std::string::npos || obj_end == std::string::npos || obj_end <= obj_start) {
+        err_out = "现有配置不是有效的 JSON 对象，无法自动合并";
+        return false;
+    }
+    ++obj_end;
+    std::vector<JsonFieldSpan> top_fields;
+    if (!collect_json_object_fields(existing, obj_start, obj_end, top_fields)) {
+        err_out = "现有 JSON 配置文件格式无效，请检查后重试";
+        return false;
+    }
+
+    for (const auto &tf : top_fields) {
+        if (tf.key != "mcpServers") continue;
+        if (tf.val_end <= tf.val_start || existing[tf.val_start] != '{' || existing[tf.val_end - 1] != '}') {
+            err_out = "现有配置文件中 mcpServers 字段不是 JSON 对象";
+            return false;
+        }
+        std::vector<JsonFieldSpan> srv_fields;
+        if (!collect_json_object_fields(existing, tf.val_start, tf.val_end, srv_fields)) {
+            err_out = "现有 mcpServers 对象格式无效";
+            return false;
+        }
+        for (const auto &sf : srv_fields) {
+            if (sf.key == server_key) {
+                out_json = existing.substr(0, sf.val_start) + entry_json + existing.substr(sf.val_end);
+                return true;
+            }
+        }
+        if (srv_fields.empty()) {
+            std::string rep = "{\n    \"" + server_key + "\": " + entry_json + "\n  }";
+            out_json = existing.substr(0, tf.val_start) + rep + existing.substr(tf.val_end);
+        } else {
+            size_t ins = srv_fields.back().val_end;
+            out_json = existing.substr(0, ins) + ",\n    \"" + server_key + "\": " + entry_json +
+                       existing.substr(ins);
+        }
+        return true;
+    }
+
+    std::string block = "\"mcpServers\": {\n    \"" + server_key + "\": " + entry_json + "\n  }";
+    if (top_fields.empty()) {
+        out_json = "{\n  " + block + "\n}\n";
+    } else {
+        size_t ins = top_fields.back().val_end;
+        out_json = existing.substr(0, ins) + ",\n  " + block + existing.substr(ins);
+    }
+    return true;
+}
+
+std::string merge_codex_toml_mcp(const std::string &existing) {
+    const std::string section_block =
+        "[mcp_servers.spinel_os]\n"
+        "command = \"/usr/local/bin/spinel-os-mcp\"\n"
+        "env = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
+
+    std::vector<std::string> lines = split_lines(existing);
+    std::vector<std::string> out_lines;
+    bool replaced = false;
+    bool skipping = false;
+    for (const auto &ln : lines) {
+        std::string t = trim_copy(ln);
+        if (!t.empty() && t.front() == '[') {
+            if (t == "[mcp_servers.spinel_os]") {
+                skipping = true;
+                if (!replaced) {
+                    out_lines.push_back("[mcp_servers.spinel_os]");
+                    out_lines.push_back("command = \"/usr/local/bin/spinel-os-mcp\"");
+                    out_lines.push_back("env = { SPINEL_AGENT_CLIENT = \"Codex\" }");
+                    replaced = true;
+                }
+                continue;
+            }
+            skipping = false;
+        }
+        if (!skipping) out_lines.push_back(ln);
+    }
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < out_lines.size(); ++i) {
+        oss << out_lines[i] << "\n";
+    }
+    if (!replaced) {
+        if (!out_lines.empty() && !trim_copy(out_lines.back()).empty()) oss << "\n";
+        oss << section_block;
+    }
+    return oss.str();
+}
+
+}  // namespace
+
+std::string mcp_client_config_path(const std::string &target) {
+    const McpTargetSpec *spec = find_mcp_target(target);
+    if (!spec) return "";
+    return (fs::path(home_dir()) / spec->rel_path).string();
+}
+
+std::string build_mcp_client_snippet(const std::string &target) {
+    const McpTargetSpec *spec = find_mcp_target(target);
+    if (spec && spec->is_toml) {
+        return "[mcp_servers.spinel_os]\n"
+               "command = \"/usr/local/bin/spinel-os-mcp\"\n"
+               "env = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
+    }
+    std::string client = spec ? spec->client_name : "Agent";
+    return "{\n"
+           "  \"mcpServers\": {\n"
+           "    \"spinel-os\": {\n"
+           "      \"command\": \"/usr/local/bin/spinel-os-mcp\",\n"
+           "      \"args\": [],\n"
+           "      \"env\": {\n"
+           "        \"SPINEL_AGENT_CLIENT\": \"" + json_escape(client) + "\"\n"
+           "      }\n"
+           "    }\n"
+           "  }\n"
+           "}\n";
+}
+
+bool is_mcp_client_installed(const std::string &target) {
+    const McpTargetSpec *spec = find_mcp_target(target);
+    if (!spec) return false;
+    std::string path = (fs::path(home_dir()) / spec->rel_path).string();
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) return false;
+    std::string raw((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    if (spec->is_toml) {
+        return raw.find("[mcp_servers.spinel_os]") != std::string::npos &&
+               raw.find("spinel-os-mcp") != std::string::npos;
+    }
+    std::string servers_raw;
+    json_parse_object_str(raw, [&](const std::string &k, const std::string &, const std::string &r) {
+        if (k == "mcpServers" && !r.empty() && r.front() == '{') servers_raw = r;
+    });
+    if (servers_raw.empty()) return false;
+    std::string spinel_raw;
+    json_parse_object_str(servers_raw, [&](const std::string &k, const std::string &, const std::string &r) {
+        if (k == "spinel-os" && !r.empty() && r.front() == '{') spinel_raw = r;
+    });
+    return !spinel_raw.empty() && spinel_raw.find("spinel-os-mcp") != std::string::npos;
+}
+
+bool install_mcp_client_config(const std::string &target, std::string &out_path, std::string &error_out) {
+    out_path.clear();
+    error_out.clear();
+    const McpTargetSpec *spec = find_mcp_target(target);
+    if (!spec) {
+        error_out = "不支持的客户端类型: " + target;
+        return false;
+    }
+    fs::path p = fs::path(home_dir()) / spec->rel_path;
+    out_path = p.string();
+
+    std::string existing;
+    {
+        std::ifstream ifs(p);
+        if (ifs.is_open()) {
+            existing.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        }
+    }
+
+    std::string next_content;
+    if (spec->is_toml) {
+        next_content = merge_codex_toml_mcp(existing);
+    } else {
+        if (!merge_json_mcp_server(existing, "spinel-os", build_mcp_json_entry(spec->client_name),
+                                   next_content, error_out)) {
+            return false;
+        }
+    }
+
+    if (!write_text_file(out_path, next_content)) {
+        error_out = "写入配置文件失败: " + out_path;
+        return false;
+    }
+    return true;
+}
+
+std::string serialize_mcp_clients_status_json() {
+    std::ostringstream oss;
+    oss << "{";
+    bool first = true;
+    for (const auto &spec : kMcpTargets) {
+        if (!first) oss << ",";
+        first = false;
+        std::string path = (fs::path(home_dir()) / spec.rel_path).string();
+        oss << "\"" << spec.id << "\":{"
+            << "\"installed\":" << (is_mcp_client_installed(spec.id) ? "true" : "false") << ","
+            << "\"path\":\"" << json_escape(path) << "\""
+            << "}";
+    }
+    oss << "}";
     return oss.str();
 }
 

@@ -1140,9 +1140,10 @@
           <div class="section-head">
             <div>
               <h3>接入外部 Coding Agent (`spinel-os-mcp`)</h3>
-              <p class="muted-hint">复制下方片段写入对应客户端 MCP 配置，即可连接工作现场、Doctor 体检与平行沙箱。</p>
+              <p class="muted-hint" id="ai-mcp-path-hint">配置文件: ~/.gemini/config/mcp_config.json</p>
             </div>
             <div class="footer-actions">
+              <span class="status-chip" id="ai-mcp-install-chip">检测中</span>
               <select id="sel-ai-mcp-client" class="spinel-select" style="min-width: 146px;">
                 <option value="antigravity">Antigravity</option>
                 <option value="codex">Codex (TOML)</option>
@@ -1150,7 +1151,8 @@
                 <option value="deepseek">DeepSeekHarness</option>
                 <option value="gemini">Gemini CLI</option>
               </select>
-              <button type="button" class="btn small primary" id="btn-ai-copy-mcp">复制配置</button>
+              <button type="button" class="btn small primary" id="btn-ai-install-mcp">自动写入配置</button>
+              <button type="button" class="btn small" id="btn-ai-copy-mcp">复制配置</button>
             </div>
           </div>
           <pre id="ai-mcp-snippet" class="log-box selectable" style="max-height: 168px;"></pre>

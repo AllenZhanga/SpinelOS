@@ -44,6 +44,7 @@ void print_usage() {
         "  spinel-agent-ctl approvals\n"
         "  spinel-agent-ctl approve <approval_id> <allow|sandbox|deny>\n"
         "  spinel-agent-ctl mcp-snippet [antigravity|codex|claude|gemini|deepseek|json]\n"
+        "  spinel-agent-ctl mcp-install <antigravity|codex|claude|gemini|deepseek>\n"
         "  spinel-agent-ctl wrap --agent <name> [--repo <dir>] [--task <task_id>] [--title <text>] [--sandbox] -- <cmd...>\n"
         "  spinel-agent-ctl doctor [--json]\n";
 }
@@ -90,40 +91,7 @@ void report_session_hybrid(const spinel::ai::AgentSessionInfo &info, std::string
 }
 
 void print_mcp_snippet(const std::string &target) {
-    std::string mcp_bin = "/usr/local/bin/spinel-os-mcp";
-    if (target == "codex") {
-        std::cout << "# ~/.codex/config.toml\n"
-                  << "[mcp_servers.spinel_os]\n"
-                  << "command = \"" << mcp_bin << "\"\n"
-                  << "env = { SPINEL_AGENT_CLIENT = \"Codex\" }\n";
-        return;
-    }
-    if (target == "claude") {
-        std::cout << "{\n"
-                  << "  \"mcpServers\": {\n"
-                  << "    \"spinel-os\": {\n"
-                  << "      \"command\": \"" << mcp_bin << "\",\n"
-                  << "      \"env\": { \"SPINEL_AGENT_CLIENT\": \"Claude\" }\n"
-                  << "    }\n"
-                  << "  }\n"
-                  << "}\n";
-        return;
-    }
-    std::string client = target.empty() ? "Agent" : target;
-    if (client == "antigravity") client = "Antigravity";
-    else if (client == "gemini") client = "GeminiCLI";
-    else if (client == "deepseek") client = "DeepSeekHarness";
-    else if (client == "json") client = "Agent";
-    std::cout << "{\n"
-              << "  \"mcpServers\": {\n"
-              << "    \"spinel-os\": {\n"
-              << "      \"type\": \"stdio\",\n"
-              << "      \"command\": \"" << mcp_bin << "\",\n"
-              << "      \"args\": [],\n"
-              << "      \"env\": { \"SPINEL_AGENT_CLIENT\": \"" << json_escape(client) << "\" }\n"
-              << "    }\n"
-              << "  }\n"
-              << "}\n";
+    std::cout << spinel::ai::build_mcp_client_snippet(target);
 }
 
 }  // namespace
@@ -378,6 +346,17 @@ int main(int argc, char **argv) {
     if (sub == "mcp-snippet") {
         std::string target = (argc >= 3) ? argv[2] : "json";
         print_mcp_snippet(target);
+        return 0;
+    }
+
+    if (sub == "mcp-install") {
+        std::string target = (argc >= 3) ? argv[2] : "antigravity";
+        std::string out_path, err;
+        if (!spinel::ai::install_mcp_client_config(target, out_path, err)) {
+            std::cerr << "[error] " << err << "\n";
+            return 1;
+        }
+        std::cout << "Installed spinel-os MCP into " << out_path << "\n";
         return 0;
     }
 
