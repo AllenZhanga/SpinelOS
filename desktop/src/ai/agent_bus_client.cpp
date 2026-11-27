@@ -23,6 +23,11 @@ std::string agent_bus_socket_path() {
     if (xdg && *xdg) {
         return (fs::path(xdg) / "spinelos/agent.sock").string();
     }
+    std::error_code ec;
+    fs::path run_user = fs::path("/run/user") / std::to_string(::getuid());
+    if (fs::is_directory(run_user, ec)) {
+        return (run_user / "spinelos/agent.sock").string();
+    }
     return "/tmp/spinelos-" + std::to_string(::getuid()) + "/agent.sock";
 }
 

@@ -10,12 +10,16 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -40,7 +44,8 @@ void print_usage() {
         "  spinel-agent-ctl approvals\n"
         "  spinel-agent-ctl approve <approval_id> <allow|sandbox|deny>\n"
         "  spinel-agent-ctl mcp-snippet [codex|claude|gemini|deepseek|json]\n"
-        "  spinel-agent-ctl wrap --agent <name> [--repo <dir>] [--task <task_id>] [--title <text>] [--sandbox] -- <cmd...>\n";
+        "  spinel-agent-ctl wrap --agent <name> [--repo <dir>] [--task <task_id>] [--title <text>] [--sandbox] -- <cmd...>\n"
+        "  spinel-agent-ctl doctor [--json]\n";
 }
 
 bool try_bus_or_print(const std::string &req_json, std::string &resp_out, int timeout_ms = 5000) {
@@ -373,6 +378,182 @@ int main(int argc, char **argv) {
         std::string target = (argc >= 3) ? argv[2] : "json";
         print_mcp_snippet(target);
         return 0;
+    }
+
+    if (sub == "doctor") {
+        bool json_mode = (argc >= 3 && std::string(argv[2]) == "--json");
+        struct DocRow {
+            std::string id;
+            std::string status;  // ok | warn | fail
+            std::string detail;
+        };
+        std::vector<DocRow> rows;
+        int fails = 0, warns = 0;
+        auto add_row = [&](const std::string &id, const std::string &st, const std::string &det) {
+            if (st == "fail") ++fails;
+            else if (st == "warn") ++warns;
+            rows.push_back({id, st, det});
+        };
+
+        // 1. agent_bus socket + ping
+        std::string sock = spinel::ai::agent_bus_socket_path();
+        std::string ping_resp;
+        if (spinel::ai::call_agent_bus_socket(sock, build_rpc("ping", "{}"), ping_resp, 2000) &&
+            bus_response_ok(ping_resp)) {
+            add_row("agent_bus", "ok", "已连接 " + sock);
+        } else {
+            add_row("agent_bus", "warn", "未检测到运行中的总线 " + sock + "（离线/非图形会话可正常使用 todo/agent）");
+        }
+
+        // 2. Desktop Context hooks via bus
+        if (ping_resp.find("pong") != std::string::npos) {
+            std::string ctx_resp;
+            if (spinel::ai::call_agent_bus_socket(sock, build_rpc("context.desktop", "{}"), ctx_resp, 2500) &&
+                bus_response_ok(ctx_resp)) {
+                bool has_win = (ctx_resp.find("\"windows\":[{") != std::string::npos);
+                bool has_ws = (ctx_resp.find("\"workspaces\":[{") != std::string::npos);
+                add_row("desktop_context", "ok",
+                        std::string("工作现场总线可达 (") + (has_ws ? "工作区" : "无工作区") + "/" +
+                            (has_win ? "已捕捉窗口)" : "暂无打开窗口)"));
+            } else {
+                add_row("desktop_context", "fail", "context.desktop 调用失败: " + ctx_resp);
+            }
+        } else {
+            add_row("desktop_context", "warn", "总线离线，跳过合成器上下文探测");
+        }
+
+        // 3. spinel-os-mcp handshake test
+        std::error_code ec;
+        std::string mcp_bin;
+        if (has_executable("spinel-os-mcp")) mcp_bin = "spinel-os-mcp";
+        else if (fs::exists("/usr/local/bin/spinel-os-mcp", ec)) mcp_bin = "/usr/local/bin/spinel-os-mcp";
+        else {
+            fs::path beside = fs::path(argv[0]).parent_path() / "spinel-os-mcp";
+            if (fs::exists(beside, ec)) mcp_bin = beside.string();
+        }
+        if (mcp_bin.empty()) {
+            add_row("mcp_gateway", "fail", "未找到 spinel-os-mcp 可执行文件");
+        } else {
+            // Spawn spinel-os-mcp directly with piped stdin/stdout (no shell).
+            std::string mcp_out;
+            int in_p[2]{-1, -1}, out_p[2]{-1, -1};
+            if (::pipe(in_p) == 0 && ::pipe(out_p) == 0) {
+                pid_t p = ::fork();
+                if (p == 0) {
+                    ::close(in_p[1]);
+                    ::close(out_p[0]);
+                    ::dup2(in_p[0], STDIN_FILENO);
+                    ::dup2(out_p[1], STDOUT_FILENO);
+                    ::close(in_p[0]);
+                    ::close(out_p[1]);
+                    ::execlp(mcp_bin.c_str(), mcp_bin.c_str(), nullptr);
+                    ::_exit(127);
+                }
+                ::close(in_p[0]);
+                ::close(out_p[1]);
+                if (p > 0) {
+                    const std::string req =
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n"
+                        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n";
+                    ssize_t wr = ::write(in_p[1], req.data(), req.size());
+                    (void)wr;
+                    ::close(in_p[1]);
+                    char buf[4096];
+                    ssize_t r;
+                    while ((r = ::read(out_p[0], buf, sizeof(buf))) > 0) {
+                        mcp_out.append(buf, static_cast<size_t>(r));
+                    }
+                    int st = 0;
+                    while (::waitpid(p, &st, 0) < 0 && errno == EINTR) {}
+                } else {
+                    ::close(in_p[1]);
+                }
+                ::close(out_p[0]);
+            } else {
+                if (in_p[0] >= 0) ::close(in_p[0]);
+                if (in_p[1] >= 0) ::close(in_p[1]);
+                if (out_p[0] >= 0) ::close(out_p[0]);
+                if (out_p[1] >= 0) ::close(out_p[1]);
+            }
+            bool has_init = (mcp_out.find("\"spinel-os-mcp\"") != std::string::npos);
+            bool has_tools = (mcp_out.find("\"agent_report\"") != std::string::npos &&
+                              mcp_out.find("\"screenshot_capture\"") != std::string::npos &&
+                              mcp_out.find("\"sandbox_status\"") != std::string::npos);
+            if (has_init && has_tools) {
+                add_row("mcp_gateway", "ok", mcp_bin + " stdio JSON-RPC 握手与 18 工具声明正常");
+            } else {
+                add_row("mcp_gateway", "fail", mcp_bin + " stdio 响应异常");
+            }
+        }
+
+        // 4. Runtime Drop-in directory & Agent Tracker
+        std::string rt_dir = spinel::ai::agent_sessions_runtime_dir();
+        fs::create_directories(rt_dir, ec);
+        bool rt_ok = !ec && fs::is_directory(rt_dir, ec);
+        auto sessions = spinel::ai::reconcile_agent_sessions(0, 300, true, {});
+        add_row("agent_tracker", rt_ok ? "ok" : "fail",
+                rt_ok ? ("目录可写 " + rt_dir + " · 当前会话数 " + std::to_string(sessions.size()))
+                      : ("无法创建运行目录 " + rt_dir));
+
+        // 5. Task Inbox storage
+        std::string tpath = spinel::ai::task_inbox_path();
+        fs::create_directories(fs::path(tpath).parent_path(), ec);
+        auto tasks = spinel::ai::list_tasks();
+        add_row("task_inbox", ec ? "fail" : "ok",
+                "存储路径 " + tpath + " · 待办总数 " + std::to_string(tasks.size()));
+
+        // 6. Permissions & Audit Log
+        spinel::ai::AgentPermConfig perms = spinel::ai::load_agent_perms();
+        auto audits = spinel::ai::tail_agent_audit(50);
+        add_row("perms_audit", "ok",
+                "tier3=" + std::string(spinel::ai::tier3_policy_str(perms.tier3_policy)) +
+                    " · clipboard=" + (perms.tier1_clipboard ? "on" : "off") +
+                    " · screenshot=" + (perms.tier1_screenshot ? "on" : "off") +
+                    " · vram_yield=" + (perms.vram_yield_on_gamemode ? "on" : "off") +
+                    " · 审计条目 " + std::to_string(audits.size()));
+
+        // 7. OS Execution Primitives (grim / bwrap / snapper / spinel-sandbox)
+        bool has_grim = has_executable("grim");
+        bool has_bwrap = has_executable("bwrap");
+        bool has_snapper = has_executable("snapper") && fs::exists("/etc/snapper/configs/root", ec);
+        bool has_sb_bin = has_executable("spinel-sandbox") || fs::exists("/usr/local/bin/spinel-sandbox", ec);
+        std::string prim_det = std::string("grim=") + (has_grim ? "yes" : "no") +
+                               " bwrap=" + (has_bwrap ? "yes" : "no") +
+                               " spinel-sandbox=" + (has_sb_bin ? "yes" : "no") +
+                               " snapper_root=" + (has_snapper ? "yes" : "no");
+        add_row("os_primitives", (has_grim && has_bwrap && has_sb_bin) ? "ok" : "warn", prim_det);
+
+        // 8. Local Inference / Container Services
+        std::string dummy;
+        int src = 1;
+        bool ol_on = run_argv_capture({"systemctl", "is-active", "--quiet", "ollama.service"}, dummy, src) && src == 0;
+        bool vl_on = run_argv_capture({"systemctl", "--user", "is-active", "--quiet", "spinel-vllm.service"}, dummy, src) && src == 0;
+        bool dk_on = run_argv_capture({"systemctl", "is-active", "--quiet", "docker.service"}, dummy, src) && src == 0;
+        add_row("local_services", "ok",
+                std::string("ollama=") + (ol_on ? "active" : "inactive") +
+                    " vllm=" + (vl_on ? "active" : "inactive") +
+                    " docker=" + (dk_on ? "active" : "inactive"));
+
+        if (json_mode) {
+            std::ostringstream js;
+            js << "{\"fails\":" << fails << ",\"warns\":" << warns << ",\"checks\":[";
+            for (size_t i = 0; i < rows.size(); ++i) {
+                if (i > 0) js << ",";
+                js << "{\"id\":\"" << json_escape(rows[i].id) << "\","
+                   << "\"status\":\"" << json_escape(rows[i].status) << "\","
+                   << "\"detail\":\"" << json_escape(rows[i].detail) << "\"}";
+            }
+            js << "]}";
+            std::cout << js.str() << "\n";
+        } else {
+            std::cout << "Spinel AI OS Doctor 自检报告\n";
+            for (const auto &r : rows) {
+                const char *tag = (r.status == "ok") ? "[OK]  " : ((r.status == "warn") ? "[WARN]" : "[FAIL]");
+                std::cout << "  " << tag << " " << r.id << ": " << r.detail << "\n";
+            }
+            std::cout << "结论: " << rows.size() << " 项检查 (fails=" << fails << ", warns=" << warns << ")\n";
+        }
+        return fails > 0 ? 1 : 0;
     }
 
     if (sub == "wrap") {

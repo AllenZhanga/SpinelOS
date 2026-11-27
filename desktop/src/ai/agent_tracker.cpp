@@ -187,6 +187,11 @@ std::string agent_sessions_runtime_dir() {
     if (xdg && *xdg) {
         return (fs::path(xdg) / "spinelos/agents").string();
     }
+    std::error_code ec;
+    fs::path run_user = fs::path("/run/user") / std::to_string(::getuid());
+    if (fs::is_directory(run_user, ec)) {
+        return (run_user / "spinelos/agents").string();
+    }
     return "/tmp/spinelos-" + std::to_string(::getuid()) + "/agents";
 }
 

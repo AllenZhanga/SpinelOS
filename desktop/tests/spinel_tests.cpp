@@ -732,7 +732,7 @@ void test_system_control_configs() {
     EXPECT(redacted.find("12:34:56:**:**:**") != std::string::npos);
 
     auto doc_checks = run_system_health_checks();
-    EXPECT(doc_checks.size() == 9);
+    EXPECT(doc_checks.size() == 10);
     bool has_drv_check = false, has_upd_check = false;
     for (const auto &c : doc_checks) {
         if (c.id == "gpu_driver_ver") has_drv_check = true;
@@ -1640,6 +1640,13 @@ void test_ai_os_stage3_integration() {
     reply.clear();
     EXPECT(dispatch_ipc_command(&dummy_state, R"({"id":702,"method":"ai:state-get","params":{}})", acts, &reply));
     EXPECT(reply.find("\"ok\":true") != std::string::npos);
+
+    // 5. Spinel Doctor includes AI OS Bus & MCP Gateway health item
+    auto doc_checks = run_system_health_checks();
+    bool has_ai_doc = std::any_of(doc_checks.begin(), doc_checks.end(), [](const DoctorCheckItem &c) {
+        return c.id == "ai_os_mcp" && !c.name.empty();
+    });
+    EXPECT(has_ai_doc);
 
     unsetenv("SPINEL_AGENT_RUNTIME_DIR");
     unsetenv("SPINEL_TASK_INBOX_FILE");

@@ -845,6 +845,36 @@ std::vector<DoctorCheckItem> run_system_health_checks() {
         checks.push_back(std::move(it));
     }
 
+    // 8. Spinel AI OS Bus & MCP Gateway
+    {
+        const char *xdg = std::getenv("XDG_RUNTIME_DIR");
+        fs::path rt_base = (xdg && *xdg) ? fs::path(xdg) : (fs::path("/run/user") / std::to_string(::getuid()));
+        bool sock_ok = fs::exists(rt_base / "spinelos/agent.sock", ec);
+        bool mcp_ok = has_executable("spinel-os-mcp") || fs::exists("/usr/local/bin/spinel-os-mcp", ec);
+        bool ctl_ok = has_executable("spinel-agent-ctl") || fs::exists("/usr/local/bin/spinel-agent-ctl", ec);
+        bool cap_ok = has_executable("grim");
+        bool sb_ok = has_executable("bwrap");
+        DoctorCheckItem it;
+        it.id = "ai_os_mcp";
+        it.name = "AI OS 总线与 MCP 网关";
+        if (sock_ok && mcp_ok && ctl_ok) {
+            it.status = (cap_ok && sb_ok) ? "ok" : "warn";
+            it.detail = std::string("agent_bus 在线 · spinel-os-mcp / spinel-agent-ctl 就绪") +
+                        (cap_ok ? " · grim 可截图" : " · 缺 grim") +
+                        (sb_ok ? " · 平行沙箱可用" : " · 缺 bwrap");
+            if (!cap_ok || !sb_ok) {
+                it.fix_hint = "运行 spinel-agent-ctl doctor 查看缺失的可选系统依赖";
+            }
+        } else {
+            it.status = "warn";
+            it.detail = std::string(sock_ok ? "agent_bus 在线" : "agent_bus 未监听") + " · " +
+                        (mcp_ok ? "MCP 网关就绪" : "缺 spinel-os-mcp") + " · " +
+                        (ctl_ok ? "CTL 就绪" : "缺 spinel-agent-ctl");
+            it.fix_hint = "执行 ./scripts/dev-deploy.sh 部署最新版并运行 spinel-agent-ctl doctor 自检";
+        }
+        checks.push_back(std::move(it));
+    }
+
     return checks;
 }
 
