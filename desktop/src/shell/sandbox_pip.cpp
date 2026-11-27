@@ -76,6 +76,9 @@ struct SandboxPipState {
     GtkWidget *btn_launch = nullptr;
     GtkWidget *launch_popover = nullptr;
     GtkWidget *launch_popover_box = nullptr;
+    GtkWidget *btn_size = nullptr;
+    GtkWidget *size_popover = nullptr;
+    GtkWidget *size_popover_box = nullptr;
     GtkWidget *btn_reset = nullptr;
     GtkWidget *btn_expand = nullptr;
     GtkWidget *expand_icon_da = nullptr;
@@ -88,6 +91,8 @@ struct SandboxPipState {
     bool minimized = false;
     bool takeover = false;
     bool last_running = false;
+    int pip_req_w = 0;  // 0 = adaptive max fit for current display
+    int pip_req_h = 0;
 
     double canvas_press_x = 0.0;
     double canvas_press_y = 0.0;
@@ -777,6 +782,32 @@ void rebuild_launch_popover_items(SandboxPipState *pip) {
     gtk_box_append(GTK_BOX(pip->launch_popover_box), cfg_b);
 }
 
+void query_host_monitor_geometry(GtkWindow *win, int &out_w, int &out_h) {
+    out_w = 1920;
+    out_h = 1080;
+    GdkDisplay *dpy = win ? gtk_widget_get_display(GTK_WIDGET(win)) : gdk_display_get_default();
+    if (!dpy) return;
+    GdkSurface *surf = win ? gtk_native_get_surface(GTK_NATIVE(win)) : nullptr;
+    GdkMonitor *mon = surf ? gdk_display_get_monitor_at_surface(dpy, surf) : nullptr;
+    GdkMonitor *unref_mon = nullptr;
+    if (!mon) {
+        GListModel *mons = gdk_display_get_monitors(dpy);
+        if (mons && g_list_model_get_n_items(mons) > 0) {
+            unref_mon = GDK_MONITOR(g_list_model_get_item(mons, 0));
+            mon = unref_mon;
+        }
+    }
+    if (mon) {
+        GdkRectangle rect{};
+        gdk_monitor_get_geometry(mon, &rect);
+        if (rect.width >= 640 && rect.height >= 480) {
+            out_w = rect.width;
+            out_h = rect.height;
+        }
+    }
+    if (unref_mon) g_object_unref(unref_mon);
+}
+
 void apply_pip_window_geometry(SandboxPipState *pip) {
     if (!pip || !pip->win) return;
     GtkWindow *win = pip->win;
@@ -788,7 +819,14 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
     }
 
     if (pip->takeover) {
-        gtk_widget_set_size_request(pip->video_da, 1024, 576);
+        int mon_w = 1920, mon_h = 1080;
+        query_host_monitor_geometry(win, mon_w, mon_h);
+        int target_w = 1280, target_h = 720;
+        compute_pip_takeover_size(pip->pip_req_w, pip->pip_req_h,
+                                  pip->surface_w, pip->surface_h,
+                                  mon_w, mon_h, target_w, target_h);
+        gtk_widget_set_size_request(pip->video_da, target_w, target_h);
+        gtk_window_set_default_size(win, -1, -1);
         gtk_widget_add_css_class(pip->card, "is-takeover");
         if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "画中画");
         if (auto *ctx = pip->expand_icon_da ? static_cast<PipGlyphCtx *>(g_object_get_data(G_OBJECT(pip->expand_icon_da), "pip-glyph-ctx")) : nullptr) {
@@ -796,6 +834,13 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
             gtk_widget_queue_draw(pip->expand_icon_da);
         }
         gtk_widget_set_tooltip_text(pip->btn_expand, "缩小回悬浮画中画");
+        gtk_widget_set_visible(pip->btn_size, TRUE);
+        if (pip->btn_size) {
+            std::string slbl = (pip->pip_req_w <= 0)
+                ? ("适应 (" + std::to_string(target_w) + "×" + std::to_string(target_h) + ") ▾")
+                : (std::to_string(target_w) + "×" + std::to_string(target_h) + " ▾");
+            gtk_menu_button_set_label(GTK_MENU_BUTTON(pip->btn_size), slbl.c_str());
+        }
         gtk_widget_set_visible(pip->btn_reset, !pip->remote_mode);
         gtk_widget_set_visible(pip->net_lbl, TRUE);
         gtk_label_set_text(GTK_LABEL(pip->title_lbl),
@@ -803,6 +848,7 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
                                             : "正在操控平行桌面 · 按 Ctrl+Shift+Esc 退出");
     } else {
         gtk_widget_set_size_request(pip->video_da, 384, 216);
+        gtk_window_set_default_size(win, -1, -1);
         gtk_widget_remove_css_class(pip->card, "is-takeover");
         if (pip->expand_lbl) gtk_label_set_text(GTK_LABEL(pip->expand_lbl), "接管");
         if (auto *ctx = pip->expand_icon_da ? static_cast<PipGlyphCtx *>(g_object_get_data(G_OBJECT(pip->expand_icon_da), "pip-glyph-ctx")) : nullptr) {
@@ -810,6 +856,7 @@ void apply_pip_window_geometry(SandboxPipState *pip) {
             gtk_widget_queue_draw(pip->expand_icon_da);
         }
         gtk_widget_set_tooltip_text(pip->btn_expand, "放大并接管键鼠操作（拖拽标题栏或预览区可移动位置）");
+        gtk_widget_set_visible(pip->btn_size, FALSE);
         gtk_widget_set_visible(pip->btn_reset, FALSE);
         gtk_widget_set_visible(pip->net_lbl, pip->remote_mode);
         gtk_label_set_text(GTK_LABEL(pip->title_lbl), pip->remote_mode ? "远程沙箱" : "平行沙箱");
@@ -942,6 +989,135 @@ void build_launch_popover(SandboxPipState *pip) {
     rebuild_launch_popover_items(pip);
 }
 
+void rebuild_size_popover_items(SandboxPipState *pip) {
+    if (!pip || !pip->size_popover_box) return;
+    while (GtkWidget *c = gtk_widget_get_first_child(pip->size_popover_box)) {
+        gtk_box_remove(GTK_BOX(pip->size_popover_box), c);
+    }
+
+    auto add_sec = [&](const char *title) {
+        GtkWidget *lbl = gtk_label_new(title);
+        gtk_widget_add_css_class(lbl, "spinel-clip-meta");
+        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+        gtk_widget_set_margin_top(lbl, 4);
+        gtk_widget_set_margin_bottom(lbl, 2);
+        gtk_widget_set_margin_start(lbl, 8);
+        gtk_box_append(GTK_BOX(pip->size_popover_box), lbl);
+    };
+
+    add_sec("接管窗口大小");
+    struct WinPreset {
+        const char *label;
+        int w;
+        int h;
+    };
+    static const WinPreset kWinPresets[] = {
+        {"适应屏幕（最大）", 0, 0},
+        {"2560 × 1440 (2K)", 2560, 1440},
+        {"1920 × 1080 (1080p)", 1920, 1080},
+        {"1600 × 900", 1600, 900},
+        {"1280 × 720", 1280, 720},
+        {"1024 × 576 (紧凑)", 1024, 576},
+    };
+    for (const auto &pr : kWinPresets) {
+        bool active = (pip->pip_req_w == pr.w && pip->pip_req_h == pr.h);
+        std::string txt = std::string(active ? "✓ " : "    ") + pr.label;
+        GtkWidget *b = gtk_button_new_with_label(txt.c_str());
+        gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+        gtk_widget_add_css_class(b, "spinel-ctx-item");
+        if (GtkWidget *ch = gtk_button_get_child(GTK_BUTTON(b))) {
+            gtk_widget_set_halign(ch, GTK_ALIGN_START);
+        }
+        g_object_set_data(G_OBJECT(b), "pip-w", GINT_TO_POINTER(pr.w));
+        g_object_set_data(G_OBJECT(b), "pip-h", GINT_TO_POINTER(pr.h));
+        g_object_set_data(G_OBJECT(b), "pip-self", pip);
+        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *btn, gpointer) {
+            auto *p = static_cast<SandboxPipState *>(g_object_get_data(G_OBJECT(btn), "pip-self"));
+            if (!p) return;
+            p->pip_req_w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "pip-w"));
+            p->pip_req_h = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "pip-h"));
+            if (p->size_popover) gtk_popover_popdown(GTK_POPOVER(p->size_popover));
+            apply_pip_window_geometry(p);
+        }), nullptr);
+        gtk_box_append(GTK_BOX(pip->size_popover_box), b);
+    }
+
+    if (!pip->remote_mode) {
+        gtk_box_append(GTK_BOX(pip->size_popover_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        add_sec("沙箱虚拟屏分辨率");
+        SandboxConfig cfg = load_sandbox_config();
+        struct ResPreset {
+            const char *mode;
+            const char *label;
+        };
+        static const ResPreset kResPresets[] = {
+            {"1280x720", "1280 × 720 (HD)"},
+            {"1600x900", "1600 × 900"},
+            {"1920x1080", "1920 × 1080 (Full HD)"},
+            {"2560x1440", "2560 × 1440 (2K QHD)"},
+            {"2560x1600", "2560 × 1600 (16:10)"},
+            {"3840x2160", "3840 × 2160 (4K UHD)"},
+        };
+        for (const auto &rp : kResPresets) {
+            bool active = (cfg.resolution == rp.mode);
+            std::string txt = std::string(active ? "✓ " : "    ") + rp.label;
+            GtkWidget *b = gtk_button_new_with_label(txt.c_str());
+            gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+            gtk_widget_add_css_class(b, "spinel-ctx-item");
+            if (GtkWidget *ch = gtk_button_get_child(GTK_BUTTON(b))) {
+                gtk_widget_set_halign(ch, GTK_ALIGN_START);
+            }
+            g_object_set_data_full(G_OBJECT(b), "sb-res", g_strdup(rp.mode), g_free);
+            g_object_set_data(G_OBJECT(b), "pip-self", pip);
+            auto on_res_click = +[](GtkButton *btn, gpointer) {
+                auto *p = static_cast<SandboxPipState *>(g_object_get_data(G_OBJECT(btn), "pip-self"));
+                const char *mode = static_cast<const char *>(g_object_get_data(G_OBJECT(btn), "sb-res"));
+                if (!p || !mode) return;
+                int w = 1600;
+                int h = 900;
+                if (!is_valid_sandbox_resolution(mode, w, h)) return;
+                SandboxConfig next = load_sandbox_config();
+                next.resolution = std::to_string(w) + "x" + std::to_string(h);
+                save_sandbox_config(next);
+                if (p->size_popover) gtk_popover_popdown(GTK_POPOVER(p->size_popover));
+                std::thread([p, w, h]() {
+                    apply_sandbox_resolution_live(w, h);
+                    g_idle_add(+[](gpointer ptr) -> gboolean {
+                        apply_pip_window_geometry(static_cast<SandboxPipState *>(ptr));
+                        return G_SOURCE_REMOVE;
+                    }, p);
+                }).detach();
+            };
+            g_signal_connect(b, "clicked", G_CALLBACK(on_res_click), nullptr);
+            gtk_box_append(GTK_BOX(pip->size_popover_box), b);
+        }
+    }
+}
+
+void build_size_popover(SandboxPipState *pip) {
+    GtkWidget *pop = gtk_popover_new();
+    gtk_popover_set_position(GTK_POPOVER(pop), GTK_POS_BOTTOM);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_widget_add_css_class(pop, "spinel-ctx-popover");
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    pip->size_popover = pop;
+    pip->size_popover_box = box;
+
+    g_signal_connect(pop, "notify::visible", G_CALLBACK(+[](GObject *obj, GParamSpec *, gpointer d) {
+        if (gtk_widget_get_visible(GTK_WIDGET(obj))) {
+            rebuild_size_popover_items(static_cast<SandboxPipState *>(d));
+        }
+    }), pip);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(pip->btn_size), pop);
+}
+
 void sync_pip_state(SandboxPipState *pip) {
     if (!pip) return;
     SandboxStatus st = query_sandbox_status();
@@ -1036,6 +1212,12 @@ void init_sandbox_pip(NativeShellState *ns) {
     gtk_menu_button_set_child(GTK_MENU_BUTTON(btn_launch), make_pip_btn_content(ns, PipGlyph::Plus, "应用", false));
     gtk_widget_add_css_class(btn_launch, "spinel-sandbox-btn");
 
+    GtkWidget *btn_size = gtk_menu_button_new();
+    gtk_menu_button_set_label(GTK_MENU_BUTTON(btn_size), "适应屏幕 ▾");
+    gtk_widget_add_css_class(btn_size, "spinel-sandbox-btn");
+    gtk_widget_set_tooltip_text(btn_size, "调整接管窗口显示大小或沙箱虚拟屏分辨率");
+    gtk_widget_set_visible(btn_size, FALSE);
+
     GtkWidget *btn_reset = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(btn_reset), make_pip_btn_content(ns, PipGlyph::Refresh, "重置", false));
     gtk_widget_add_css_class(btn_reset, "spinel-sandbox-btn");
@@ -1061,6 +1243,7 @@ void init_sandbox_pip(NativeShellState *ns) {
     gtk_box_append(GTK_BOX(header), title);
     gtk_box_append(GTK_BOX(header), net_lbl);
     gtk_box_append(GTK_BOX(header), btn_launch);
+    gtk_box_append(GTK_BOX(header), btn_size);
     gtk_box_append(GTK_BOX(header), btn_reset);
     gtk_box_append(GTK_BOX(header), btn_expand);
     gtk_box_append(GTK_BOX(header), btn_min);
@@ -1084,6 +1267,7 @@ void init_sandbox_pip(NativeShellState *ns) {
     pip->title_lbl = title;
     pip->net_lbl = net_lbl;
     pip->btn_launch = btn_launch;
+    pip->btn_size = btn_size;
     pip->btn_reset = btn_reset;
     pip->btn_expand = btn_expand;
     pip->btn_min = btn_min;
@@ -1091,6 +1275,7 @@ void init_sandbox_pip(NativeShellState *ns) {
     pip->video_da = da;
 
     build_launch_popover(pip);
+    build_size_popover(pip);
 
     // Compositor-driven smooth window move on header press
     GtkGesture *hdr_press = gtk_gesture_click_new();

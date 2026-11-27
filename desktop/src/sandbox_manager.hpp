@@ -44,6 +44,15 @@ std::string sandbox_socket_name();
 bool is_valid_sandbox_perf_mode(const std::string &mode);
 bool is_valid_sandbox_resolution(const std::string &res, int &out_w, int &out_h);
 bool is_valid_sandbox_mount_dir(const std::string &raw_path, std::string &normalized_out, std::string &error_out);
+void compute_pip_takeover_size(int req_w,
+                               int req_h,
+                               int surf_w,
+                               int surf_h,
+                               int mon_w,
+                               int mon_h,
+                               int &out_w,
+                               int &out_h);
+bool apply_sandbox_resolution_live(int w, int h);
 
 SandboxConfig load_sandbox_config();
 bool save_sandbox_config(const SandboxConfig &cfg);

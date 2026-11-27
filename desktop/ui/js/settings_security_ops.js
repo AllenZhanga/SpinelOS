@@ -375,6 +375,7 @@
     setSwitchState(document.getElementById("sw-sandbox-net"), data.allow_network);
     setSwitchState(document.getElementById("sw-sandbox-clip"), data.sync_clipboard);
     syncSelectValue(document.getElementById("sel-sandbox-perf"), data.perf_mode);
+    syncSelectValue(document.getElementById("sel-sandbox-res"), data.resolution);
 
     if (dirList) {
       dirList.innerHTML = "";
@@ -494,6 +495,10 @@
   const selSbPerf = document.getElementById("sel-sandbox-perf");
   selSbPerf?.addEventListener("change", () => {
     sendCommand(buildKvCommand("sandbox:config-set", { perf_mode: selSbPerf.value }));
+  });
+  const selSbRes = document.getElementById("sel-sandbox-res");
+  selSbRes?.addEventListener("change", () => {
+    sendCommand(buildKvCommand("sandbox:config-set", { resolution: selSbRes.value }));
   });
   document.getElementById("btn-sandbox-add-rw")?.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=true"));
   document.getElementById("btn-sandbox-add-ro")?.addEventListener("click", () => sendCommand("sandbox:add-dir\nwritable=false"));

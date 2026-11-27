@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -290,6 +291,67 @@ bool is_valid_sandbox_resolution(const std::string &res, int &out_w, int &out_h)
     } catch (...) {
         return false;
     }
+}
+
+void compute_pip_takeover_size(int req_w,
+                               int req_h,
+                               int surf_w,
+                               int surf_h,
+                               int mon_w,
+                               int mon_h,
+                               int &out_w,
+                               int &out_h) {
+    int safe_mon_w = std::max(800, mon_w);
+    int safe_mon_h = std::max(600, mon_h);
+    int max_w = std::max(640, safe_mon_w - 88);
+    int max_h = std::max(400, safe_mon_h - 136);
+
+    double aspect = (surf_w > 0 && surf_h > 0)
+        ? std::clamp(static_cast<double>(surf_w) / static_cast<double>(surf_h), 0.5, 3.0)
+        : (16.0 / 9.0);
+
+    double desired_w = 0.0;
+    double desired_h = 0.0;
+    if (req_w <= 0 || req_h <= 0) {
+        desired_w = static_cast<double>(max_w) * 0.90;
+        desired_h = desired_w / aspect;
+        if (desired_h > static_cast<double>(max_h) * 0.90) {
+            desired_h = static_cast<double>(max_h) * 0.90;
+            desired_w = desired_h * aspect;
+        }
+    } else {
+        double scale = std::min({1.0,
+                                 static_cast<double>(max_w) / static_cast<double>(req_w),
+                                 static_cast<double>(max_h) / static_cast<double>(req_h)});
+        desired_w = static_cast<double>(req_w) * scale;
+        desired_h = static_cast<double>(req_h) * scale;
+    }
+
+    out_w = std::max(480, static_cast<int>(std::lround(desired_w)));
+    out_h = std::max(320, static_cast<int>(std::lround(desired_h)));
+}
+
+bool apply_sandbox_resolution_live(int w, int h) {
+    if (w < 800 || w > 3840 || h < 600 || h > 2160) return false;
+    if (!has_executable("wlr-randr")) return false;
+    std::string rt_dir = sandbox_runtime_dir();
+    std::error_code ec;
+    if (!fs::exists(rt_dir + "/" + sandbox_socket_name(), ec)) return false;
+
+    pid_t wp = ::fork();
+    if (wp == 0) {
+        ::setenv("XDG_RUNTIME_DIR", rt_dir.c_str(), 1);
+        ::setenv("WAYLAND_DISPLAY", sandbox_socket_name().c_str(), 1);
+        std::string mode = std::to_string(w) + "x" + std::to_string(h);
+        ::execlp("wlr-randr", "wlr-randr", "--output", "HEADLESS-1", "--custom-mode", mode.c_str(), nullptr);
+        _exit(127);
+    }
+    if (wp > 0) {
+        int st = 0;
+        ::waitpid(wp, &st, 0);
+        return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+    }
+    return false;
 }
 
 bool is_valid_sandbox_mount_dir(const std::string &raw_path, std::string &normalized_out, std::string &error_out) {
@@ -945,24 +1007,7 @@ bool start_sandbox_session(std::string &error_out) {
     }
 
     // Apply requested headless resolution via wlr-randr if available inside that socket
-    if (has_executable("wlr-randr")) {
-        std::string out;
-        int rc = 1;
-        pid_t wp = ::fork();
-        if (wp == 0) {
-            ::setenv("XDG_RUNTIME_DIR", rt_dir.c_str(), 1);
-            ::setenv("WAYLAND_DISPLAY", sandbox_socket_name().c_str(), 1);
-            std::string mode = std::to_string(res_w) + "x" + std::to_string(res_h);
-            ::execlp("wlr-randr", "wlr-randr", "--output", "HEADLESS-1", "--custom-mode", mode.c_str(), nullptr);
-            _exit(127);
-        }
-        if (wp > 0) {
-            int st = 0;
-            ::waitpid(wp, &st, 0);
-        }
-        (void)out;
-        (void)rc;
-    }
+    apply_sandbox_resolution_live(res_w, res_h);
 
     ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
     ensure_sandbox_shell_running(cfg, rt_dir, fake_home);

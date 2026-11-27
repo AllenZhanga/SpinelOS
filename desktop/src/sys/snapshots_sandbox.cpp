@@ -367,6 +367,8 @@ void set_sandbox_config(AppState *state, const std::string &payload) {
     SandboxConfig cfg = load_sandbox_config();
     bool clip_changed = false;
     bool net_changed = false;
+    bool res_changed = false;
+    int new_res_w = 1600, new_res_h = 900;
     for (const auto &line : split_lines(payload)) {
         auto eq = line.find('=');
         if (eq == std::string::npos) continue;
@@ -382,6 +384,10 @@ void set_sandbox_config(AppState *state, const std::string &payload) {
             cfg.sync_clipboard = nxt;
         } else if (k == "perf_mode" && is_valid_sandbox_perf_mode(v)) {
             cfg.perf_mode = v;
+        } else if (k == "resolution" && is_valid_sandbox_resolution(v, new_res_w, new_res_h)) {
+            std::string norm = std::to_string(new_res_w) + "x" + std::to_string(new_res_h);
+            res_changed = (norm != cfg.resolution);
+            cfg.resolution = norm;
         }
     }
     if (!save_sandbox_config(cfg)) {
@@ -392,9 +398,14 @@ void set_sandbox_config(AppState *state, const std::string &payload) {
     if (clip_changed) {
         ensure_sandbox_clipboard_sync(cfg.sync_clipboard);
     }
+    if (res_changed && is_valid_sandbox_resolution(cfg.resolution, new_res_w, new_res_h)) {
+        apply_sandbox_resolution_live(new_res_w, new_res_h);
+    }
     native_shell_sync_sandbox(state, "sync");
     if (net_changed && query_sandbox_status().running) {
         emit_sandbox_feedback(state, true, "已更新网络开关，新启动的沙箱应用将立即应用此策略（可重启沙箱使全部应用生效）。");
+    } else if (res_changed) {
+        emit_sandbox_feedback(state, true, "已应用沙箱分辨率 " + cfg.resolution + "。");
     } else {
         emit_sandbox_feedback(state, true, "平行沙箱配置已保存。");
     }

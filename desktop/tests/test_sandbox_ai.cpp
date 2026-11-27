@@ -639,6 +639,15 @@ void test_ai_os_stage3_integration() {
     EXPECT(should_show_agent_island_pill({}, {ap1}, "", false));
     EXPECT(should_show_agent_island_pill({}, {}, "✓ Codex · 完成", false));
 
+    // 1b. Sandbox PiP adaptive takeover sizing (auto fit + clamped explicit resolutions)
+    int pw = 0, ph = 0;
+    compute_pip_takeover_size(0, 0, 1920, 1080, 1920, 1080, pw, ph);
+    EXPECT(pw > 1024 && pw <= 1832 && ph > 576 && ph <= 944);
+    compute_pip_takeover_size(2560, 1440, 2560, 1440, 3840, 2160, pw, ph);
+    EXPECT(pw == 2560 && ph == 1440);
+    compute_pip_takeover_size(3840, 2160, 3840, 2160, 1920, 1080, pw, ph);
+    EXPECT(pw <= 1832 && ph <= 944 && pw > 1500);
+
     // 2. GameMode <-> vLLM VRAM yield arbitration & persistence
     std::string vram_act;
     EXPECT(evaluate_vram_yield_for_gamemode(true, true, true, vram_act) && vram_act == "stop_vllm");
