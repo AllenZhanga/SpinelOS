@@ -814,6 +814,12 @@ bool launch_file_app(FilesWin *fw, GAppInfo *app, GFile *file) {
     }
     g_autoptr(GdkAppLaunchContext) context = gdk_display_get_app_launch_context(
         gtk_widget_get_display(GTK_WIDGET(fw->win)));
+    if (context) {
+        g_app_launch_context_setenv(G_APP_LAUNCH_CONTEXT(context), "XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
+        for (const auto &kv : collect_active_proxy_envs()) {
+            g_app_launch_context_setenv(G_APP_LAUNCH_CONTEXT(context), kv.first.c_str(), kv.second.c_str());
+        }
+    }
     GList files{file, nullptr, nullptr};
     g_autoptr(GError) error = nullptr;
     if (g_app_info_launch(app, &files, G_APP_LAUNCH_CONTEXT(context), &error)) return true;
@@ -959,9 +965,11 @@ void open_item_action(FilesWin *fw, const fs::path &path, bool choose_app = fals
 
 void execute_file_direct(FilesWin *fw, const fs::path &p) {
     std::string dir = p.has_parent_path() ? p.parent_path().string() : home_dir();
+    auto envs = collect_active_proxy_envs();
+    envs.emplace_back("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
     spawn_argv_detached({
         "sh", "-c", "cd \"$1\" && exec \"$2\"", "_", dir, p.string()
-    });
+    }, envs);
     if (fw && fw->status_label) {
         gtk_label_set_text(GTK_LABEL(fw->status_label), ("已启动执行: " + p.filename().string()).c_str());
     }

@@ -425,3 +425,114 @@ std::vector<std::string> split_lines(const std::string &text) {
     }
     return lines;
 }
+
+namespace {
+
+bool is_valid_proxy_url_common(const std::string &s) {
+    if (s.empty()) return true;
+    if (s.size() > 256) return false;
+    bool ok_scheme = s.rfind("http://", 0) == 0 || s.rfind("https://", 0) == 0 ||
+                     s.rfind("socks5://", 0) == 0 || s.rfind("socks5h://", 0) == 0 ||
+                     s.rfind("socks4://", 0) == 0;
+    if (!ok_scheme) return false;
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (c <= 0x20 || c == '"' || c == '\'' || c == '\\' || c == ';') return false;
+    }
+    return true;
+}
+
+std::string sanitize_no_proxy_common(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || ch == '.' || ch == ',' || ch == ':' || ch == '/' ||
+            ch == '-' || ch == '_' || ch == '*') {
+            out += ch;
+        }
+        if (out.size() >= 256) break;
+    }
+    return out;
+}
+
+std::string gsettings_proxy_get_common(const char *schema, const char *key) {
+    std::string out;
+    int rc = 1;
+    if (!run_argv_capture({"gsettings", "get", schema, key}, out, rc) || rc != 0) return "";
+    out = trim_copy(out);
+    if (out.size() >= 2 && out.front() == '\'' && out.back() == '\'') {
+        return out.substr(1, out.size() - 2);
+    }
+    return out;
+}
+
+}  // namespace
+
+bool resolve_active_proxy_fields(std::string &out_http, std::string &out_socks, std::string &out_no_proxy) {
+    out_http.clear();
+    out_socks.clear();
+    out_no_proxy = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8";
+
+    bool enabled = false;
+    {
+        std::ifstream ifs(fs::path(home_dir()) / ".config/spinelos/proxy.conf");
+        std::string line;
+        while (std::getline(ifs, line)) {
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            std::string k = trim_copy(line.substr(0, eq));
+            std::string v = trim_copy(line.substr(eq + 1));
+            if (k == "enabled") enabled = (v == "true" || v == "1");
+            else if (k == "http_proxy" && is_valid_proxy_url_common(v)) out_http = v;
+            else if (k == "socks_proxy" && is_valid_proxy_url_common(v)) out_socks = v;
+            else if (k == "no_proxy") {
+                std::string clean = sanitize_no_proxy_common(v);
+                if (!clean.empty()) out_no_proxy = clean;
+            }
+        }
+    }
+
+    if (enabled && (!out_http.empty() || !out_socks.empty())) {
+        return true;
+    }
+
+    out_http.clear();
+    out_socks.clear();
+    if (!has_executable("gsettings")) return false;
+    if (gsettings_proxy_get_common("org.gnome.system.proxy", "mode") != "manual") return false;
+
+    auto read_hp = [&](const char *subschema, const char *scheme) -> std::string {
+        std::string host = gsettings_proxy_get_common(subschema, "host");
+        std::string port = gsettings_proxy_get_common(subschema, "port");
+        int pnum = std::atoi(port.c_str());
+        if (host.empty() || pnum <= 0 || pnum > 65535) return "";
+        std::string url = std::string(scheme) + "://" + host + ":" + std::to_string(pnum);
+        return is_valid_proxy_url_common(url) ? url : "";
+    };
+
+    std::string http_u = read_hp("org.gnome.system.proxy.http", "http");
+    std::string https_u = read_hp("org.gnome.system.proxy.https", "http");
+    std::string socks_u = read_hp("org.gnome.system.proxy.socks", "socks5");
+
+    out_http = !http_u.empty() ? http_u : https_u;
+    out_socks = socks_u;
+    return !out_http.empty() || !out_socks.empty();
+}
+
+std::vector<std::pair<std::string, std::string>> collect_active_proxy_envs() {
+    std::string http_p, socks_p, no_p;
+    if (!resolve_active_proxy_fields(http_p, socks_p, no_p)) return {};
+    std::string http_val = !http_p.empty() ? http_p : socks_p;
+    std::string all_val = !socks_p.empty() ? socks_p : http_p;
+    return {
+        {"http_proxy", http_val},
+        {"https_proxy", http_val},
+        {"HTTP_PROXY", http_val},
+        {"HTTPS_PROXY", http_val},
+        {"all_proxy", all_val},
+        {"ALL_PROXY", all_val},
+        {"no_proxy", no_p},
+        {"NO_PROXY", no_p}
+    };
+}

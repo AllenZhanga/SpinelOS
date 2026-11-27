@@ -596,7 +596,9 @@ void launch_desktop_entry(const DesktopApp &app) {
             args.insert(args.begin(), "gamemoderun");
         }
     }
-    spawn_argv_logged(args, tag, {}, app.working_dir);
+    auto envs = build_effective_proxy_envs();
+    envs.emplace_back("XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
+    spawn_argv_logged(args, tag, envs, app.working_dir);
 }
 
 } // namespace
@@ -619,6 +621,12 @@ void launch_desktop_app_file(const std::string &path) {
     GAppInfo *app = G_APP_INFO(info);
     GdkDisplay *display = gdk_display_get_default();
     g_autoptr(GdkAppLaunchContext) context = display ? gdk_display_get_app_launch_context(display) : nullptr;
+    if (context) {
+        g_app_launch_context_setenv(G_APP_LAUNCH_CONTEXT(context), "XDG_CURRENT_DESKTOP", "SpinelOS:GNOME");
+        for (const auto &kv : build_effective_proxy_envs()) {
+            g_app_launch_context_setenv(G_APP_LAUNCH_CONTEXT(context), kv.first.c_str(), kv.second.c_str());
+        }
+    }
     g_autoptr(GError) error = nullptr;
     if (!g_app_info_launch(app, nullptr, context ? G_APP_LAUNCH_CONTEXT(context) : nullptr, &error)) {
         notify_app_launch_failure(g_app_info_get_name(app), error ? error->message : "请检查应用是否仍然安装。");

@@ -1284,6 +1284,9 @@ void native_shell_sync_telemetry(AppState *state) {
         }
     }
 
+    if (!state->sandbox_shell_mode) {
+        sync_process_proxy_env();
+    }
     if (ns->bar_mem_lbl) {
         std::string m = ns->telemetry.mem;
         if (ns->telemetry.mem_used_mb >= 1024) {

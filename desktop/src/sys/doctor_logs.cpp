@@ -768,13 +768,34 @@ std::vector<DoctorCheckItem> run_system_health_checks() {
     // 4. Polkit & XDG Portals
     {
         bool pk_up = proc_running_pattern("polkit-gnome-authentication-agent-1");
+        bool pk_in_session = false;
+        if (pk_up) {
+            std::string p_out;
+            int p_rc = 1;
+            if (run_argv_capture({"pgrep", "-f", "polkit-gnome-authentication-agent-1"}, p_out, p_rc) && p_rc == 0) {
+                for (const auto &pid_str : split_lines(p_out)) {
+                    std::string tpid = trim_copy(pid_str);
+                    if (tpid.empty()) continue;
+                    std::ifstream cg("/proc/" + tpid + "/cgroup");
+                    std::string cg_txt((std::istreambuf_iterator<char>(cg)), std::istreambuf_iterator<char>());
+                    if (cg_txt.find("session-") != std::string::npos) {
+                        pk_in_session = true;
+                        break;
+                    }
+                }
+            }
+        }
         bool pt_up = proc_running_pattern("xdg-desktop-portal");
         DoctorCheckItem it;
         it.id = "portals_polkit";
         it.name = "权限弹窗与 Portal 授权";
-        if (pk_up && pt_up) {
+        if (pk_up && pk_in_session && pt_up) {
             it.status = "ok";
-            it.detail = "Polkit 提权弹窗与 xdg-desktop-portal 运行中";
+            it.detail = "Polkit 提权弹窗（图形会话已绑定）与 xdg-desktop-portal 运行中";
+        } else if (pk_up && !pk_in_session) {
+            it.status = "warn";
+            it.detail = "Polkit 代理当前未绑定图形登录会话 (user@.service)，pkexec 会报 /dev/tty 错误";
+            it.fix_hint = "请注销或重启桌面，让 labwc 会话自启恢复图形认证弹窗";
         } else {
             it.status = "warn";
             it.detail = std::string(pk_up ? "Polkit 正常" : "Polkit Agent 未运行") + " · " +
@@ -1152,6 +1173,31 @@ void restart_polkit_agent(AppState *state) {
             eval_js(state->settings_view,
                     "window.__spinelPermsFeedback && window.__spinelPermsFeedback(false, \"尚未安装 polkit-gnome，请先运行 ./scripts/dev-deploy.sh --full 安装权限代理组件。\");");
         }
+        return;
+    }
+    bool healthy_in_session = false;
+    {
+        std::string p_out;
+        int p_rc = 1;
+        if (run_argv_capture({"pgrep", "-f", "polkit-gnome-authentication-agent-1"}, p_out, p_rc) && p_rc == 0) {
+            for (const auto &pid_str : split_lines(p_out)) {
+                std::string tpid = trim_copy(pid_str);
+                if (tpid.empty()) continue;
+                std::ifstream cg("/proc/" + tpid + "/cgroup");
+                std::string cg_txt((std::istreambuf_iterator<char>(cg)), std::istreambuf_iterator<char>());
+                if (cg_txt.find("session-") != std::string::npos) {
+                    healthy_in_session = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (healthy_in_session) {
+        if (state && state->settings_view) {
+            eval_js(state->settings_view,
+                    "window.__spinelPermsFeedback && window.__spinelPermsFeedback(true, \"Polkit 代理已在当前图形会话正常运行。\");");
+        }
+        push_perms_state(state);
         return;
     }
     spawn_argv_detached({"sh", "-c", "pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true; sleep 0.1; setsid -f /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1 </dev/null"});

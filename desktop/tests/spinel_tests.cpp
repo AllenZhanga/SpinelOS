@@ -1641,12 +1641,21 @@ void test_ai_os_stage3_integration() {
     EXPECT(dispatch_ipc_command(&dummy_state, R"({"id":702,"method":"ai:state-get","params":{}})", acts, &reply));
     EXPECT(reply.find("\"ok\":true") != std::string::npos);
 
-    // 5. Spinel Doctor includes AI OS Bus & MCP Gateway health item
+    // 5. Spinel Doctor includes AI OS Bus & MCP Gateway health item & Proxy env propagation
     auto doc_checks = run_system_health_checks();
     bool has_ai_doc = std::any_of(doc_checks.begin(), doc_checks.end(), [](const DoctorCheckItem &c) {
         return c.id == "ai_os_mcp" && !c.name.empty();
     });
     EXPECT(has_ai_doc);
+    fs::create_directories(fs::path(home_dir()) / ".config/spinelos", ec);
+    write_text_file(fs::path(home_dir()) / ".config/spinelos/proxy.conf",
+                    "enabled=true\nhttp_proxy=http://127.0.0.1:10801\nno_proxy=localhost,127.0.0.1\n");
+    auto proxy_envs = collect_active_proxy_envs();
+    bool has_https_p = std::any_of(proxy_envs.begin(), proxy_envs.end(), [](const auto &kv) {
+        return kv.first == "HTTPS_PROXY" && kv.second == "http://127.0.0.1:10801";
+    });
+    EXPECT(has_https_p);
+    write_text_file(fs::path(home_dir()) / ".config/spinelos/proxy.conf", "enabled=false\n");
 
     unsetenv("SPINEL_AGENT_RUNTIME_DIR");
     unsetenv("SPINEL_TASK_INBOX_FILE");

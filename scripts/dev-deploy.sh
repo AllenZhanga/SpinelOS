@@ -273,9 +273,18 @@ if [ "$MODE" = "full" ]; then
     launch_bg spice-vdagent
   fi
   if [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ]; then
-    pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true
-    sleep 0.1
-    launch_bg sh -c 'exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/tmp/spinel-polkit.log 2>&1'
+    POLKIT_OK=0
+    for pp in $(pgrep -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true); do
+      if grep -q 'session-' "/proc/${pp}/cgroup" 2>/dev/null; then
+        POLKIT_OK=1
+        break
+      fi
+    done
+    if [ "${POLKIT_OK}" -eq 0 ]; then
+      pkill -f '/usr/lib/polkit-gnome/[p]olkit-gnome-authentication-agent-1' 2>/dev/null || true
+      sleep 0.1
+      launch_bg sh -c 'exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 </dev/null >/tmp/spinel-polkit.log 2>&1'
+    fi
   fi
   if command -v swayidle >/dev/null 2>&1; then
     pkill -x swayidle 2>/dev/null || true

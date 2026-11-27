@@ -262,21 +262,6 @@ ProxyConfig load_proxy_config() {
     return cfg;
 }
 
-std::string strip_single_quotes(std::string s) {
-    s = trim_copy(s);
-    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
-        return s.substr(1, s.size() - 2);
-    }
-    return s;
-}
-
-std::string gsettings_proxy_get(const char *schema, const char *key) {
-    std::string out;
-    int rc = 1;
-    if (!run_argv_capture({"gsettings", "get", schema, key}, out, rc) || rc != 0) return "";
-    return strip_single_quotes(out);
-}
-
 void sync_gsettings_proxy(const ProxyConfig &cfg) {
     if (!has_executable("gsettings")) return;
     auto parse_host_port = [](const std::string &url, std::string &host_out, std::string &port_out) {
@@ -312,48 +297,13 @@ void sync_gsettings_proxy(const ProxyConfig &cfg) {
 }
 
 ProxyConfig resolve_effective_proxy() {
-    ProxyConfig cfg = load_proxy_config();
-    if (cfg.enabled && (!cfg.http_proxy.empty() || !cfg.socks_proxy.empty())) {
-        return cfg;
-    }
-    if (!has_executable("gsettings")) return cfg;
-    if (gsettings_proxy_get("org.gnome.system.proxy", "mode") != "manual") return cfg;
-
-    // Pick up desktop-wide GSettings proxies written by Clash/Monocloud/v2rayN even if http.enabled was left false
-    auto read_hp = [&](const char *subschema, const char *scheme) -> std::string {
-        std::string host = gsettings_proxy_get(subschema, "host");
-        std::string port = gsettings_proxy_get(subschema, "port");
-        int pnum = std::atoi(port.c_str());
-        if (host.empty() || pnum <= 0 || pnum > 65535) return "";
-        std::string url = std::string(scheme) + "://" + host + ":" + std::to_string(pnum);
-        return is_valid_proxy_url(url) ? url : "";
-    };
-
-    std::string http_u = read_hp("org.gnome.system.proxy.http", "http");
-    std::string https_u = read_hp("org.gnome.system.proxy.https", "http");
-    std::string socks_u = read_hp("org.gnome.system.proxy.socks", "socks5");
-
-    cfg.http_proxy = !http_u.empty() ? http_u : https_u;
-    cfg.socks_proxy = socks_u;
-    cfg.enabled = (!cfg.http_proxy.empty() || !cfg.socks_proxy.empty());
+    ProxyConfig cfg;
+    cfg.enabled = resolve_active_proxy_fields(cfg.http_proxy, cfg.socks_proxy, cfg.no_proxy);
     return cfg;
 }
 
 std::vector<std::pair<std::string, std::string>> build_effective_proxy_envs() {
-    ProxyConfig cfg = resolve_effective_proxy();
-    if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) return {};
-    std::string http_val = !cfg.http_proxy.empty() ? cfg.http_proxy : cfg.socks_proxy;
-    std::string all_val = !cfg.socks_proxy.empty() ? cfg.socks_proxy : cfg.http_proxy;
-    return {
-        {"http_proxy", http_val},
-        {"https_proxy", http_val},
-        {"HTTP_PROXY", http_val},
-        {"HTTPS_PROXY", http_val},
-        {"all_proxy", all_val},
-        {"ALL_PROXY", all_val},
-        {"no_proxy", cfg.no_proxy},
-        {"NO_PROXY", cfg.no_proxy}
-    };
+    return collect_active_proxy_envs();
 }
 
 void launch_browser_command(std::vector<std::string> args, const std::string &tag,
@@ -435,24 +385,44 @@ bool open_url_in_browser(const std::string &url, const std::string &tag) {
 
 void sync_process_proxy_env() {
     ProxyConfig cfg = resolve_effective_proxy();
+    std::string sig = (cfg.enabled ? "1|" : "0|") + cfg.http_proxy + "|" + cfg.socks_proxy + "|" + cfg.no_proxy;
+    static std::string last_synced_sig;
+
     const char *vars[] = {
         "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
         "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"
     };
     if (!cfg.enabled || (cfg.http_proxy.empty() && cfg.socks_proxy.empty())) {
         for (const char *v : vars) unsetenv(v);
+        if (sig != last_synced_sig) {
+            last_synced_sig = sig;
+            if (has_executable("systemctl")) {
+                spawn_argv_detached({"systemctl", "--user", "unset-environment",
+                                     "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                                     "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"});
+            }
+        }
         return;
     }
-    std::string http_val = !cfg.http_proxy.empty() ? cfg.http_proxy : cfg.socks_proxy;
-    std::string all_val = !cfg.socks_proxy.empty() ? cfg.socks_proxy : cfg.http_proxy;
-    setenv("http_proxy", http_val.c_str(), 1);
-    setenv("https_proxy", http_val.c_str(), 1);
-    setenv("HTTP_PROXY", http_val.c_str(), 1);
-    setenv("HTTPS_PROXY", http_val.c_str(), 1);
-    setenv("all_proxy", all_val.c_str(), 1);
-    setenv("ALL_PROXY", all_val.c_str(), 1);
-    setenv("no_proxy", cfg.no_proxy.c_str(), 1);
-    setenv("NO_PROXY", cfg.no_proxy.c_str(), 1);
+    auto envs = build_effective_proxy_envs();
+    for (const auto &kv : envs) {
+        setenv(kv.first.c_str(), kv.second.c_str(), 1);
+    }
+    if (sig != last_synced_sig) {
+        last_synced_sig = sig;
+        if (has_executable("systemctl")) {
+            spawn_argv_detached({"systemctl", "--user", "import-environment",
+                                 "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                                 "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"},
+                                envs);
+        }
+        if (has_executable("dbus-update-activation-environment")) {
+            spawn_argv_detached({"dbus-update-activation-environment", "--systemd",
+                                 "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                                 "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"},
+                                envs);
+        }
+    }
 }
 
 void push_proxy_config(AppState *state) {
