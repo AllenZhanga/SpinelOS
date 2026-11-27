@@ -2,9 +2,9 @@
 
 # Spinel OS
 
-**一个不基于 KDE / GNOME / XFCE 的轻量级 Wayland 桌面操作系统**
+**A lightweight Wayland desktop OS built without KDE, GNOME, or XFCE**
 
-基于 **Arch Linux (`archiso`)** 构建 · **C++20 原生桌面外壳 (`Spinel Shell`)** · **Steam / Gamescope / MangoHud 开箱即用** · **原生中文输入法与系统代理**
+Based on **Arch Linux (`archiso`)** · **Custom C++20 Desktop Shell (`spinel-shell`)** · **AI-Native OS Layer (`spinel-os-mcp` & Sandbox)** · **Steam / Gamescope / MangoHud Ready**
 
 [![Arch Linux Base](https://img.shields.io/badge/Base-Arch%20Linux-1793D1?logo=archlinux&logoColor=white)](https://archlinux.org/)
 [![Wayland Compositor](https://img.shields.io/badge/Wayland-labwc%20%2B%20GTK4%20Layer--Shell-38BDF8)](https://labwc.github.io/)
@@ -12,171 +12,186 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg)](LICENSE)
 [![GitHub Issues](https://img.shields.io/github/issues/AllenZhanga/SpinelOS)](https://github.com/AllenZhanga/SpinelOS/issues)
 
-[核心特性](#核心特性) · [架构设计](#为什么不用传统桌面) · [快速上手](#快速体验与安装) · [自构建 ISO](#从源码构建-iso) · [English Overview](#english-overview)
+**English** · [简体中文](README.zh-CN.md)
+
+[Features](#core-features) · [Architecture](#why-not-a-traditional-de) · [AI OS Layer](#3-ai-native-os-infrastructure--parallel-sandbox) · [Quick Start](#quick-start--installation) · [Build ISO](#build-iso-from-source)
 
 </div>
 
 ---
 
-> **预览截图位（待补充真机录屏 / 高清截图）**  
-> 建议将物理机或显卡直通虚拟机实拍图放入 `docs/assets/` 后在此取消注释展示：
+> **Screenshots (Coming Soon)**  
+> Place real hardware / GPU-passthrough captures under `docs/assets/` and uncomment below:
 > <!-- ![SpinelOS Desktop](docs/assets/desktop-light.png) -->
 > <!-- ![SpinelOS Gamescope & Control Center](docs/assets/games-center.png) -->
 
 > [!NOTE]
-> **当前项目状态（Alpha 预览阶段）**：Spinel OS 目前面向桌面开发者、Linux 日用及游戏玩家与早期尝鲜用户提供源码与 Live ISO 构建链路。欢迎在 [Issues](https://github.com/AllenZhanga/SpinelOS/issues) 提交真机显卡适配（AMD / Intel / NVIDIA）与体验反馈。
+> **Project Status (Alpha Preview)**: Spinel OS currently provides source builds, Live ISOs, and cloud OTA updates for desktop developers, daily Linux users, and PC/handheld gamers. Hardware compatibility reports (AMD / Intel / NVIDIA) and feedback are welcome in [Issues](https://github.com/AllenZhanga/SpinelOS/issues).
 
 ---
 
-## Spinel OS 是什么？
+## What is Spinel OS?
 
-很多 Arch 衍生发行版只是在 KDE 或 GNOME 上预装常用软件或驱动。**Spinel OS 希望做得更轻、更统一**：
+Most Arch derivatives simply bundle themes or pre-installed packages on top of KDE or GNOME. **Spinel OS is built to be leaner, cohesive, and controllable end-to-end**:
 
-- **完全独立的桌面外壳与双进程低内存架构**：不依赖 KDE / GNOME / XFCE 整套桌面环境，由自研的 C++20 桌面核心 [`spinel-shell`](desktop/)（纯 `GTK4 + Cairo + gtk4-layer-shell`，常驻内存仅约 **75 MB PSS**）承担顶栏、Dock、桌面、Control Center、Spotlight 全局启动器与剪贴板守护；设置、应用商店、游戏中心与安装向导拆分为按需拉起的 `spinel-webui`（`WebKitGTK 6.0`），关闭即释放全部内存。底层仅由极轻量的 `labwc`（`wlroots`）负责 Wayland/DRM 合成与 `XWayland` 兼容。
-- **自研多标签终端与彩色开机体验**：自研基于 `GTK4 + VTE4` 的多标签终端 `spinel-terminal`（`Ctrl+T` 继承工作目录、内置搜索与主题同步）；配置彩色尖晶石晶体 Logo、静默无感 GRUB 与 Plymouth 开机动画。
-- **为桌面体验与游戏玩家同步打磨**：兼顾主机大屏模式、桌面级窗口多任务、开箱中文环境与透明的系统权限/进程控制。
-
----
-
-## 核心特性
-
-### 1. 独立设计的 Spinel Shell 桌面体验
-- **全局动态顶部菜单栏 & 剪贴板历史**：随当前焦点应用自动切换菜单项，右上角集成 `wl-clip-persist` 剪贴板守护（10 条历史记录）、Bento 风格控制中心与状态监控。
-- **Spotlight 全局搜索启动器 (`Alt + Space`)**：一键模糊搜索已安装桌面应用、本地 Steam 游戏、系统设置直达页与快捷操作。
-- **悬浮 Dock 与桌面交互**：支持桌面图标左键双击打开、Dock 常驻图标拖拽排序与右键菜单（保留/移除/显示/关闭应用）；遵循 [UI 设计规范](docs/UI_SPEC.md)，内置 4 套主题（默认 `tahoe-light` 浅色液态玻璃），支持 `.theme` 扩展及**自定义本地壁纸图片**。
-
-### 2. 开箱即用的 PC / 掌机游戏环境
-- **全系主流 GPU 驱动预置**（见 [packages.custom.x86_64](archiso/packages.custom.x86_64)）：
-  - **AMD**：`mesa` + `vulkan-radeon`（含 32 位 `lib32-*`）
-  - **Intel**：`mesa` + `vulkan-intel`（含 32 位 `lib32-*`）
-  - **NVIDIA**：`nvidia-open` + `nvidia-utils` + `lib32-nvidia-utils`（适配 RTX 20/30/40/50 及 GTX 16 系）
-- **游戏栈即装即玩（开源合规设计）**：ISO 预集成 `[multilib]`、Gamescope、MangoHud、GameMode、PipeWire 与蓝牙手柄支持；专有 `Steam` 客户端未预捆绑在商业发行镜像中，首次点击桌面/Dock/游戏中心图标可通过**应用商店一键在线安装**（ISO 构建同时导出 `spinelos-packages-licenses.tsv` 与 `NOTICE-THIRD-PARTY.txt`）。
-- **游戏与启动中心**：自动扫描本地 Steam 游戏库与封面图，可直接从桌面/游戏中心一键直达 **Steam 客户端** 或 **Gamescope 主机大屏模式**，并在设置页可视化开关 MangoHud HUD、GameMode 与渲染分辨率。
-- **运行本地 Windows 程序**：在应用商店按需下载安装 Wine。首次双击 `.exe` 或右键选择「用 Wine 运行」时，系统会在缺少 Wine 的情况下打开商店安装页。安装后重新打开文件即可运行。在 `Alt+Space` 搜索「Windows 应用」可安装 Wine、查看、启动和卸载已安装软件，也可以搜索 Wine 生成的应用快捷方式。虚拟 C 盘默认位于 `~/.local/share/spinelos/wine-prefix/drive_c`。Steam 游戏通过 Steam 自己管理的 Proton 运行。
-
-### 3. 真正面向中文用户的日用体验
-- **中文输入法开箱可用**：内置 **Fcitx5 Wayland**、默认中文拼音（`fcitx5-chinese-addons`，禁用生僻 ExtB 字符并预置 `Noto Color Emoji` 彩色 Emoji 回退）及可选 **Rime 雾凇拼音**，配合 9-patch 磨砂浅/深色皮肤。
-- **系统级代理自动接管**：在「系统设置 → Wi-Fi 与网络」配置 HTTP / SOCKS 代理后，自动同步至桌面启动的浏览器与 Steam。
-- **日常工具精简完备**：
-  - 自研轻量多标签终端 **`spinel-terminal`**（`Super+Enter` / `Ctrl+T` / `Ctrl+Shift+C/V` / `Ctrl+F`，原生跟随系统主题）
-  - **Thunar** 文件管理（含压缩包插件与 GVFS）、Mousepad、Ristretto、自定义截图 (`spinel-screenshot`) 与晶石圆环锁屏 (`spinel-lock`)
-  - **应用商店**：整合系统软件源（`pacman`）与 Flatpak / Flathub 一键安装 Steam、Chrome、Firefox、Heroic、Lutris、Discord、OBS 等
-  - **分类系统设置**：网络与蓝牙、显示与缩放、声音与电源、交互式全局快捷键录制（自动同步 `labwc`）、进程与 `PSS` 内存监控、权限与安全、系统日志导出
+- **Independent C++20 Shell with Dual-Process Low-Memory Design**: Instead of pulling in a full KDE/GNOME/XFCE stack, Spinel OS runs a custom native Wayland shell [`spinel-shell`](desktop/) (`GTK4 + Cairo + gtk4-layer-shell`, ~**75 MB PSS** resident) for the global top bar, Dock, desktop canvas, Control Center, Spotlight launcher, and AI Dynamic Island. Heavy windows (`Settings`, `App Center`, `Games Center`, `System Monitor`, `Spinel Doctor`, `Installer`) spawn on demand via `spinel-webui` (`WebKitGTK 6.0`) and free all memory on close, backed by lightweight `labwc` (`wlroots`) for Wayland/XWayland compositing.
+- **First-Party Native Core Apps**: Includes [`spinel-files`](desktop/) (GTK4 virtualized file manager with `org.freedesktop.FileManager1` D-Bus integration and built-in archive compression/extraction), [`spinel-terminal`](desktop/) (`GTK4 + VTE4` multi-tabbed terminal with theme sync), and [`spinel-sandbox`](desktop/) (isolated parallel sandbox desktop with Picture-in-Picture takeover), alongside custom GRUB and Plymouth boot animations.
+- **Built for Office + AI Agent Workflows + Gaming**: Designed as a unified daily workstation combining desktop multitasking, first-class OS integration for coding agents via MCP, out-of-the-box CJK input and proxy routing, and pre-configured GPU + Gamescope gaming stacks.
 
 ---
 
-## 为什么不用传统桌面？
+## Core Features
 
-| 维度 | 传统桌面环境（KDE / GNOME / XFCE） | **Spinel OS (`Spinel Shell + labwc`)** |
+### 1. Custom Spinel Shell Desktop Experience
+- **Dynamic Global Menu Bar, System Tray & Workspaces**: Context-aware top bar with active-window menus, native `StatusNotifierItem` (`SNI` + `DBusMenu`) tray support, `wl-clip-persist` clipboard history (10 entries), Bento Control Center, and multi-workspace switching (`Super + 1~4` / top-bar indicator).
+- **Spotlight Global Launcher (`Alt + Space`)**: Instant fuzzy search across installed desktop apps, local Steam games, Windows apps, Settings deep-links, and quick system actions.
+- **Floating Dock, Desktop Icons & Theme Engine**: Drag-to-reorder Dock, context menus, unified visual design tokens ([docs/UI_SPEC.md](docs/UI_SPEC.md)), built-in themes (default `tahoe-light` liquid glass), custom local wallpapers, native screenshot (`spinel-screenshot`), and lock screen (`spinel-lock`).
+
+### 2. First-Party Apps & Daily Productivity
+- **Native File Manager (`spinel-files`)**: Fast `GListStore` virtualized list/grid views, asynchronous directory scanning, D-Bus `FileManager1` reveal-in-folder support, and native archive extract/compress actions.
+- **Multi-Tab Terminal (`spinel-terminal`)**: Built on `GTK4 + VTE4` (`Super + Enter` / `Ctrl + T` inheriting working directory / `Ctrl + Shift + C/V` / `Ctrl + F`), synced live with active desktop themes.
+- **Dedicated System & Utility Apps (`spinel-webui`)**:
+  - **App Center**: Host-native software installation via `pacman` and native packages (browsers, office suites, LibreOffice, PDF/note tools, VS Code, containers, local LLM runtimes).
+  - **System Monitor & Spinel Doctor**: Independent `PSS`-accurate process monitor, categorized system/service/AI audit logs (`?mode=monitor`), and one-click health diagnostics (`?mode=doctor`).
+  - **Granular Settings**: Network/Wi-Fi/VPN & Bluetooth, Display & scaling, Audio & Power, interactive global shortcut recording (synced to `labwc`), Btrfs `snapper` snapshots, and categorized Security & Permissions.
+
+### 3. AI-Native OS Infrastructure & Parallel Sandbox
+> Full specification and CLI usage: [docs/AI_OS_GUIDE.md](docs/AI_OS_GUIDE.md) · [docs/AI_OS_PLAN.md](docs/AI_OS_PLAN.md)
+- **Top-Bar AI Dynamic Island**: Automatically aggregates live coding-agent sessions (e.g., Antigravity, Codex, Claude Code, `spinel-os-mcp` tool calls, or `/proc` probes), supports instant workspace/window jumping or sandbox PiP takeover, and surfaces **Tier 3 interactive approval cards** (`Allow`, `Snapshot + Allow`, `Run in Sandbox`, `Deny`).
+- **`spinel-os-mcp` Gateway (`stdio`) & One-Click Setup**: Exposes 18 OS capabilities (desktop context, screenshots, clipboard, Doctor diagnostics, sandbox launch, Btrfs checkpoints, service control) guarded by `Tier 0–3` permissions and denoised audit logging. Configure **Antigravity** (`~/.gemini/config/mcp_config.json`), **Codex**, **Claude Code**, **DeepSeekHarness**, or **Gemini CLI** non-destructively via **Settings → Permissions & Security** or `spinel-agent-ctl mcp-install <client>`.
+- **Parallel Sandbox (`spinel-sandbox`) & Cloud Relay**: Isolated sandboxed desktop sessions with PiP preview, network/clipboard toggles, plus optional `spinel-relay` ([server/spinel-relay](server/spinel-relay)) for remote session continuity and cloud OTA distribution.
+
+### 4. Ready-to-Play PC & Handheld Gaming
+- **Pre-installed GPU Drivers** (see [archiso/packages.custom.x86_64](archiso/packages.custom.x86_64)):
+  - **AMD**: `mesa` + `vulkan-radeon` (including 32-bit `lib32-*`)
+  - **Intel**: `mesa` + `vulkan-intel` (including 32-bit `lib32-*`)
+  - **NVIDIA**: `nvidia-open` + `nvidia-utils` + `lib32-nvidia-utils` (GTX 16 & RTX 20/30/40/50 series)
+- **Compliance-Friendly Gaming Stack**: Pre-configured `[multilib]`, `gamescope`, `mangohud`, `gamemode`, PipeWire audio, and Bluetooth controller support. Proprietary `Steam` is not bundled into the ISO; clicking Steam or **Games Center** triggers one-click online installation from the App Center (every ISO build also emits `spinelos-packages-licenses.tsv` and `NOTICE-THIRD-PARTY.txt`).
+- **Games Center & Windows `.exe` Support**: Automatically discovers local Steam libraries and artwork, launches into **Steam** or **Gamescope Big Picture**, configures per-game MangoHud/GameMode/upscaling toggles, and supports on-demand Wine execution (`spinel-wine`, prefix at `~/.local/share/spinelos/wine-prefix/drive_c`).
+
+### 5. Out-of-the-Box CJK & System Proxy Routing
+- **Fcitx5 Wayland IME**: Pre-configured Pinyin (`fcitx5-chinese-addons`), optional **Rime-Ice**, `Noto Color Emoji` fallback, and matching 9-patch frosted light/dark skins.
+- **Unified Proxy Sync**: HTTP / SOCKS proxy settings (or external `org.gnome.system.proxy` tools like Clash/Monocloud) automatically propagate across Chromium browsers and Steam.
+
+---
+
+## Why Not a Traditional DE?
+
+| Area | Traditional Desktops (KDE / GNOME / XFCE) | **Spinel OS (`Spinel Shell + labwc`)** |
 | :--- | :--- | :--- |
-| **桌面外壳** | 完整桌面套件，服务与后台组件多 | 自研 C++20 `spinel-shell`（纯 GTK4 + Cairo）+ 按需 `spinel-webui` + `labwc` 合成器 |
-| **主题与交互一致性** | 常混用 GTK3/GTK4/Qt 多套风格，顶栏/设置体验割裂 | 全局统一 [UI_SPEC.md](docs/UI_SPEC.md) 设计规范，主题一键同步到壁纸、顶栏、Dock、窗口装饰与终端 |
-| **国内网络与中文开箱度** | 装机后往往需手动配置 `fcitx5` 环境变量与 Steam 代理 | 开箱预设 Wayland IME、`xdg-desktop-portal` 授权链与代理环境变量同步 |
-| **可定制性** | 修改全局桌面交互需维护插件或 Patch 上游 | 桌面、顶栏、应用商店、设置全部在本仓库 [desktop/](desktop/) 内掌控，热部署秒级迭代 |
+| **Desktop Stack** | Heavy suites with many background daemons | Custom C++20 `spinel-shell` (`GTK4 + Cairo`) + on-demand `spinel-webui` + `labwc` |
+| **Visual Consistency** | Mixed GTK3 / GTK4 / Qt toolkits and fragmented settings | Unified [UI_SPEC.md](docs/UI_SPEC.md) tokens across top bar, Dock, apps, walls & terminal |
+| **CJK & Proxy Readiness** | Often requires manual `fcitx5` env vars and per-app proxy setup | Pre-wired Wayland IME, Portals (`SpinelOS:GNOME`), and GSettings proxy inheritance |
+| **AI & Isolation Layer** | Ad-hoc scripts without OS-level approval or sandbox PiP | Native Dynamic Island, `spinel-os-mcp` (`Tier 0–3`), Btrfs checkpoints & `spinel-sandbox` |
+| **Hackability** | Maintaining patches/extensions across multiple upstream repos | Complete desktop stack lives in [desktop/](desktop/) with sub-second hot-deploy |
 
 ---
 
-## 快速体验与安装
+## Quick Start & Installation
 
-### 硬件与虚拟机建议
-- **架构**：`x86_64`（UEFI 启动，建议开启 3D 加速以获得最佳体验；无 3D 加速的虚拟机也已做软件渲染兼容）
-- **内存**：建议 8 GB 及以上（最低 4 GB）
-- **显卡**：AMD Radeon / Intel UHD·Arc / NVIDIA GTX 16 系及 RTX 20~50 系
+### Hardware / VM Requirements
+- **Architecture**: `x86_64` (UEFI boot; 3D acceleration recommended, software rendering fallback included for VMs)
+- **Memory**: 8 GB+ recommended (4 GB minimum)
+- **GPU**: AMD Radeon / Intel UHD & Arc / NVIDIA GTX 16 & RTX 20–50 series
 
-### 使用方式
-1. 从 [Releases](https://github.com/AllenZhanga/SpinelOS/releases) 下载最新镜像（或按下方步骤自行构建 `out/spinelos-*.iso`）。
-2. **真机体验**：使用 [Ventoy](https://www.ventoy.net/)、`balenaEtcher` 或 `dd` 写入 U 盘，以 **UEFI 模式** 引导进入 Live 桌面。
-3. **虚拟机体验**：在 QEMU / VMware / VirtualBox 中挂载 ISO（建议启用 UEFI 与 3D 加速）。
-4. **安装到硬盘**：在 Live 桌面点击 **「安装 Spinel OS」**，按向导选择目标磁盘并配置主机名、账户与密码即可完成安装。
+### Getting Started
+1. Download the latest ISO from [Releases](https://github.com/AllenZhanga/SpinelOS/releases) (or build `out/spinelos-*.iso` from source below).
+2. **Bare Metal**: Flash to USB via [Ventoy](https://www.ventoy.net/), `balenaEtcher`, or `dd`, and boot in **UEFI mode**.
+3. **Virtual Machine**: Attach the ISO in QEMU / VMware / VirtualBox with UEFI enabled.
+4. **Install to Disk**: Launch **Install Spinel OS** (`spinel-install`) from the Live desktop to configure target disk, Btrfs `@`/`@home`/`@snapshots` layout, hostname, user account, and dual-boot detection.
 
 > [!IMPORTANT]
-> **Live 环境说明**：Live ISO 默认自动登录演示账户 `gamer` 并允许免密 `sudo` 以便快速尝鲜与部署测试；安装到硬盘正式使用前，请务必为系统账户设置强密码。
+> **Live Environment Note**: The Live ISO auto-logs into demo user `gamer` with passwordless `sudo` for rapid evaluation and VM testing. Set a strong password for your system account when installing to disk.
 
 ---
 
-## 从源码构建 ISO
+## Build ISO from Source
 
-只要宿主机为 `x86_64` Linux（Ubuntu / Debian / Arch / Alibaba Cloud Linux 等）并安装 **Docker**（建议预留 15 GB 以上磁盘空间），即可一键构建完整可启动 ISO：
+On any `x86_64` Linux host with **Docker** installed (15 GB+ free disk space recommended):
 
 ```bash
 chmod +x scripts/build-iso.sh docker/build-inside-container.sh
 ./scripts/build-iso.sh
 ```
 
-构建产物位于 `out/spinelos-*.iso`。
+The bootable image is written to `out/spinelos-*.iso`.
 
 <details>
-<summary>点击展开：面向开发者的热部署与仓库目录结构</summary>
+<summary>Expand: Developer Build, C++20 Unit Tests, Hot Deploy & Repository Layout</summary>
 
-### 目录结构
+### Repository Layout
 
 ```text
 .
-├── desktop/                     # 独立桌面外壳 Spinel Shell (C++20 + HTML/CSS/JS)
-│   ├── CMakeLists.txt
-│   ├── src/                     # Wayland Layer-Shell 宿主、sysbridge IPC、主题/Steam/系统控制
-│   └── ui/                      # 桌面前端、设置、游戏中心、应用商店、安装器界面
-├── docs/
-│   └── UI_SPEC.md               # SpinelOS 统一 UI 设计规范（Design Tokens / 栅格 / 组件 / 主题）
-├── archiso/                     # ArchISO 定制覆盖层
-│   ├── packages.custom.x86_64   # 内核、显卡、Wayland、Gamescope、Fcitx5、Spinel 依赖软件清单
-│   └── airootfs/                # 根文件系统覆盖（labwc/portals/themes/autostart/install 脚本）
-├── docker/                      # 容器化 ISO 与 C++20 交叉构建环境
+├── desktop/                     # Native C++20 desktop stack + HTML/CSS/JS UI
+│   ├── CMakeLists.txt           # Builds shell, webui, files, terminal, sandbox, agent-ctl, os-mcp, tests
+│   ├── src/                     # Wayland layer-shell, IPC router, AI/MCP engine, sys controls
+│   ├── tests/                   # spinel-tests (CTest spinel_unit_tests)
+│   └── ui/                      # Frontend for Settings, App Center, Games, Monitor, Doctor, Installer
+├── docs/                        # UI_SPEC.md, AI_OS_GUIDE.md, AI_OS_PLAN.md, OTA_RELEASE_GUIDE.md, ROADMAP.md
+├── archiso/                     # ArchISO overlay
+│   ├── packages.custom.x86_64   # Kernel, GPU drivers, Wayland, Gamescope, Fcitx5, Spinel dependencies
+│   └── airootfs/                # Rootfs configs, labwc/portals, spinel-install, spinel-update
+├── docker/                      # Containerized ISO & C++20 cross-build environment
+├── server/spinel-relay/         # Go TLS relay server for remote sandbox streaming & OTA hosting
 ├── scripts/
-│   ├── build-iso.sh             # 一键打包可启动 ISO
-│   ├── dev-deploy.sh            # 向运行中的 SpinelOS VM 热更新二进制/UI/系统包 (--ui-only / --full)
-│   └── sync-ecs.sh              # 同步代码到远程构建机
+│   ├── build-iso.sh             # Build bootable ISO
+│   ├── dev-deploy.sh            # Hot-deploy C++ / UI / full system configs to a running VM
+│   ├── release-ota.sh           # Sign and publish cloud OTA bundles
+│   ├── build-relay.sh           # Deploy/upgrade spinel-relay server
+│   └── sync-ecs.sh              # Sync sources to remote build host
 └── .github/workflows/build-iso.yml
 ```
 
-### 对运行中的 VM 快速热部署
+### Build & Run C++20 Unit Tests (via `spinelos-builder`)
 
 ```bash
-# 仅同步 UI 改动并重启 spinel-shell（约 1 秒）
-./scripts/dev-deploy.sh gamer@<VM_IP> --ui-only
+docker run --rm --platform linux/amd64 -v "$PWD":/workspace -w /workspace spinelos-builder \
+  bash -c "cmake -S desktop -B build/linux-amd64 -DCMAKE_BUILD_TYPE=Release && cmake --build build/linux-amd64 -j4 && ctest --test-dir build/linux-amd64 --output-on-failure -V"
+```
 
-# 增量编译 C++20 外壳 + 同步 UI + 热重启
-./scripts/dev-deploy.sh gamer@<VM_IP>
+### Hot Deploy & Cloud OTA
 
-# 全量更新系统包、主题、labwc/portal 配置与启动脚本
-./scripts/dev-deploy.sh gamer@<VM_IP> --full
+```bash
+# Sync desktop UI only (~1s)
+./scripts/dev-deploy.sh <user>@<VM_IP> --ui-only
+
+# Sync compiled C++20 binaries + UI + D-Bus/MIME entries
+./scripts/dev-deploy.sh <user>@<VM_IP>
+
+# Full sync including packages, themes, labwc, portals, and boot scripts
+./scripts/dev-deploy.sh <user>@<VM_IP> --full
+
+# Pull latest published Cloud OTA directly on a Spinel OS machine
+sudo spinel-update upgrade --full --yes
 ```
 
 </details>
 
 ---
 
-## 路线图与 ARM64 (`aarch64`) 探索
+## Roadmap & ARM64 (`aarch64`) Exploration
 
-- [x] 自研 C++20 + GTK4 Layer-Shell + WebKitGTK 6.0 原生桌面外壳与双主题窗口 chrome
-- [x] Steam / Gamescope / MangoHud 集成、Flatpak 应用商店、Fcitx5 中文输入法与进程监控
-- [ ] 更多真机显卡（多屏高刷、混合显卡笔记本、掌机手柄热键）实测与打磨
-- [ ] 优化硬盘安装器分区体验（双系统识别 / Btrfs 快照恢复探索）
-- [ ] **ARM64 (`aarch64`) 支持调研**：Arch 官方 `archiso` 仅面向 `x86_64`，`desktop/` 自身可跨架构编译；后续计划探索基于 **Arch Linux ARM + FEX-Emu + Proton** 在 ARM64 设备上转译运行 Windows Steam 游戏与 Vulkan（Turnip / PanVK / AGX）转发
+- [x] Custom C++20 + GTK4 Layer-Shell + WebKitGTK 6.0 dual-process desktop (`spinel-shell`, `spinel-webui`, `spinel-terminal`, `spinel-files`)
+- [x] Dedicated App Center (host-native `pacman`/packages), Games Center, System Monitor (`PSS` + categorized logs), and Spinel Doctor
+- [x] AI OS infrastructure (`spinel-os-mcp`, Dynamic Island, `spinel-sandbox`, safe MCP auto-config, denoised audit logs) & Cloud OTA (`spinel-update`)
+- [ ] Bare-metal GPU validation and installer storage/dual-boot refinements
+- [ ] **ARM64 (`aarch64`) Research**: `desktop/` cross-compiles cleanly while upstream `archiso` targets `x86_64`; future exploration covers **Arch Linux ARM + FEX-Emu + Proton** with Vulkan forwarding (Turnip / PanVK / AGX)
 
----
-
-## English Overview
-
-**Spinel OS** is an Arch-based Wayland Linux desktop OS featuring a **custom standalone Wayland desktop shell (`spinel-shell`)** built from scratch in **C++20 (`GTK4` + `gtk4-layer-shell` + `WebKitGTK 6.0`)** on top of the lightweight **`labwc`** compositor — without KDE, GNOME, or XFCE.
-
-- **Ready for Gaming**: Pre-configured `[multilib]`, AMD (`mesa`/`vulkan-radeon`), Intel (`mesa`/`vulkan-intel`), NVIDIA (`nvidia-open`), `gamescope`, `mangohud`, `gamemode`, `pipewire`, and 1-click Store install for Steam.
-- **Cohesive Custom UI**: Unified global top menu bar, Clipboard History (`wl-clip-persist`), Spotlight Launcher (`Alt+Space`), drag-to-reorder Dock, Bento Control Center, custom image wallpapers + multi-theme engine, Flatpak + `pacman` App Store, and `PSS`-accurate Process Monitor.
-- **Out-of-the-Box CJK & First-Party Terminal**: Fcitx5 Wayland (Pinyin + optional Rime-Ice + Noto Color Emoji), custom lightweight tabbed terminal `spinel-terminal` (`GTK4 + VTE4`), and GUI proxy toggles propagated to Steam and browsers.
-- **Build Your Own ISO**: Run `./scripts/build-iso.sh` on any Docker-enabled `x86_64` Linux host to generate `out/spinelos-*.iso`.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the architectural evolution plan.
 
 ---
 
-## 参与贡献与反馈
+## Contributing & Feedback
 
-欢迎提交 Issue 或 Pull Request！提交 Bug 时建议附上：
-1. 运行环境（物理机型号或 VMware / QEMU 配置，以及 GPU 型号）
-2. 问题复现步骤
-3. 在「系统设置 → 系统日志」或 `/tmp/spinel-shell.log`、`~/.local/state/spinelos/apps.log` 捕获的相关日志
+Issues and Pull Requests are welcome! When filing a bug report, please include:
+1. Environment details (bare-metal model or QEMU / VMware setup, plus GPU model)
+2. Steps to reproduce
+3. Logs exported from **System Monitor → System Logs** or `/tmp/spinel-shell.log`, `~/.local/state/spinelos/apps.log`, and `spinel-agent-ctl doctor`
 
 ---
 
-## 开源许可 (License)
+## License
 
-- 本仓库中的 **Spinel Shell 源码、UI 前端、内置主题配置与构建/安装脚本** 基于 [MIT License](LICENSE) 开源。
-- 构建生成的系统镜像及其中集成的第三方开源或专有组件（如上游 Linux 内核、`labwc`、Mesa、`spinel-terminal` 底层所链接的 `VTE4`、NVIDIA 驱动、Fcitx5 等）各自遵循其原始开源或最终用户许可协议；每次构建 ISO 均会在输出目录附带完整软件包及 GPL/开源许可清单（`spinelos-packages-licenses.tsv` 与 `NOTICE-THIRD-PARTY.txt`）。
+- First-party **Spinel Shell source code, UI frontend, built-in themes, and build/install scripts** in this repository are licensed under the [MIT License](LICENSE).
+- Built OS images bundle third-party open-source and proprietary components (such as the Linux kernel, `labwc`, Mesa, `VTE4`, NVIDIA drivers, Fcitx5, etc.), each governed by its own upstream or EULA terms; every ISO build generates `spinelos-packages-licenses.tsv` and `NOTICE-THIRD-PARTY.txt`.
