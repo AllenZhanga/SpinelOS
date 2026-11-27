@@ -82,9 +82,28 @@
 - **Tier 2（推荐默认开启）**：在 `spinel-sandbox` 平行桌面执行任务、创建 Btrfs 保护快照。
 - **Tier 3（灵动岛交互审批）**：启停系统服务、改代理/网络、宿主机窗口重排，调用时在灵动岛弹出 `[允许 / 先快照并允许 / 在沙箱执行 / 拒绝]`，不抢终端焦点。
 
+### 6. 跨应用现场、端侧轻守夜人与跨设备连续性
+- **工作现场打包（Context Fabric）**：`os_context` 统一采集当前活跃窗口/工作区、聚焦终端/IDE 工作目录（`cwd`/Git 根）、剪贴板与报错通知摘要、按需截图与 Doctor 日志；支持通过 MCP 拉取或快捷键一键打包传递给新建/活跃 Agent。
+- **端侧轻守夜人（规则 + 按需本地小模型协同）**：不常驻吃显存大模型，依托按需启停的 `ollama` / `llama.cpp` 轻量模型或确定性摘要规则，负责把长输出压缩为灵动岛一句话结论、给零碎 Todo 自动关联仓库、`Alt+Space` 跨应用检索，并与 `GameMode` 联动在全屏游戏时自动让出 VRAM。
+- **跨设备连续性（Cloud Relay 扩展）**：通过现有 Go Cloud Relay + E2EE 信道与 macOS 客户端，把本机 `agent_tracker` 进度、灵动岛完成/待审批事件同步到远程设备，支持异地一键审批并直接通过 PiP 接管平行沙箱继续操作。
+
 ---
 
-## 四、分阶段实施路线图（Atoms First：Stage 1 → 2 → 3）
+## 四、五大核心跃迁与实施计划映射表
+
+确保「真 AI OS」的 5 个核心跃迁在工程推进中一个不丢：
+
+| 真 AI OS 关键跃迁 | 核心能力落点 | 对应实施阶段 |
+| :--- | :--- | :--- |
+| **1. 从「管理窗口」转向「管理任务与会话」** | `agent_tracker`（三源会话注册表 + PID 绑窗）+ `task_inbox`（`backlog→review→done` 派单闭环）+ 顶栏「灵动岛」主动提示与跳窗 | **Stage 1**（原子状态机）→ **Stage 2**（`todo_*` / `agent_report`）→ **Stage 3**（灵动岛 + Todo 面板） |
+| **2. 跨应用「工作现场总线 (Context Fabric)」** | `os_context` 无头采集当前窗口/工作区/仓库 `cwd`/剪贴板/通知/截图/Doctor 日志，打包直喂 Agent | **Stage 1**（`os_context` 原子）→ **Stage 2**（`desktop_get_context` 等 MCP）→ **Stage 3**（Tier 1 开关与一键喂现场） |
+| **3. 「默认沙箱 + 人类接管 + Btrfs 快照」OS 原语** | `guarded_actions` + `spinel-sandbox` 隔离跑 GUI/网页测试 + PiP 实时人工接管 + 改前建 Snapper 快照 + Tier 3 审批 | **Stage 1**（`guarded_actions` + `approval_gate`）→ **Stage 2**（`snapshot_checkpoint` / `sandbox_launch`）→ **Stage 3**（灵动岛审批卡片） |
+| **4. 「端侧轻守夜人」与「云端强主力」算力分工** | 本地规则/轻小模型负责日志摘要、Todo 归类、语义检索；商业/自研重 Agent 负责编码；`GameMode` 启动时自动协调释放显存 | **Stage 1**（服务控制与状态查询原子）→ **Stage 2**（`service_control` MCP）→ **Stage 3**（Game/VRAM 显存仲裁 + Spotlight/摘要联动） |
+| **5. 跨设备连续性（个人全天候 Agent 节点）** | 通过现有 `relay_client` + Cloud Relay + macOS 端同步会话完成/审批推送，异地直接 PiP 接管沙箱现场 | **Stage 1**（统一 `agent_bus` 事件流）→ **Stage 3**（Relay 事件桥接与远程审批/PiP 联动） |
+
+---
+
+## 五、分阶段实施路线图（Atoms First：Stage 1 → 2 → 3）
 
 按「**先底层原子原语 → 再标准协议出口 → 最后桌面业务交互**」顺序推进，确保架构稳定、单测先行、各端复用同一套事实来源：
 
