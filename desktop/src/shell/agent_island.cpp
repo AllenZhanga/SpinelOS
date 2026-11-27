@@ -80,54 +80,68 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
         gtk_box_remove(GTK_BOX(ns->bar_ai_list_box), c);
     }
 
-    // Popover Header Bar
+    bool has_finished = std::any_of(sessions.begin(), sessions.end(), [](const auto &s) {
+        return s.status == spinel::ai::AgentSessionStatus::Done ||
+               s.status == spinel::ai::AgentSessionStatus::Error;
+    });
+
+    // Compact Popover Header Bar: Title + top-right Copy & Settings icon buttons
     {
-        GtkWidget *top_hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *top_hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         gtk_widget_add_css_class(top_hdr, "spinel-ai-pop-hdr");
-        GtkWidget *hdr_lbl = gtk_label_new("Spinel AI 状态中心");
+
+        GtkWidget *hdr_lbl = gtk_label_new("AI 活动");
         gtk_widget_add_css_class(hdr_lbl, "spinel-ai-pop-title");
         gtk_widget_set_hexpand(hdr_lbl, TRUE);
         gtk_widget_set_halign(hdr_lbl, GTK_ALIGN_START);
         gtk_box_append(GTK_BOX(top_hdr), hdr_lbl);
+
+        GtkWidget *copy_btn = gtk_button_new_from_icon_name("edit-copy-symbolic");
+        gtk_button_set_has_frame(GTK_BUTTON(copy_btn), FALSE);
+        gtk_widget_add_css_class(copy_btn, "spinel-ai-hdr-btn");
+        gtk_widget_set_tooltip_text(copy_btn, "复制当前工作现场");
+        g_signal_connect(copy_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            std::string bundle = spinel::ai::build_work_context_bundle("");
+            copy_text_to_clipboard(bundle);
+            show_island_toast(n, "✓ 已复制工作现场");
+        }), ns);
+        gtk_box_append(GTK_BOX(top_hdr), copy_btn);
+
+        GtkWidget *set_btn = gtk_button_new_from_icon_name("emblem-system-symbolic");
+        gtk_button_set_has_frame(GTK_BUTTON(set_btn), FALSE);
+        gtk_widget_add_css_class(set_btn, "spinel-ai-hdr-btn");
+        gtk_widget_set_tooltip_text(set_btn, "权限与设置");
+        g_signal_connect(set_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+            auto *n = static_cast<NativeShellState *>(d);
+            if (n->bar_ai_popover) gtk_popover_popdown(GTK_POPOVER(n->bar_ai_popover));
+            trigger_cmd(n->app_state, "settings:open:perms");
+        }), ns);
+        gtk_box_append(GTK_BOX(top_hdr), set_btn);
+
         gtk_box_append(GTK_BOX(ns->bar_ai_list_box), top_hdr);
     }
 
-    // Section 1: Pending Tier 3 Interactive Approvals
+    // Section 1: Pending Approvals (concise plain-language cards)
     if (!approvals.empty()) {
-        GtkWidget *ap_head = gtk_label_new("待人工审批 (Tier 3 权限门禁)");
+        GtkWidget *ap_head = gtk_label_new("待确认");
         gtk_widget_add_css_class(ap_head, "spinel-ai-sec-title");
         gtk_widget_add_css_class(ap_head, "is-alert");
         gtk_widget_set_halign(ap_head, GTK_ALIGN_START);
         gtk_box_append(GTK_BOX(ns->bar_ai_list_box), ap_head);
 
         for (const auto &apr : approvals) {
-            GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+            GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
             gtk_widget_add_css_class(card, "spinel-ai-apr-card");
 
-            std::string title_txt = apr.client_id + " 请求 " + apr.capability;
+            std::string title_txt = apr.client_id + " · " + (apr.summary.empty() ? apr.capability : apr.summary);
             GtkWidget *t_lbl = gtk_label_new(title_txt.c_str());
             gtk_widget_add_css_class(t_lbl, "spinel-ai-item-title");
             gtk_widget_set_halign(t_lbl, GTK_ALIGN_START);
-            gtk_label_set_ellipsize(GTK_LABEL(t_lbl), PANGO_ELLIPSIZE_END);
+            gtk_label_set_wrap(GTK_LABEL(t_lbl), TRUE);
             gtk_box_append(GTK_BOX(card), t_lbl);
 
-            if (!apr.summary.empty()) {
-                GtkWidget *s_lbl = gtk_label_new(apr.summary.c_str());
-                gtk_widget_add_css_class(s_lbl, "spinel-ai-item-sub");
-                gtk_widget_set_halign(s_lbl, GTK_ALIGN_START);
-                gtk_label_set_wrap(GTK_LABEL(s_lbl), TRUE);
-                gtk_box_append(GTK_BOX(card), s_lbl);
-            }
-            if (!apr.detail.empty() && apr.detail != "{}") {
-                GtkWidget *d_lbl = gtk_label_new(apr.detail.c_str());
-                gtk_widget_add_css_class(d_lbl, "spinel-ai-mono");
-                gtk_widget_set_halign(d_lbl, GTK_ALIGN_START);
-                gtk_label_set_ellipsize(GTK_LABEL(d_lbl), PANGO_ELLIPSIZE_END);
-                gtk_label_set_max_width_chars(GTK_LABEL(d_lbl), 44);
-                gtk_box_append(GTK_BOX(card), d_lbl);
-            }
-
-            GtkWidget *btn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+            GtkWidget *btn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             auto add_dec_btn = [&](const char *lbl, const char *cls, const char *dec) {
                 GtkWidget *b = gtk_button_new_with_label(lbl);
                 gtk_widget_add_css_class(b, "spinel-ai-mini-btn");
@@ -145,9 +159,9 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
                             std::string out_json, err;
                             if (spinel::ai::create_guarded_snapshot("AI 审批前保护点", out_json, err)) {
                                 spinel::ai::resolve_pending_approval(aid, "allow");
-                                schedule_island_refresh_from_any_thread("✓ 已创建还原点并放行");
+                                schedule_island_refresh_from_any_thread("✓ 已建快照并放行");
                             } else {
-                                schedule_island_refresh_from_any_thread("⚠ 快照创建失败，请改选允许或拒绝");
+                                schedule_island_refresh_from_any_thread("⚠ 快照失败，请重试");
                             }
                         }).detach();
                     } else {
@@ -158,41 +172,42 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
                 gtk_box_append(GTK_BOX(btn_row), b);
             };
             add_dec_btn("允许", "is-primary", "allow");
-            add_dec_btn("快照后允许", nullptr, "snapshot_allow");
+            add_dec_btn("快照放行", nullptr, "snapshot_allow");
             add_dec_btn("沙箱", nullptr, "sandbox");
             add_dec_btn("拒绝", "is-danger", "deny");
             gtk_box_append(GTK_BOX(card), btn_row);
             gtk_box_append(GTK_BOX(ns->bar_ai_list_box), card);
         }
-        gtk_box_append(GTK_BOX(ns->bar_ai_list_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     }
 
-    // Section 2: Active & Recent Agent Sessions
-    {
+    // Optional subheader only when both approvals & sessions are shown, or finished sessions can be cleared
+    if ((!approvals.empty() && !sessions.empty()) || has_finished) {
         GtkWidget *sec_head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        GtkWidget *sec_lbl = gtk_label_new("活动 AI 会话");
+        GtkWidget *sec_lbl = gtk_label_new(!approvals.empty() ? "会话" : "最近会话");
         gtk_widget_add_css_class(sec_lbl, "spinel-ai-sec-title");
         gtk_widget_set_hexpand(sec_lbl, TRUE);
         gtk_widget_set_halign(sec_lbl, GTK_ALIGN_START);
         gtk_box_append(GTK_BOX(sec_head), sec_lbl);
 
-        GtkWidget *clr_btn = gtk_button_new_with_label("清理已结束");
-        gtk_widget_add_css_class(clr_btn, "spinel-clip-clr");
-        g_signal_connect(clr_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
-            auto *n = static_cast<NativeShellState *>(d);
-            spinel::ai::clear_agent_session("");
-            agent_island_refresh(n);
-        }), ns);
-        gtk_box_append(GTK_BOX(sec_head), clr_btn);
+        if (has_finished) {
+            GtkWidget *clr_btn = gtk_button_new_with_label("清除已结束");
+            gtk_widget_add_css_class(clr_btn, "spinel-clip-clr");
+            g_signal_connect(clr_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
+                auto *n = static_cast<NativeShellState *>(d);
+                spinel::ai::clear_agent_session("");
+                agent_island_refresh(n);
+            }), ns);
+            gtk_box_append(GTK_BOX(sec_head), clr_btn);
+        }
         gtk_box_append(GTK_BOX(ns->bar_ai_list_box), sec_head);
     }
 
-    if (sessions.empty()) {
-        GtkWidget *empty = gtk_label_new("暂无活跃 Agent 会话\n（支持 Codex / Antigravity / Claude / DeepSeekHarness 自动感知）");
+    if (sessions.empty() && approvals.empty()) {
+        GtkWidget *empty = gtk_label_new("暂无活动会话");
         gtk_widget_add_css_class(empty, "spinel-clip-empty");
         gtk_label_set_justify(GTK_LABEL(empty), GTK_JUSTIFY_CENTER);
         gtk_box_append(GTK_BOX(ns->bar_ai_list_box), empty);
-    } else {
+    } else if (!sessions.empty()) {
         for (const auto &s : sessions) {
             GtkWidget *btn = gtk_button_new();
             gtk_button_set_has_frame(GTK_BUTTON(btn), FALSE);
@@ -227,15 +242,15 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
             gtk_widget_set_hexpand(t_lbl, TRUE);
             gtk_widget_set_halign(t_lbl, GTK_ALIGN_START);
             gtk_label_set_ellipsize(GTK_LABEL(t_lbl), PANGO_ELLIPSIZE_END);
-            gtk_label_set_max_width_chars(GTK_LABEL(t_lbl), 30);
+            gtk_label_set_max_width_chars(GTK_LABEL(t_lbl), 28);
             gtk_box_append(GTK_BOX(top), t_lbl);
 
             if (s.in_sandbox) {
-                GtkWidget *sb_tag = gtk_label_new("沙箱 PiP");
+                GtkWidget *sb_tag = gtk_label_new("沙箱");
                 gtk_widget_add_css_class(sb_tag, "spinel-ai-badge");
                 gtk_box_append(GTK_BOX(top), sb_tag);
             } else if (s.win_id > 0) {
-                GtkWidget *jmp = gtk_label_new("切窗 ›");
+                GtkWidget *jmp = gtk_label_new("›");
                 gtk_widget_add_css_class(jmp, "spinel-clip-meta");
                 gtk_box_append(GTK_BOX(top), jmp);
             }
@@ -246,7 +261,7 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
                 gtk_widget_add_css_class(sum, "spinel-ai-item-sub");
                 gtk_widget_set_halign(sum, GTK_ALIGN_START);
                 gtk_label_set_ellipsize(GTK_LABEL(sum), PANGO_ELLIPSIZE_END);
-                gtk_label_set_max_width_chars(GTK_LABEL(sum), 40);
+                gtk_label_set_max_width_chars(GTK_LABEL(sum), 36);
                 gtk_box_append(GTK_BOX(v), sum);
             }
 
@@ -267,35 +282,6 @@ void rebuild_ai_popover_contents(NativeShellState *ns,
             }), ns);
             gtk_box_append(GTK_BOX(ns->bar_ai_list_box), btn);
         }
-    }
-
-    gtk_box_append(GTK_BOX(ns->bar_ai_list_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-
-    // Compact bottom action bar
-    {
-        GtkWidget *foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        gtk_widget_set_margin_top(foot, 2);
-
-        GtkWidget *feed_btn = gtk_button_new_with_label("复制当前现场");
-        gtk_widget_add_css_class(feed_btn, "spinel-ai-mini-btn");
-        gtk_widget_set_tooltip_text(feed_btn, "打包当前窗口/工作区与近期剪贴板到剪贴板，直接喂给任意 AI 工具");
-        g_signal_connect(feed_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
-            auto *n = static_cast<NativeShellState *>(d);
-            std::string bundle = spinel::ai::build_work_context_bundle("");
-            copy_text_to_clipboard(bundle);
-            show_island_toast(n, "✓ 已打包工作现场到剪贴板");
-        }), ns);
-        gtk_box_append(GTK_BOX(foot), feed_btn);
-
-        GtkWidget *perm_btn = gtk_button_new_with_label("权限与审计");
-        gtk_widget_add_css_class(perm_btn, "spinel-ai-mini-btn");
-        g_signal_connect(perm_btn, "clicked", G_CALLBACK(+[](GtkButton *, gpointer d) {
-            auto *n = static_cast<NativeShellState *>(d);
-            if (n->bar_ai_popover) gtk_popover_popdown(GTK_POPOVER(n->bar_ai_popover));
-            trigger_cmd(n->app_state, "settings:open:perms");
-        }), ns);
-        gtk_box_append(GTK_BOX(foot), perm_btn);
-        gtk_box_append(GTK_BOX(ns->bar_ai_list_box), foot);
     }
 }
 
@@ -387,14 +373,14 @@ GtkWidget *build_agent_island_widget(NativeShellState *ns) {
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 400);
-    gtk_widget_set_size_request(scroll, 348, -1);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 360);
+    gtk_widget_set_size_request(scroll, 316, -1);
 
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_top(box, 6);
-    gtk_widget_set_margin_bottom(box, 6);
-    gtk_widget_set_margin_start(box, 6);
-    gtk_widget_set_margin_end(box, 6);
+    gtk_widget_set_margin_bottom(box, 8);
+    gtk_widget_set_margin_start(box, 8);
+    gtk_widget_set_margin_end(box, 8);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), box);
     gtk_popover_set_child(GTK_POPOVER(pop), scroll);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn), pop);
@@ -566,13 +552,24 @@ std::string agent_island_css(const NativeShellState *ns) {
         "  padding: 1px 16px 1px 11px;\n"
         "}\n"
         ".spinel-ai-pill-lbl { font-size: 11.5px; font-weight: 600; color: #f8fafc; letter-spacing: 0.01em; }\n"
-        ".spinel-ai-pop-hdr { padding: 2px 4px 4px 4px; }\n"
+        ".spinel-ai-pop-hdr { padding: 2px 2px 4px 4px; }\n"
         ".spinel-ai-pop-title { font-size: 13px; font-weight: 700; color: " + t.bar_fg + "; }\n"
-        ".spinel-ai-sec-title { font-size: 11.5px; font-weight: 700; color: " + t.bar_fg + "; padding: 4px 4px 2px 4px; }\n"
+        ".spinel-ai-hdr-btn {\n"
+        "  background: transparent;\n"
+        "  background-image: none;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "  border-radius: 8px;\n"
+        "  min-width: 26px;\n"
+        "  min-height: 26px;\n"
+        "  padding: 4px;\n"
+        "  color: " + std::string(sub_fg) + ";\n"
+        "}\n"
+        ".spinel-ai-hdr-btn:hover { background-color: " + std::string(pill_bg) + "; color: " + t.bar_fg + "; }\n"
+        ".spinel-ai-sec-title { font-size: 11.5px; font-weight: 700; color: " + std::string(sub_fg) + "; padding: 4px 4px 2px 4px; }\n"
         ".spinel-ai-sec-title.is-alert { color: #f59e0b; }\n"
-        ".spinel-ai-item-title { font-size: 12px; font-weight: 600; color: " + t.bar_fg + "; }\n"
-        ".spinel-ai-item-sub { font-size: 11px; color: " + std::string(sub_fg) + "; }\n"
-        ".spinel-ai-mono { font-size: 10.5px; font-family: monospace; color: " + std::string(sub_fg) + "; }\n"
+        ".spinel-ai-item-title { font-size: 12.5px; font-weight: 600; color: " + t.bar_fg + "; }\n"
+        ".spinel-ai-item-sub { font-size: 11.5px; color: " + std::string(sub_fg) + "; }\n"
         ".spinel-ai-dot { font-size: 11px; min-width: 14px; }\n"
         ".spinel-ai-dot.st-run { color: #38bdf8; }\n"
         ".spinel-ai-dot.st-wait { color: #f59e0b; }\n"
@@ -585,19 +582,20 @@ std::string agent_island_css(const NativeShellState *ns) {
         ".spinel-ai-apr-card {\n"
         "  background-color: " + std::string(apr_bg) + ";\n"
         "  border: 1px solid " + std::string(apr_bd) + ";\n"
-        "  border-radius: 11px;\n"
-        "  padding: 9px 11px;\n"
+        "  border-radius: 10px;\n"
+        "  padding: 10px 12px;\n"
         "  margin: 2px 0;\n"
         "}\n"
+        ".spinel-ai-row { border-radius: 10px; padding: 7px 9px; }\n"
         ".spinel-ai-mini-btn {\n"
         "  background-color: " + std::string(pill_bg) + ";\n"
         "  background-image: none;\n"
         "  border: 1px solid " + t.bar_border + ";\n"
         "  box-shadow: none;\n"
         "  border-radius: 8px;\n"
-        "  padding: 3px 9px;\n"
-        "  min-height: 24px;\n"
-        "  font-size: 11px;\n"
+        "  padding: 4px 10px;\n"
+        "  min-height: 26px;\n"
+        "  font-size: 11.5px;\n"
         "  font-weight: 600;\n"
         "  color: " + t.bar_fg + ";\n"
         "}\n"
