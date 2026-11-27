@@ -204,7 +204,7 @@ apply_stage_and_restart() {
       echo "==> Installing vte4 runtime for Spinel Terminal..."
       pacman -Sy --noconfirm --needed vte4
     fi
-    for bin in spinel-wine spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-update; do
+    for bin in spinel-wine spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl spinel-update; do
       if [[ -f "${stage_dir}/bin/${bin}" ]]; then
         install -Dm755 "${stage_dir}/bin/${bin}" "/usr/local/bin/${bin}"
       fi

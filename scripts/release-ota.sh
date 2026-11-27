@@ -81,7 +81,7 @@ rm -rf "${STAGE_ABS}" "${OTA_LOCAL_DIR}"
 mkdir -p "${STAGE_ABS}/bin" "${STAGE_ABS}/assets" "${STAGE_ABS}/ui" "${STAGE_ABS}/etc/spinelos" "${STAGE_ABS}/full" "${OTA_LOCAL_DIR}"
 
 echo "==> [2/4] Staging binaries, UI assets & full system configs..."
-for bin in spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox; do
+for bin in spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl; do
   cp -f "${ROOT_DIR}/build/linux-amd64/${bin}" "${STAGE_ABS}/bin/${bin}"
 done
 cp -f "${ROOT_DIR}/archiso/airootfs/usr/local/bin/spinel-wine" "${STAGE_ABS}/bin/spinel-wine"
@@ -133,7 +133,7 @@ docker run --rm --platform linux/amd64 \
   -v "${ROOT_DIR}:/workspace" \
   -w /workspace \
   spinelos-builder \
-  bash -c "strip --strip-unneeded ${STAGE_REL}/bin/spinel-shell ${STAGE_REL}/bin/spinel-webui ${STAGE_REL}/bin/spinel-terminal ${STAGE_REL}/bin/spinel-files ${STAGE_REL}/bin/spinel-sandbox && tar --zstd -cf out/ota/${BUNDLE_NAME} -C ${STAGE_REL} ."
+  bash -c "strip --strip-unneeded ${STAGE_REL}/bin/spinel-shell ${STAGE_REL}/bin/spinel-webui ${STAGE_REL}/bin/spinel-terminal ${STAGE_REL}/bin/spinel-files ${STAGE_REL}/bin/spinel-sandbox ${STAGE_REL}/bin/spinel-agent-ctl && tar --zstd -cf out/ota/${BUNDLE_NAME} -C ${STAGE_REL} ."
 
 rm -rf "${STAGE_ABS}"
 

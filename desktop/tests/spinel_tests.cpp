@@ -1,3 +1,8 @@
+#include "ai/agent_bus.hpp"
+#include "ai/agent_perms.hpp"
+#include "ai/agent_tracker.hpp"
+#include "ai/os_atomics.hpp"
+#include "ai/task_inbox.hpp"
 #include "app_store.hpp"
 #include "common.hpp"
 #include "desktop_apps.hpp"
@@ -1283,6 +1288,154 @@ void test_relay_crypto_and_stream() {
     EXPECT(ipc_rep.find("\"ok\":true") != std::string::npos);
 }
 
+void test_ai_os_stage1_atomics() {
+    using namespace spinel::ai;
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+
+    fs::path ai_tmp = fs::path(home_dir()) / "ai-test-run";
+    std::error_code ec;
+    fs::create_directories(ai_tmp, ec);
+    setenv("SPINEL_AGENT_RUNTIME_DIR", (ai_tmp / "agents").c_str(), 1);
+    setenv("SPINEL_TASK_INBOX_FILE", (ai_tmp / "tasks.json").c_str(), 1);
+    setenv("SPINEL_AGENT_PERMS_FILE", (ai_tmp / "agent_perms.conf").c_str(), 1);
+    setenv("SPINEL_AGENT_BUS_SOCK", (ai_tmp / "agent.sock").c_str(), 1);
+
+    // 1. Permission gate & audit log
+    std::string reason;
+    EXPECT(check_agent_capability("agent.report", reason) == PermDecision::Allow);
+    EXPECT(check_agent_capability("context.clipboard", reason) == PermDecision::Deny);
+    EXPECT(check_agent_capability("action.snapshot", reason) == PermDecision::Allow);
+    EXPECT(check_agent_capability("action.workspace_focus", reason) == PermDecision::RequireApproval);
+    EXPECT(check_agent_capability("unknown.evil", reason) == PermDecision::Deny);
+
+    AgentPermConfig updated_perms;
+    EXPECT(update_agent_perms_kv("tier1_clipboard=true\ntier3_policy=deny\n", updated_perms));
+    EXPECT(updated_perms.tier1_clipboard == true);
+    EXPECT(updated_perms.tier3_policy == Tier3Policy::Deny);
+    EXPECT(check_agent_capability("context.clipboard", reason) == PermDecision::Allow);
+    EXPECT(check_agent_capability("action.workspace_focus", reason) == PermDecision::Deny);
+    EXPECT(update_agent_perms_kv("tier3_policy=ask\n", updated_perms));
+
+    // 2. Agent command line matching & drop-in lifecycle + window binding
+    std::string matched;
+    EXPECT(match_known_agent_cmdline("/usr/bin/codex --repo /tmp/demo", matched) && matched == "Codex");
+    EXPECT(match_known_agent_cmdline("node /opt/antigravity/cli.js", matched) && matched == "Antigravity");
+    EXPECT(match_known_agent_cmdline("python3 /opt/DeepSeekHarness/run.py", matched) && matched == "DeepSeekHarness");
+    EXPECT(!match_known_agent_cmdline("spinel-agent-ctl report --agent codex", matched));
+    EXPECT(!match_known_agent_cmdline("grep codex /tmp/foo", matched));
+
+    // 3. Task Inbox state machine + bound session auto-transition
+    AgentTaskItem created_task;
+    EXPECT(create_task("修复登录超时重试", "/tmp/SpinelOS", "DeepSeekHarness", "high", "加上指数退避", created_task));
+    EXPECT(created_task.status == TaskStatus::Backlog);
+
+    AgentTaskItem claimed;
+    EXPECT(claim_task(created_task.id, "ds-sess-1", "DeepSeekHarness", claimed));
+    EXPECT(claimed.status == TaskStatus::InProgress);
+    EXPECT(claimed.assigned_session_id == "ds-sess-1");
+
+    // 4. Bus dispatch: report Running -> Done automatically promotes bound Task to Review
+    std::string r1 = dispatch_agent_bus_json(
+        R"({"id":1,"client":"deepseek","method":"agent.report","params":{"id":"ds-sess-1","agent":"DeepSeekHarness","repo":"/tmp/SpinelOS","status":"running","task_id":")" +
+        created_task.id + R"("}})");
+    EXPECT(r1.find("\"ok\":true") != std::string::npos);
+
+    std::string r2 = dispatch_agent_bus_json(
+        R"({"id":2,"client":"deepseek","method":"agent.report","params":{"id":"ds-sess-1","agent":"DeepSeekHarness","status":"done","summary":"单测全部通过","task_id":")" +
+        created_task.id + R"("}})");
+    EXPECT(r2.find("\"ok\":true") != std::string::npos);
+
+    auto review_list = list_tasks("review");
+    EXPECT(review_list.size() == 1 && review_list[0].id == created_task.id);
+    EXPECT(review_list[0].result_summary == "单测全部通过");
+
+    AgentTaskItem accepted;
+    EXPECT(accept_task(created_task.id, accepted));
+    EXPECT(accepted.status == TaskStatus::Done);
+    AgentTaskItem reopened;
+    EXPECT(reopen_task(created_task.id, reopened));
+    EXPECT(reopened.status == TaskStatus::Backlog && reopened.assigned_session_id.empty());
+    EXPECT(delete_task(created_task.id));
+
+    // Stale finished session eviction + window binding
+    auto list_now = reconcile_agent_sessions(
+        static_cast<long long>(std::time(nullptr)), 300, false,
+        {{88, "spinel-terminal", "SpinelOS - DeepSeekHarness", true}});
+    EXPECT(list_now.size() == 1 && list_now[0].win_id == 88);
+    auto list_expired = reconcile_agent_sessions(static_cast<long long>(std::time(nullptr)) + 600, 300, false, {});
+    EXPECT(list_expired.empty());
+
+    // 5. Mocked desktop context + AF_UNIX agent_bus socket + interactive approval gate
+    DesktopContextHooks mock_ctx;
+    mock_ctx.list_windows = []() -> std::vector<WindowBindingRef> {
+        return {{77, "org.spinelos.terminal", "Spinel 终端", true}};
+    };
+    mock_ctx.list_workspaces = []() -> std::vector<WorkspaceBindingRef> {
+        return {{0, "工作区 1", true, false}, {1, "工作区 2", false, false}};
+    };
+    static int focused_ws = 0;
+    static uint64_t focused_wid = 0;
+    mock_ctx.activate_workspace = [](int ws1) { focused_ws = ws1; return true; };
+    mock_ctx.activate_window = [](uint64_t wid) { focused_wid = wid; return true; };
+    set_desktop_context_hooks(std::move(mock_ctx));
+
+    std::string bound_sock;
+    EXPECT(start_agent_bus_server(&bound_sock));
+    EXPECT(is_agent_bus_running());
+
+    std::string ping_resp;
+    EXPECT(call_agent_bus_socket(bound_sock, R"({"id":"p1","method":"ping","params":{}})", ping_resp, 2000));
+    EXPECT(ping_resp.find("\"pong\":true") != std::string::npos);
+
+    std::string ctx_resp;
+    EXPECT(call_agent_bus_socket(bound_sock, R"({"id":"c1","method":"context.desktop","params":{}})", ctx_resp, 2000));
+    EXPECT(ctx_resp.find("\"active_workspace\":1") != std::string::npos);
+    EXPECT(ctx_resp.find("Spinel 终端") != std::string::npos);
+
+    // Trigger concurrent Tier 3 interactive approval over socket and resolve from a second connection
+    std::string focus_resp;
+    std::thread requester([&]() {
+        call_agent_bus_socket(
+            bound_sock,
+            R"({"id":"f1","client":"codex","interactive":true,"method":"action.workspace_focus","params":{"workspace":2,"win_id":77,"summary":"切换验证","timeout_ms":5000}})",
+            focus_resp, 6000);
+    });
+    std::string pending_id;
+    for (int i = 0; i < 40; ++i) {
+        auto pend = list_pending_approvals();
+        if (!pend.empty()) {
+            pending_id = pend[0].id;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT(!pending_id.empty());
+    std::string resolve_resp;
+    EXPECT(call_agent_bus_socket(
+        bound_sock,
+        "{\"id\":\"r1\",\"client\":\"ui\",\"method\":\"approval.resolve\",\"params\":{\"id\":\"" +
+            pending_id + "\",\"decision\":\"allow\"}}",
+        resolve_resp, 2000));
+    EXPECT(resolve_resp.find("\"resolved\":true") != std::string::npos);
+    requester.join();
+    EXPECT(focus_resp.find("\"focused\":true") != std::string::npos);
+    EXPECT(focused_ws == 2 && focused_wid == 77);
+
+    auto audits = tail_agent_audit(20);
+    EXPECT(!audits.empty());
+
+    stop_agent_bus_server();
+    EXPECT(!is_agent_bus_running());
+
+    unsetenv("SPINEL_AGENT_RUNTIME_DIR");
+    unsetenv("SPINEL_TASK_INBOX_FILE");
+    unsetenv("SPINEL_AGENT_PERMS_FILE");
+    unsetenv("SPINEL_AGENT_BUS_SOCK");
+    reset_agent_tracker_for_tests();
+    reset_os_atomics_for_tests();
+}
+
 }  // namespace
 
 int main() {
@@ -1302,6 +1455,7 @@ int main() {
     test_temp_memory_cleanup();
     test_parallel_sandbox();
     test_relay_crypto_and_stream();
+    test_ai_os_stage1_atomics();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " assertion(s) failed.\n";

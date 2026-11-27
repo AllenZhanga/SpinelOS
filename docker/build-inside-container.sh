@@ -83,6 +83,7 @@ install -Dm755 "${BUILD_DIR}/spinel-webui" "${PROFILE_DIR}/airootfs/usr/local/bi
 install -Dm755 "${BUILD_DIR}/spinel-terminal" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-terminal"
 install -Dm755 "${BUILD_DIR}/spinel-files" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-files"
 install -Dm755 "${BUILD_DIR}/spinel-sandbox" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-sandbox"
+install -Dm755 "${BUILD_DIR}/spinel-agent-ctl" "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-agent-ctl"
 [ -f "${WORKSPACE}/archiso/airootfs/usr/local/bin/spinel-update" ] && \
   chmod 755 "${PROFILE_DIR}/airootfs/usr/local/bin/spinel-update"
 mkdir -p "${PROFILE_DIR}/airootfs/etc/spinelos"

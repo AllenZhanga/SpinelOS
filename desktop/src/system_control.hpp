@@ -106,6 +106,8 @@ std::string redact_sensitive_text(const std::string &raw);
 std::string build_redacted_diagnostic_report();
 void push_doctor_report(AppState *state);
 void export_diagnostic_report(AppState *state);
+std::string collect_doctor_summary_json();
+std::string collect_redacted_logs_tail(const std::string &source, size_t max_lines = 80);
 
 void ensure_fcitx5_defaults(bool is_light);
 void sync_fcitx5_theme(bool is_light);

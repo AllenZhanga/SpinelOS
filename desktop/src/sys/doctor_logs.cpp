@@ -883,31 +883,50 @@ std::string build_redacted_diagnostic_report() {
     return redact_sensitive_text(report.str());
 }
 
-void push_doctor_report(AppState *state) {
-    if (!state || (!state->doctor_view && !state->settings_view)) return;
+std::string collect_doctor_summary_json() {
     auto checks = run_system_health_checks();
     int ok_c = 0, warn_c = 0, fail_c = 0;
-    std::ostringstream js;
-    js << "window.__spinelDoctorData && window.__spinelDoctorData({\"checks\":[";
+    std::ostringstream oss;
+    oss << "{\"checks\":[";
     for (size_t i = 0; i < checks.size(); ++i) {
-        if (i > 0) js << ",";
+        if (i > 0) oss << ",";
         const auto &c = checks[i];
         if (c.status == "ok") ++ok_c;
         else if (c.status == "warn") ++warn_c;
         else ++fail_c;
-        js << "{"
-           << "\"id\":\"" << json_escape(c.id) << "\","
-           << "\"name\":\"" << json_escape(c.name) << "\","
-           << "\"status\":\"" << json_escape(c.status) << "\","
-           << "\"detail\":\"" << json_escape(c.detail) << "\","
-           << "\"fix_hint\":\"" << json_escape(c.fix_hint) << "\""
-           << "}";
+        oss << "{"
+            << "\"id\":\"" << json_escape(c.id) << "\","
+            << "\"name\":\"" << json_escape(c.name) << "\","
+            << "\"status\":\"" << json_escape(c.status) << "\","
+            << "\"detail\":\"" << json_escape(c.detail) << "\","
+            << "\"fix_hint\":\"" << json_escape(c.fix_hint) << "\""
+            << "}";
     }
-    js << "],\"ok_count\":" << ok_c
-       << ",\"warn_count\":" << warn_c
-       << ",\"fail_count\":" << fail_c << "});";
-    if (state->doctor_view) eval_js(state->doctor_view, js.str());
-    if (state->settings_view) eval_js(state->settings_view, js.str());
+    oss << "],\"ok_count\":" << ok_c
+        << ",\"warn_count\":" << warn_c
+        << ",\"fail_count\":" << fail_c << "}";
+    return oss.str();
+}
+
+std::string collect_redacted_logs_tail(const std::string &source, size_t max_lines) {
+    std::string raw = collect_logs_bundle_text(source);
+    std::vector<std::string> lines = split_lines(raw);
+    if (lines.size() > max_lines) {
+        lines.erase(lines.begin(), lines.end() - static_cast<std::ptrdiff_t>(max_lines));
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (i > 0) oss << '\n';
+        oss << lines[i];
+    }
+    return redact_sensitive_text(oss.str());
+}
+
+void push_doctor_report(AppState *state) {
+    if (!state || (!state->doctor_view && !state->settings_view)) return;
+    std::string script = "window.__spinelDoctorData && window.__spinelDoctorData(" + collect_doctor_summary_json() + ");";
+    if (state->doctor_view) eval_js(state->doctor_view, script);
+    if (state->settings_view) eval_js(state->settings_view, script);
 }
 
 void export_diagnostic_report(AppState *state) {

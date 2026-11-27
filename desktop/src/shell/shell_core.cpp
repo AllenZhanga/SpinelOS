@@ -1,6 +1,8 @@
 #include "shell_internal.hpp"
 #include "shell/sni_tray.hpp"
 #include "shell/sandbox_pip.hpp"
+#include "ai/agent_bus.hpp"
+#include "ai/os_atomics.hpp"
 #include "common.hpp"
 
 #include <pango/pangocairo.h>
@@ -1111,6 +1113,40 @@ void init_native_shell(GtkApplication *app, AppState *state) {
         init_sni_tray(+[](void *d) {
             shell_internal::sync_top_bar_tray(static_cast<NativeShellState *>(d));
         }, ns);
+
+        spinel::ai::DesktopContextHooks ai_hooks;
+        ai_hooks.list_windows = []() {
+            std::vector<spinel::ai::WindowBindingRef> out;
+            for (const auto &w : list_tracked_windows()) {
+                out.push_back({w.id, w.app_id, w.title, w.activated});
+            }
+            return out;
+        };
+        ai_hooks.list_workspaces = []() {
+            std::vector<spinel::ai::WorkspaceBindingRef> out;
+            for (const auto &ws : list_tracked_workspaces()) {
+                out.push_back({ws.index, ws.name, ws.active, ws.urgent});
+            }
+            return out;
+        };
+        ai_hooks.activate_window = [](uint64_t wid) -> bool {
+            if (wid == 0) return false;
+            g_idle_add(+[](gpointer d) -> gboolean {
+                activate_tracked_window(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(d)));
+                return G_SOURCE_REMOVE;
+            }, reinterpret_cast<gpointer>(static_cast<uintptr_t>(wid)));
+            return true;
+        };
+        ai_hooks.activate_workspace = [](int idx1) -> bool {
+            if (idx1 < 1) return false;
+            g_idle_add(+[](gpointer d) -> gboolean {
+                activate_tracked_workspace(GPOINTER_TO_INT(d) - 1);
+                return G_SOURCE_REMOVE;
+            }, GINT_TO_POINTER(idx1));
+            return true;
+        };
+        spinel::ai::set_desktop_context_hooks(std::move(ai_hooks));
+        spinel::ai::start_agent_bus_server();
     }
     shell_internal::sync_top_bar_workspaces(ns);
     if (!sb_mode) {
@@ -1142,6 +1178,7 @@ void shutdown_native_shell(AppState *state) {
     if (!state || !state->native) return;
     NativeShellState *ns = state->native;
     shutdown_sandbox_pip(ns);
+    spinel::ai::stop_agent_bus_server();
     shutdown_sni_tray();
     shell_internal::close_startup_splash(ns);
     if (ns->osd_timer) g_source_remove(ns->osd_timer);

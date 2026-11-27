@@ -137,6 +137,13 @@ add_executable(spinel-shell
     src/shell/overlays.cpp
     src/shell/sandbox_pip.cpp
     src/window_tracker.cpp
+    src/ai/json_util.cpp
+    src/ai/agent_perms.cpp
+    src/ai/agent_tracker.cpp
+    src/ai/task_inbox.cpp
+    src/ai/os_atomics.cpp
+    src/ai/agent_bus_client.cpp
+    src/ai/agent_bus.cpp
     "${TOPLEVEL_HDR}"
     "${TOPLEVEL_SRC}"
     "${EXT_WORKSPACE_HDR}"
@@ -292,6 +299,24 @@ target_compile_options(spinel-sandbox PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
 )
 
+add_executable(spinel-agent-ctl
+    src/ai/spinel_agent_ctl.cpp
+    src/ai/json_util.cpp
+    src/ai/agent_perms.cpp
+    src/ai/agent_tracker.cpp
+    src/ai/task_inbox.cpp
+    src/ai/agent_bus_client.cpp
+    src/common.cpp
+)
+
+target_include_directories(spinel-agent-ctl PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_compile_options(spinel-agent-ctl PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O2>
+)
+
 enable_testing()
 configure_file(../archiso/airootfs/usr/local/bin/spinel-wine spinel-wine COPYONLY)
 
@@ -314,6 +339,13 @@ add_executable(spinel-tests
     src/sys/audio_power.cpp
     src/sys/devices.cpp
     src/sys/doctor_logs.cpp
+    src/ai/json_util.cpp
+    src/ai/agent_perms.cpp
+    src/ai/agent_tracker.cpp
+    src/ai/task_inbox.cpp
+    src/ai/os_atomics.cpp
+    src/ai/agent_bus_client.cpp
+    src/ai/agent_bus.cpp
 )
 
 target_compile_definitions(spinel-tests PRIVATE
@@ -339,7 +371,7 @@ target_compile_options(spinel-tests PRIVATE
 
 add_test(NAME spinel_unit_tests COMMAND spinel-tests)
 
-install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox DESTINATION bin)
+install(TARGETS spinel-shell spinel-webui spinel-terminal spinel-files spinel-sandbox spinel-agent-ctl DESTINATION bin)
 install(PROGRAMS ../archiso/airootfs/usr/local/bin/spinel-wine DESTINATION bin)
 install(DIRECTORY ui/ DESTINATION share/spinel-shell/ui)
 install(FILES
